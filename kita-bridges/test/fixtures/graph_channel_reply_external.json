@@ -1,0 +1,7 @@
+{"id":"1790000050000","replyToId":"1790000000000","etag":"1790000050000","messageType":"message",
+ "createdDateTime":"2026-09-24T10:00:50Z","deletedDateTime":null,"chatId":null,
+ "from":{"application":null,"device":null,"user":{"@odata.type":"#microsoft.graph.teamworkUserIdentity","id":"acme-user-dana","displayName":"Dana Reyes","userIdentityType":"aadUser","tenantId":"acme-tenant"}},
+ "body":{"contentType":"html","content":"<p><at id=\"0\">Kita</at>&nbsp;payouts are delayed &amp; stuck<br>see screenshot</p><p><img src=\"https://graph.microsoft.com/v1.0/teams/team-acme/channels/19:acme-shared@thread.tacv2/messages/1790000050000/hostedContents/aWQ9eF8x/$value\" width=\"250\"></p>"},
+ "channelIdentity":{"teamId":"team-acme","channelId":"19:acme-shared@thread.tacv2"},
+ "attachments":[{"id":"f1","contentType":"reference","contentUrl":"https://acme.sharepoint.com/sites/x/Shared%20Documents/log.txt","name":"log.txt"}],
+ "mentions":[{"id":0,"mentionText":"Kita","mentioned":{"user":{"id":"kita-user-id","displayName":"Kita"}}}]}

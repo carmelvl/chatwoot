@@ -1,0 +1,4 @@
+{"value":[{"subscriptionId":"sub-channel-1","changeType":"created","clientState":"guessed-wrong",
+ "resource":"teams('team-acme')/channels('19:acme-shared@thread.tacv2')/messages('1790000099999')"},
+ {"subscriptionId":"sub-unknown","changeType":"created","clientState":"CLIENT_STATE_CHANNEL",
+ "resource":"chats('19:x@thread.v2')/messages('1')"}]}

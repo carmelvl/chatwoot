@@ -1,3 +1,0 @@
-{"type":"conversationUpdate","id":"f:1","channelId":"msteams","serviceUrl":"https://smba.trafficmanager.net/amer/",
- "from":{"id":"29:1abcCUSTOMER"},"conversation":{"id":"a:1personalCONV"},"recipient":{"id":"28:kita-bot-app-id"},
- "membersAdded":[{"id":"28:kita-bot-app-id"}]}

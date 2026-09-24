@@ -1,0 +1,4 @@
+{"id":"1790000100000","replyToId":null,"messageType":"message","createdDateTime":"2026-09-24T11:00:00Z","deletedDateTime":null,
+ "chatId":"19:acme-group@thread.v2",
+ "from":{"user":{"id":"guest-lee","displayName":"Lee Park (Acme)","userIdentityType":"aadUser","tenantId":"kita-tenant"}},
+ "body":{"contentType":"text","content":"Hi Kita, the export is failing"},"attachments":[],"mentions":[]}

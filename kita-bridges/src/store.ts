@@ -10,6 +10,15 @@ export interface ConversationRow {
   /** Chatwoot contact_inbox source_id of the contact that owns the conversation. */
   sourceId: string;
   replyRef: Record<string, unknown>;
+  /** Last Chatwoot status seen via conversation_status_changed ('open' until told otherwise). */
+  status?: string;
+}
+
+export interface SubscriptionRow {
+  id: string;
+  resource: string;
+  clientState: string;
+  expiresAt: number;
 }
 
 /** Id mappings (platform <-> Chatwoot) and idempotency keys, in one SQLite file. */
@@ -31,7 +40,12 @@ export class Store {
       CREATE INDEX IF NOT EXISTS conversations_by_cw ON conversations (platform, conversation_id);
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS media (token TEXT PRIMARY KEY, source_url TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS graph_subscriptions (
+        id TEXT PRIMARY KEY, resource TEXT NOT NULL UNIQUE, client_state TEXT NOT NULL, expires_at INTEGER NOT NULL);
     `);
+    const cols = (this.db.prepare('PRAGMA table_info(conversations)').all() as any[]).map((c) => c.name);
+    if (!cols.includes('status')) this.db.exec("ALTER TABLE conversations ADD COLUMN status TEXT NOT NULL DEFAULT 'open'");
   }
 
   getContactSourceId(platform: Platform, userKey: string): string | undefined {
@@ -46,7 +60,7 @@ export class Store {
 
   private row(r: any): ConversationRow | undefined {
     if (!r) return undefined;
-    return { platform: r.platform, threadKey: r.thread_key, conversationId: Number(r.conversation_id), sourceId: r.source_id, replyRef: JSON.parse(r.reply_ref) };
+    return { platform: r.platform, threadKey: r.thread_key, conversationId: Number(r.conversation_id), sourceId: r.source_id, replyRef: JSON.parse(r.reply_ref), status: r.status };
   }
 
   getByThread(platform: Platform, threadKey: string): ConversationRow | undefined {
@@ -61,8 +75,43 @@ export class Store {
 
   putConversation(r: ConversationRow): void {
     this.db
-      .prepare('INSERT OR REPLACE INTO conversations (platform, thread_key, conversation_id, source_id, reply_ref, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(r.platform, r.threadKey, r.conversationId, r.sourceId, JSON.stringify(r.replyRef), Date.now());
+      .prepare('INSERT OR REPLACE INTO conversations (platform, thread_key, conversation_id, source_id, reply_ref, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(r.platform, r.threadKey, r.conversationId, r.sourceId, JSON.stringify(r.replyRef), Date.now(), r.status ?? 'open');
+  }
+
+  setConversationStatus(platform: Platform, conversationId: number, status: string): void {
+    this.db.prepare('UPDATE conversations SET status = ? WHERE platform = ? AND conversation_id = ?').run(status, platform, conversationId);
+  }
+
+  getKv(key: string): string | undefined {
+    return (this.db.prepare('SELECT value FROM kv WHERE key = ?').get(key) as any)?.value;
+  }
+
+  putKv(key: string, value: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(key, value);
+  }
+
+  deleteKv(key: string): void {
+    this.db.prepare('DELETE FROM kv WHERE key = ?').run(key);
+  }
+
+  listSubscriptions(): SubscriptionRow[] {
+    return (this.db.prepare('SELECT * FROM graph_subscriptions').all() as any[]).map((r) => ({
+      id: r.id, resource: r.resource, clientState: r.client_state, expiresAt: Number(r.expires_at),
+    }));
+  }
+
+  getSubscription(id: string): SubscriptionRow | undefined {
+    return this.listSubscriptions().find((s) => s.id === id);
+  }
+
+  putSubscription(s: SubscriptionRow): void {
+    this.db.prepare('DELETE FROM graph_subscriptions WHERE resource = ? AND id != ?').run(s.resource, s.id);
+    this.db.prepare('INSERT OR REPLACE INTO graph_subscriptions (id, resource, client_state, expires_at) VALUES (?, ?, ?, ?)').run(s.id, s.resource, s.clientState, s.expiresAt);
+  }
+
+  deleteSubscription(id: string): void {
+    this.db.prepare('DELETE FROM graph_subscriptions WHERE id = ?').run(id);
   }
 
   /** Returns true the first time a key is seen (atomic), false on repeats. */

@@ -4,7 +4,8 @@ import type { Bridge } from './bridge.ts';
 import type { Config } from './config.ts';
 import { log } from './log.ts';
 import { parseSlackEvent, verifySlackSignature, type SlackSender } from './platforms/slack.ts';
-import { authorizeTeamsAttachments, parseTeamsActivity, verifyTeamsJwt, type JwksProvider, type TeamsSender } from './platforms/teams.ts';
+import { validationToken } from './platforms/teams/messages.ts';
+import type { TeamsIntegration } from './platforms/teams/index.ts';
 import { parseViberEvent, verifyViberSignature } from './platforms/viber.ts';
 import type { Store } from './store.ts';
 import type { Platform } from './types.ts';
@@ -18,8 +19,7 @@ export interface AppDeps {
   bridge: Bridge;
   enabled: Platform[];
   slack?: SlackSender;
-  teams?: TeamsSender;
-  jwks: JwksProvider;
+  teams?: TeamsIntegration;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -77,7 +77,24 @@ export function createHandler(d: AppDeps) {
     // Tolerate being mounted with or without the /bridges prefix.
     const path = url.pathname.replace(/^\/bridges(?=\/)/, '');
     try {
-      if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true, platforms: d.enabled });
+      if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true, platforms: d.enabled, teamsConnected: d.teams?.auth.isConnected() ?? false });
+
+      if (d.teams && req.method === 'GET' && path === '/teams/connect') {
+        const target = d.teams.connectUrl(url.searchParams.get('key'));
+        if (!target) return send(res, 403);
+        res.writeHead(302, { location: target });
+        return res.end();
+      }
+      if (d.teams && req.method === 'GET' && path === '/teams/connect/callback') {
+        if (url.searchParams.get('error')) return send(res, 400, `Microsoft sign-in failed: ${url.searchParams.get('error')}`);
+        try {
+          const upn = await d.teams.connectCallback(url.searchParams.get('code'), url.searchParams.get('state'));
+          return send(res, 200, `Connected as ${upn}. Teams subscriptions are syncing; you can close this tab.`);
+        } catch (e: any) {
+          log.warn('teams_connect_failed', { error: String(e?.message ?? e) });
+          return send(res, 400, `Connect failed: ${e?.message ?? e}`);
+        }
+      }
       const media = path.match(/^\/media\/([A-Za-z0-9_-]{32})\/[^/]+$/);
       if ((req.method === 'GET' || req.method === 'HEAD') && media) return serveMedia(d, media[1], req.method, res);
       if (req.method !== 'POST') return send(res, 404);
@@ -96,21 +113,15 @@ export function createHandler(d: AppDeps) {
         return;
       }
 
-      if (path === '/teams/messages' && d.enabled.includes('teams')) {
-        const activity = JSON.parse(raw);
-        const v = await verifyTeamsJwt(h(req, 'authorization'), { appId: cfg.teams.appId, serviceUrl: activity.serviceUrl, jwks: d.jwks });
-        if (!v.ok) {
-          log.warn('teams_auth_rejected', { reason: v.reason });
-          return send(res, 401);
-        }
-        const parsed = parseTeamsActivity(activity);
-        send(res, 200);
-        if (parsed.kind === 'message') {
-          background('teams_inbound', (async () => {
-            const withAuth = parsed.message.attachments.length && d.teams ? authorizeTeamsAttachments(parsed.message, await d.teams.accessToken()) : parsed.message;
-            return bridge.inbound(withAuth);
-          })());
-        }
+      if (d.teams && (path === '/teams/notifications' || path === '/teams/lifecycle')) {
+        // Subscription handshake: echo the token as text/plain (must happen within 10 seconds).
+        const token = validationToken(url);
+        if (token !== undefined) return send(res, 200, token);
+        const body = JSON.parse(raw);
+        send(res, 202); // ack fast; clientState is checked per item before anything is fetched
+        const teams = d.teams;
+        if (path === '/teams/notifications') background('teams_notifications', teams.notifications(body, (m) => bridge.inbound(m)));
+        else background('teams_lifecycle', teams.lifecycle(body));
         return;
       }
 

@@ -1,0 +1,3 @@
+{"id":"1790000200000","messageType":"message","chatId":"19:acme-group@thread.v2",
+ "from":{"user":{"id":"kita-user-id","displayName":"Kita","userIdentityType":"aadUser","tenantId":"kita-tenant"}},
+ "body":{"contentType":"html","content":"<p>We fixed it</p>"},"attachments":[]}
