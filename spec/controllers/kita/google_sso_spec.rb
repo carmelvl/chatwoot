@@ -45,6 +45,15 @@ RSpec.describe 'Kita Google SSO provisioning', type: :request do
     expect(response.location).to include('error=no-account-found')
   end
 
+  it 'refuses kita.ai users outside KITA_SSO_EMAILS when it is set' do
+    with_modified_env(KITA_SSO_EMAILS: 'sam@kita.ai') do
+      mock_google(email: 'other@kita.ai')
+      expect { callback }.not_to change(User, :count)
+      mock_google(email: 'sam@kita.ai')
+      expect { callback }.to change(User, :count).by(1)
+    end
+  end
+
   it 'refuses unverified kita.ai emails' do
     mock_google(email: 'spoof@kita.ai', verified: false)
     expect { callback }.not_to change(User, :count)
