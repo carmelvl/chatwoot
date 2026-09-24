@@ -3,8 +3,10 @@ class DeviseOverrides::OmniauthCallbacksController < DeviseTokenAuth::OmniauthCa
 
   def omniauth_success
     get_resource_from_auth_hash
+    return sign_in_user if @resource.present?
+    return provision_sso_agent if sso_domain_email?
 
-    @resource.present? ? sign_in_user : sign_up_user
+    sign_up_user
   end
 
   private
@@ -22,6 +24,27 @@ class DeviseOverrides::OmniauthCallbacksController < DeviseTokenAuth::OmniauthCa
     # that will log them in
     encoded_email = ERB::Util.url_encode(@resource.email)
     redirect_to login_page_url(email: encoded_email, sso_auth_token: @resource.generate_sso_auth_token)
+  end
+
+  # Kita: verified Google accounts on KITA_SSO_DOMAINS join KITA_SSO_ACCOUNT_ID as agents
+  # instead of creating a new account.
+  def sso_domain_email?
+    domains = ENV.fetch('KITA_SSO_DOMAINS', '').split(',').map { |d| d.strip.downcase }.reject(&:empty?)
+    email = auth_hash.dig('info', 'email').to_s.downcase
+    domain = email.split('@').last
+    domains.include?(domain) && ActiveModel::Type::Boolean.new.cast(auth_hash.dig('info', 'email_verified')) &&
+      auth_hash.dig('extra', 'raw_info', 'hd').to_s.downcase == domain
+  end
+
+  def provision_sso_agent
+    account = Account.find(ENV.fetch('KITA_SSO_ACCOUNT_ID'))
+    ActiveRecord::Base.transaction do
+      @resource = User.create!(email: auth_hash.dig('info', 'email').downcase, name: auth_hash.dig('info', 'name'),
+                               password: "#{SecureRandom.hex(16)}aA1!", confirmed_at: Time.current)
+      AccountUser.create!(account: account, user: @resource, role: :agent)
+    end
+    Avatar::AvatarFromUrlJob.perform_later(@resource, auth_hash.dig('info', 'image')) if auth_hash.dig('info', 'image').present?
+    sign_in_user
   end
 
   def sign_in_user_on_mobile

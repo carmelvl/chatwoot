@@ -1,0 +1,39 @@
+name: Kita specs
+
+on:
+  push:
+    branches: ['kita/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  specs:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ''
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:alpine
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Strip enterprise code (production runs with DISABLE_ENTERPRISE)
+        run: rm -rf enterprise spec/enterprise
+      - run: bundle exec rake db:create db:schema:load
+      - name: Kita specs + the upstream OAuth callback spec
+        run: bundle exec rspec spec/controllers/kita spec/controllers/devise/omniauth_callbacks_controller_spec.rb
+      - name: Rubocop on Kita-touched Ruby
+        run: bundle exec rubocop app/controllers/devise_overrides/omniauth_callbacks_controller.rb spec/controllers/kita
