@@ -29,15 +29,18 @@ class DeviseOverrides::OmniauthCallbacksController < DeviseTokenAuth::OmniauthCa
   # Kita: verified Google accounts on KITA_SSO_DOMAINS join KITA_SSO_ACCOUNT_ID as agents
   # instead of creating a new account.
   def sso_domain_email?
-    domains = ENV.fetch('KITA_SSO_DOMAINS', '').split(',').map { |d| d.strip.downcase }.reject(&:empty?)
     email = auth_hash.dig('info', 'email').to_s.downcase
-    domain = email.split('@').last
-    # devise_token_auth drops `extra` (and the hd claim) between redirects; Google's
-    # email_verified still proves control of the mailbox on our domain.
-    allowed = ENV.fetch('KITA_SSO_EMAILS', '').split(',').map { |e| e.strip.downcase }.reject(&:empty?)
+    allowed = env_list('KITA_SSO_EMAILS')
     return false if allowed.any? && allowed.exclude?(email)
 
-    domains.include?(domain) && ActiveModel::Type::Boolean.new.cast(auth_hash.dig('info', 'email_verified'))
+    # devise_token_auth drops `extra` (and the hd claim) between redirects; Google's
+    # email_verified still proves control of the mailbox on our domain.
+    env_list('KITA_SSO_DOMAINS').include?(email.split('@').last) &&
+      ActiveModel::Type::Boolean.new.cast(auth_hash.dig('info', 'email_verified'))
+  end
+
+  def env_list(name)
+    ENV.fetch(name, '').split(',').map { |v| v.strip.downcase }.reject(&:empty?)
   end
 
   def provision_sso_agent
