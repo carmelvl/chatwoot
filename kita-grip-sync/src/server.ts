@@ -5,16 +5,22 @@ import { ClaudeClassifier } from './claude.ts';
 import { capabilities, loadConfig } from './config.ts';
 import { GripClient } from './grip.ts';
 import { log } from './log.ts';
+import { Owners } from './owner.ts';
 import { Store } from './store.ts';
 import { Sync } from './sync.ts';
 
 const cfg = loadConfig();
 const caps = capabilities(cfg);
 const store = new Store(cfg.dbPath);
+const botApi = cfg.chatwootApiToken ? new ChatwootApi(cfg.chatwootBaseUrl, cfg.chatwootApiToken) : undefined;
+const owners = caps.owners && botApi
+  ? new Owners({ store, chatwoot: botApi, directory: cfg.chatwootAdminToken ? new ChatwootApi(cfg.chatwootBaseUrl, cfg.chatwootAdminToken) : undefined, agentsRefreshMs: cfg.agentsRefreshMs })
+  : undefined;
 const sync = new Sync({
   store,
+  owners,
   grip: caps.grip ? new GripClient(cfg.gripBaseUrl, cfg.gripApiKey) : undefined,
-  chatwoot: caps.tickets ? new ChatwootApi(cfg.chatwootBaseUrl, cfg.chatwootApiToken) : undefined,
+  chatwoot: caps.tickets ? botApi : undefined,
   claude: caps.tickets ? new ClaudeClassifier({ apiKey: cfg.anthropicApiKey, model: cfg.claudeModel, baseUrl: cfg.anthropicBaseUrl }) : undefined,
   publicUrl: cfg.chatwootPublicUrl,
   debounceMs: cfg.debounceMs,
