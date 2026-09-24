@@ -3,12 +3,11 @@ require 'rails_helper'
 RSpec.describe 'Kita Google SSO provisioning', type: :request do
   let!(:account) { create(:account) }
 
-  def mock_google(email:, verified: true, hd: 'kita.ai')
+  def mock_google(email:, verified: true)
     OmniAuth.config.test_mode = true
     OmniAuth.config.mock_auth[:google_oauth2] = OmniAuth::AuthHash.new(
       provider: 'google', uid: '42',
-      info: { name: 'Sam Lee', email: email, email_verified: verified },
-      extra: { raw_info: { hd: hd } }
+      info: { name: 'Sam Lee', email: email, email_verified: verified }
     )
   end
 
@@ -27,7 +26,7 @@ RSpec.describe 'Kita Google SSO provisioning', type: :request do
   it 'adds a verified kita.ai user to the Kita account as an agent and signs them in' do
     mock_google(email: 'sam@kita.ai')
     expect { callback }.to change(User, :count).by(1)
-    user = User.find_by(email: 'sam@kita.ai')
+    user = User.from_email('sam@kita.ai')
     expect(user.account_users.find_by(account: account).role).to eq('agent')
     expect(user.confirmed?).to be(true)
     expect(response.location).to include('sso_auth_token=')
@@ -41,7 +40,7 @@ RSpec.describe 'Kita Google SSO provisioning', type: :request do
   end
 
   it 'refuses other domains' do
-    mock_google(email: 'someone@gmail.com', hd: nil)
+    mock_google(email: 'someone@gmail.com')
     expect { callback }.not_to change(User, :count)
     expect(response.location).to include('error=no-account-found')
   end
