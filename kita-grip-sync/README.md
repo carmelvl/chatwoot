@@ -70,6 +70,13 @@ Like `kita-bridges`, it is **Node 24 + TypeScript with no dependencies**: Node s
   * Once per conversation: a flag in SQLite means later messages don't resolve or relabel it again (if the customer writes again, Chatwoot reopens it and it stays open). Both calls are idempotent, so a retried job is safe.
   * If Grip later answers `in_scope: true` (the account became Active or Pending), the block is lifted and new customer messages classify again. The conversation is **not** reopened and the label is left as history.
   * A Grip that doesn't send `in_scope` yet changes nothing.
+* **Owner in the desk.** Grip's `POST /support/conversations` also answers `dri_email`, `dri_name`, `sales_owner_email` and `account_name` (flat or in `{ success, data }`). After each upsert that carries them, an `owner:<id>` job (`src/owner.ts`):
+  * sets conversation custom attributes through `POST …/conversations/:id/custom_attributes` with `merge: true` (so `channel_key` and the other bridge attributes are kept): `account_owner` (DRI name, else email), `account_owner_email`, `sales_owner`, `grip_account`. What was last written is kept in SQLite (`owners` table) and **only changed keys are sent**; an unchanged conversation costs no Chatwoot call. Empty values are skipped, never cleared.
+  * assigns the conversation (`POST …/assignments {assignee_id}`) to the Chatwoot agent whose email matches `dri_email` (case-insensitive). The agent list (`GET /agents`) is cached for `AGENTS_REFRESH_SECONDS` (a miss refreshes at most once a minute).
+  * assigns **only** when the conversation is unassigned or still assigned to the agent this service assigned (tracked in SQLite). Before assigning it reads the live assignee (`GET …/conversations/:id`), so a human's reassignment is never overridden; that decision is remembered, so it is not re-checked until the DRI changes.
+  * a DRI who isn't a Chatwoot agent still gets the attributes, and `dri_not_agent` is logged. Out-of-scope conversations (`in_scope: false`) get the attributes but are never assigned.
+  * token scope: the agent bot token may call `conversations#show/custom_attributes` and `assignments#create`, but **not** `agents#index` or `custom_attribute_definitions`. Set `CHATWOOT_ADMIN_TOKEN` (an administrator's access token) for those. Without it, attributes are still written, assignment is skipped and `agents_unavailable` is logged once.
+  * the attribute definitions are created on first use if the admin token allows it; otherwise `attribute_definitions_missing` is logged and you create them once (Setup checklist, step 2b).
 * **Loop safety.** The service's own notes come back as `message_created` with `private: true` and are ignored for counting and classification. The `ticket` label comes back as `conversation_updated` and changes nothing.
 * **Logs contain ids and event kinds only**, never message bodies or tokens. Message text lives only in the local SQLite volume (last 40 public messages per conversation) so the classifier has context.
 
@@ -101,9 +108,12 @@ The service rejects missing or incorrect signatures, and any timestamp more than
 | `CLAUDE_MODEL` | `claude-sonnet-5` | Classifier model |
 | `CLASSIFY_DEBOUNCE_SECONDS` / `CLASSIFY_MAX_WAIT_SECONDS` | `60` / `300` | Debounce window and its cap |
 | `AUTO_TICKETS` | `true` | `false` = sync conversations only |
+| `CHATWOOT_ADMIN_TOKEN` | none | Administrator access token for `agents#index` + `custom_attribute_definitions` (bot tokens can't call them). Needed for owner assignment |
+| `OWNER_SYNC` | `true` | `false` = no owner attributes or assignment |
+| `AGENTS_REFRESH_SECONDS` | `600` | Agent list cache lifetime |
 | `GRIP_SYNC_DB_PATH`, `PORT`, `LOG_LEVEL` | `/data/grip-sync.sqlite`, `8080`, `info` | |
 
-If `GRIP_API_KEY` is missing, nothing is synced. If the Anthropic key or the Chatwoot token is missing (or `AUTO_TICKETS=false`), conversations still sync but no tickets are made. `/healthz` shows `{webhook, grip, tickets}`.
+Owner in the desk runs when the webhook, Grip and `CHATWOOT_API_TOKEN` are set and `OWNER_SYNC` isn't `false`. If `GRIP_API_KEY` is missing, nothing is synced. If the Anthropic key or the Chatwoot token is missing (or `AUTO_TICKETS=false`), conversations still sync but no tickets are made. `/healthz` shows `{webhook, grip, tickets, owners}`.
 
 ## Run and test locally
 
@@ -121,6 +131,7 @@ The tests use recorded Chatwoot webhook payloads (`test/fixtures/`) and one inje
 * resolve and reopen;
 * dismissal before and after a ticket exists;
 * out-of-scope resolve + label, no classification, and recovery when back in scope;
+* owner in the desk: assignment when unassigned or still on the previous DRI we set, manual reassignments kept, DRI not an agent, bot token without agents access, out-of-scope never assigned, only changed attribute values written, attribute definitions created once;
 * loop safety;
 * retries, backoff and dead jobs;
 * signature checks over real HTTP.
@@ -159,6 +170,28 @@ values ('kita-grip-sync', 'grip-sync@usekita.com', '<HASH>');
 Agent bot tokens may call `messages#create`, `labels#index/create` and `conversations#toggle_status` (`AccessTokenAuthHelper::BOT_ACCESSIBLE_ENDPOINTS`), which is all this service uses. Notes show up authored by "Kita Grip Sync". Alternatively, use an administrator's access token from Profile settings.
 
 4. Create the labels `ticket`, `not-a-ticket` and `out-of-scope` (Settings → Labels) so agents can pick `not-a-ticket` from the sidebar and filter on `out-of-scope`.
+
+### 2b. Chatwoot: owner attribute definitions (one time)
+
+The values are written without them, but the sidebar only shows attributes that have a definition. With `CHATWOOT_ADMIN_TOKEN` set the service creates them itself. Otherwise run once on the server (`docker compose -f docker-compose.kita.yaml exec rails bundle exec rails runner '…'`, account id 1):
+
+```ruby
+account = Account.find(1)
+[
+  ['account_owner',       'Account owner',       'Grip DRI for this account (set by kita-grip-sync)'],
+  ['account_owner_email', 'Account owner email', 'Grip DRI email (set by kita-grip-sync)'],
+  ['sales_owner',         'Sales owner',         'Grip sales owner email (set by kita-grip-sync)'],
+  ['grip_account',        'Grip account',        'Grip account name (set by kita-grip-sync)'],
+].each do |key, name, desc|
+  account.custom_attribute_definitions.find_or_create_by!(attribute_key: key, attribute_model: :conversation_attribute) do |d|
+    d.attribute_display_name = name
+    d.attribute_display_type = :text
+    d.attribute_description = desc
+  end
+end
+```
+
+For assignment, also set `CHATWOOT_ADMIN_TOKEN` (Profile settings → Access token of an administrator), since the bot token can't list agents.
 
 ### 3. Chatwoot: account webhook
 

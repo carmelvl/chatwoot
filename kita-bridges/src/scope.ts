@@ -17,6 +17,8 @@ export interface ScopeOptions {
   apiKey: string;
   refreshMs?: number;
   fetchImpl?: typeof fetch;
+  /** Called after every successful refresh (team sync runs on the same cadence). Errors are logged, never thrown. */
+  onRefresh?: (inScope: string[]) => Promise<unknown> | unknown;
 }
 
 export const DEFAULT_SCOPE_REFRESH_SECONDS = 300;
@@ -27,6 +29,8 @@ export class ScopeCache implements ScopeCheck {
   readonly enabled: boolean;
   readonly refreshMs: number;
   generatedAt: string | undefined;
+  /** Channel keys Grip lists as in scope (in_scope, plus channels[] rows with in_scope: true). */
+  inScope: string[] = [];
   private o: Partial<ScopeOptions>;
 
   constructor(o: Partial<ScopeOptions> = {}) {
@@ -57,12 +61,23 @@ export class ScopeCache implements ScopeCheck {
       if (!Array.isArray(body?.out_of_scope)) throw new Error('malformed scope response');
       this.outOfScope = new Set(body.out_of_scope.map(String));
       this.generatedAt = body.generated_at;
+      const inScope = new Set<string>(Array.isArray(body.in_scope) ? body.in_scope.map(String) : []);
+      for (const c of Array.isArray(body.channels) ? body.channels : []) if (c?.in_scope === true && c.channel_key) inScope.add(String(c.channel_key));
+      for (const k of this.outOfScope) inScope.delete(k);
+      this.inScope = [...inScope];
       log.info('scope_refreshed', { in_scope: Array.isArray(body.in_scope) ? body.in_scope.length : undefined, out_of_scope: this.outOfScope.size });
-      return true;
     } catch (e: any) {
       log.warn('scope_refresh_failed', { error: String(e?.message ?? e), keeping_last: this.loaded });
       return false;
     }
+    if (this.o.onRefresh) {
+      try {
+        await this.o.onRefresh(this.inScope);
+      } catch (e: any) {
+        log.error('scope_on_refresh_failed', { error: String(e?.message ?? e) });
+      }
+    }
+    return true;
   }
 
   /** Refresh now and then every refreshMs. No-op when disabled. */

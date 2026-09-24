@@ -4,6 +4,7 @@ import { chatwootUrl, conversationBody, deriveChannelKey, NOT_A_TICKET, OUT_OF_S
 import type { GripClient } from './grip.ts';
 import { backoffMs, isRetryable } from './http.ts';
 import { log } from './log.ts';
+import { gripOwner, type Owners } from './owner.ts';
 import type { ConversationState, Job, Priority, Store, TicketRow } from './store.ts';
 
 export const MAX_ATTEMPTS = 10;
@@ -15,6 +16,8 @@ export interface SyncDeps {
   grip?: GripClient;
   chatwoot?: ChatwootApi;
   claude?: ClaudeClassifier;
+  /** Owner in the desk (DRI attributes + assignment). Needs a Chatwoot token. */
+  owners?: Owners;
   publicUrl: string;
   debounceMs: number;
   debounceMaxMs: number;
@@ -180,6 +183,17 @@ export class Sync {
         const r = await this.d.grip.upsertConversation(conversationBody(s, this.d.publicUrl));
         log.info('conversation_synced', { conversation: id, account: r?.account_id ?? null, support_status: r?.support_status ?? null, in_scope: r?.in_scope ?? null });
         if (typeof r?.in_scope === 'boolean') this.applyScope(id, r.in_scope);
+        const owner = this.d.owners ? gripOwner(r) : undefined;
+        if (owner) {
+          const prev = store.getOwner(id);
+          store.putOwner({ conversationId: id, attrs: {}, assignedAgentId: null, keptManualFor: null, ...prev, grip: owner });
+          store.enqueue(`owner:${id}`, 'owner', id, { runAt: this.now(), mode: 'coalesce', now: this.now() });
+        }
+        return;
+      }
+      case 'owner': {
+        const s = store.getConversation(id);
+        if (s && this.d.owners) await this.d.owners.apply(id, s.accountId);
         return;
       }
       case 'ticket_status': {

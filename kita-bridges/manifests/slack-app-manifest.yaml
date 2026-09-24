@@ -25,7 +25,11 @@ oauth_config:
       - files:read           # copy customer attachments into the desk
       - files:write          # send agent attachments as native Slack files
       - users:read           # display names
-      - users:read.email     # match a connecting Slack account to the agent's desk email
+      - users:read.email     # match a connecting Slack account to the agent's desk email; team sync users.lookupByEmail
+      - channels:read        # team sync: conversations.members (public / Slack Connect)
+      - groups:read          # team sync: conversations.members (private shared)
+      - channels:manage      # team sync: conversations.invite (public / Slack Connect)
+      - groups:write         # team sync: conversations.invite (private shared)
 settings:
   event_subscriptions:
     request_url: https://support.internal.kita.ai/bridges/slack/events

@@ -168,6 +168,14 @@ export class ChatwootAppClient {
     return { id: Number(j.id) };
   }
 
+  /** Every agent in the account (agents#index): id, email, name, confirmed, role. Throws on HTTP errors. */
+  async listAgents(): Promise<{ id: number; email?: string; name?: string; confirmed?: boolean; role?: string; type?: string }[]> {
+    const res = await this.fetchImpl(`${this.base}/agents`, { headers: { api_access_token: this.token } });
+    if (!res.ok) throw new Error(`chatwoot app api agents -> ${res.status}`);
+    const list: any = await res.json();
+    return Array.isArray(list) ? list : [];
+  }
+
   /** Agent avatar (thumbnail) by Chatwoot user id; cached for an hour. */
   async avatarUrl(agentId: number): Promise<string | undefined> {
     if (!this.agents || Date.now() - this.agents.at > 3600_000) {

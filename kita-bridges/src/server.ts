@@ -14,6 +14,7 @@ import { ViberSender } from './platforms/viber.ts';
 import { WhatsAppSender } from './platforms/whatsapp.ts';
 import { ScopeCache } from './scope.ts';
 import { Store } from './store.ts';
+import { parseTeamSyncMode, rosterSource, SlackMembership, TeamSync, TeamsMembership } from './teamsync.ts';
 import type { Platform, Sender } from './types.ts';
 
 const cfg = loadConfig();
@@ -33,8 +34,19 @@ const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender
 
 const app = cfg.chatwootApiToken && cfg.chatwootAccountId ? new ChatwootAppClient(cfg.chatwootBaseUrl, cfg.chatwootApiToken, cfg.chatwootAccountId) : undefined;
 const connectLink = cfg.linkSecret ? (a: { id: number; email?: string }) => (a.email ? signConnectLink(cfg.linkSecret, cfg.publicUrl, { id: a.id, email: a.email }) : undefined) : undefined;
+// Team in every customer channel: runs after each Grip scope refresh (TEAM_SYNC=off|dry-run|on, default dry-run).
+const teamSync = new TeamSync({
+  mode: parseTeamSyncMode(cfg.teamSync.mode),
+  store,
+  roster: rosterSource({ emails: cfg.teamSync.roster, exclude: cfg.teamSync.exclude, listAgents: app ? () => app.listAgents() : undefined }),
+  slack: enabled.includes('slack') ? new SlackMembership({ botToken: cfg.slack.botToken }) : undefined,
+  teams: teams ? new TeamsMembership({ graph: teams.graph, store }) : undefined,
+});
 // Grip scope (fails open; disabled when GRIP_* is unset). First refresh runs in the background.
-const scope = new ScopeCache({ baseUrl: cfg.grip.baseUrl, apiKey: cfg.grip.apiKey, refreshMs: cfg.grip.scopeRefreshMs });
+const scope = new ScopeCache({
+  baseUrl: cfg.grip.baseUrl, apiKey: cfg.grip.apiKey, refreshMs: cfg.grip.scopeRefreshMs,
+  onRefresh: (inScope) => void teamSync.run(inScope).catch((e) => log.error('teamsync_failed', { error: String(e?.message ?? e) })),
+});
 void scope.start();
 const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, connectLink, scope });
 const connect = cfg.linkSecret && (teams || slackOAuth) ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth }) : undefined;

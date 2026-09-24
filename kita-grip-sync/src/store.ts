@@ -53,6 +53,19 @@ export interface Job {
   version: number;
 }
 
+/** Per-conversation owner state: what Grip last said, what we last wrote to Chatwoot, and whom we assigned. */
+export interface OwnerRow {
+  conversationId: number;
+  /** Grip's latest owner fields for the conversation's account. */
+  grip: { dri_email: string | null; dri_name: string | null; sales_owner_email: string | null; account_name: string | null; in_scope: boolean | null };
+  /** Custom attribute values this service last wrote (only changed values are sent again). */
+  attrs: Record<string, string>;
+  /** Agent id this service assigned. A different current assignee means a human reassigned: never override it. */
+  assignedAgentId: number | null;
+  /** DRI agent id we declined to assign because a human owns the conversation; stops re-checking every sync. */
+  keptManualFor: number | null;
+}
+
 const THREAD_KEEP = 40;
 
 /** All service state in one SQLite file: dedupe keys, conversation snapshots, tickets, a durable job queue. */
@@ -85,6 +98,9 @@ export class Store {
         key TEXT PRIMARY KEY, kind TEXT NOT NULL, conversation_id INTEGER NOT NULL, payload TEXT NOT NULL DEFAULT '{}',
         run_at INTEGER NOT NULL, first_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
         version INTEGER NOT NULL DEFAULT 1, dead INTEGER NOT NULL DEFAULT 0, last_error TEXT);
+      CREATE TABLE IF NOT EXISTS owners (
+        conversation_id INTEGER PRIMARY KEY, grip TEXT NOT NULL DEFAULT '{}', attrs TEXT NOT NULL DEFAULT '{}',
+        assigned_agent_id INTEGER, kept_manual_for INTEGER, updated_at INTEGER NOT NULL);
     `);
     // Databases created before the out-of-scope column existed.
     const cols = (this.db.prepare('PRAGMA table_info(conversations)').all() as any[]).map((c) => c.name);
@@ -157,6 +173,22 @@ export class Store {
 
   dismissals(): any[] {
     return this.db.prepare('SELECT * FROM dismissals ORDER BY at').all() as any[];
+  }
+
+  // ---- owners ----
+  getOwner(conversationId: number): OwnerRow | undefined {
+    const r = this.db.prepare('SELECT * FROM owners WHERE conversation_id = ?').get(conversationId) as any;
+    if (!r) return undefined;
+    return {
+      conversationId: Number(r.conversation_id), grip: JSON.parse(r.grip), attrs: JSON.parse(r.attrs),
+      assignedAgentId: r.assigned_agent_id === null ? null : Number(r.assigned_agent_id),
+      keptManualFor: r.kept_manual_for === null ? null : Number(r.kept_manual_for),
+    };
+  }
+
+  putOwner(o: OwnerRow): void {
+    this.db.prepare('INSERT OR REPLACE INTO owners (conversation_id, grip, attrs, assigned_agent_id, kept_manual_for, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(o.conversationId, JSON.stringify(o.grip), JSON.stringify(o.attrs), o.assignedAgentId, o.keptManualFor, Date.now());
   }
 
   // ---- durable job queue ----

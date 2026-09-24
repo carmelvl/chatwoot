@@ -22,7 +22,8 @@ export function verifyChatwootSignature(
 
 /**
  * Chatwoot Application API, limited to the endpoints an agent bot token may call
- * (AccessTokenAuthHelper::BOT_ACCESSIBLE_ENDPOINTS): messages#create, labels#index/create and conversations#toggle_status.
+ * (AccessTokenAuthHelper::BOT_ACCESSIBLE_ENDPOINTS): messages#create, labels#index/create, conversations#show/toggle_status/custom_attributes
+ * and assignments#create. agents#index and custom_attribute_definitions are NOT bot-accessible: they need a user (administrator) token.
  */
 export class ChatwootApi {
   private baseUrl: string;
@@ -64,5 +65,37 @@ export class ChatwootApi {
     const current = await this.labels(accountId, conversationId);
     if (current.includes(label)) return;
     await this.call('POST', accountId, `conversations/${conversationId}/labels`, { labels: [...current, label] });
+  }
+
+  /** conversations#show: current assignee (meta.assignee) and custom attributes. */
+  conversation(accountId: number, conversationId: number): Promise<any> {
+    return this.call('GET', accountId, `conversations/${conversationId}`);
+  }
+
+  /** conversations#custom_attributes with merge=true: only the keys sent change (channel_key etc. are kept). */
+  async setCustomAttributes(accountId: number, conversationId: number, attrs: Record<string, string>): Promise<void> {
+    await this.call('POST', accountId, `conversations/${conversationId}/custom_attributes`, { custom_attributes: attrs, merge: true });
+  }
+
+  /** assignments#create with an agent (User) id. */
+  async assign(accountId: number, conversationId: number, agentId: number): Promise<void> {
+    await this.call('POST', accountId, `conversations/${conversationId}/assignments`, { assignee_id: agentId });
+  }
+
+  /** agents#index (user token only). */
+  async agents(accountId: number): Promise<{ id: number; email: string; name: string }[]> {
+    const r = await this.call('GET', accountId, 'agents');
+    return Array.isArray(r) ? r : [];
+  }
+
+  /** custom_attribute_definitions#index for conversations (user token). */
+  async attributeDefinitions(accountId: number): Promise<{ attribute_key: string }[]> {
+    const r = await this.call('GET', accountId, 'custom_attribute_definitions?attribute_model=conversation_attribute');
+    return Array.isArray(r) ? r : [];
+  }
+
+  /** custom_attribute_definitions#create (administrator token). */
+  async createAttributeDefinition(accountId: number, def: Record<string, string>): Promise<void> {
+    await this.call('POST', accountId, 'custom_attribute_definitions', { custom_attribute_definition: def });
   }
 }

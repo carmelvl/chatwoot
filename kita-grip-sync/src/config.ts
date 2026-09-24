@@ -22,6 +22,11 @@ export function loadConfig() {
     debounceMaxMs: Number(env('CLASSIFY_MAX_WAIT_SECONDS', '300')) * 1000,
     /** Kill switch: sync conversations but never classify or ticket. */
     ticketsEnabled: env('AUTO_TICKETS', 'true') !== 'false',
+    /** Administrator access token for agents#index and custom_attribute_definitions (agent bot tokens can't call them). Optional. */
+    chatwootAdminToken: env('CHATWOOT_ADMIN_TOKEN'),
+    /** Owner in the desk: DRI attributes + assignment. */
+    ownerSync: env('OWNER_SYNC', 'true') !== 'false',
+    agentsRefreshMs: Number(env('AGENTS_REFRESH_SECONDS', '600')) * 1000,
   };
 }
 
@@ -32,5 +37,6 @@ export function capabilities(cfg: Config) {
   const webhook = !!cfg.webhookSecret;
   const grip = !!cfg.gripApiKey;
   const tickets = webhook && grip && cfg.ticketsEnabled && !!cfg.anthropicApiKey && !!cfg.chatwootApiToken;
-  return { webhook, grip, tickets };
+  const owners = webhook && grip && cfg.ownerSync && !!cfg.chatwootApiToken;
+  return { webhook, grip, tickets, owners };
 }

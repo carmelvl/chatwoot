@@ -62,11 +62,38 @@ The desk only shows channels whose account is on Grip's **Customers** page (Acti
 * **Outbound is unchanged.** Agents can still reply in a conversation that's already in the desk.
 * **Mid-conversation changes.** Scope is checked per message, not per conversation. When an account is paused or closed in Grip, the next refresh (within `SCOPE_REFRESH_SECONDS`) puts its channel in `out_of_scope`, and **new customer messages in conversations that are already open stop arriving in the desk**; the open conversation just goes quiet. Dropped messages are not queued or replayed. If the account becomes Active or Pending again, new messages flow again from the next refresh.
 
+## Team in every customer channel (`src/teamsync.ts`)
+
+Every Kita team member should be in every **in-scope** customer channel, so nobody depends on one person being there. After each successful Grip scope refresh (same `SCOPE_REFRESH_SECONDS` cadence) the bridge adds missing team members. **It only adds; it never removes anyone.**
+
+* **Mode.** `TEAM_SYNC=off|dry-run|on`, default **`dry-run`**: it resolves everything and logs `teamsync_would_add {channel_key, emails}` without a single write call. Check that output, then set `on`.
+* **Which channels.** Grip's `in_scope` list plus `channels[]` rows with `in_scope: true`, minus anything in `out_of_scope`. `whatsapp:*` and `viber:*` are 1:1 and have no membership: skipped.
+* **Roster.** `TEAM_ROSTER` (comma-separated emails). If unset: every active (confirmed) Chatwoot agent from `GET /agents` (needs `CHATWOOT_API_ACCESS_TOKEN` + `CHATWOOT_ACCOUNT_ID`), excluding bots and `TEAM_ROSTER_EXCLUDE` (default `bridge@kita.ai`).
+* **Skip unchanged.** SQLite kv `teamsync:<channel_key>` holds a hash of the roster, written only after the channel synced cleanly. An unchanged channel costs no API call; a roster change re-checks every channel. Dry-run uses its own key (`teamsync.dry:<key>`), so switching to `on` still does the work.
+* **Slack** (`slack:<channel>`, bot token):
+  1. `users.lookupByEmail` per roster email (cached per process); `users_not_found` is logged as `teamsync_slack_user_not_found` and skipped.
+  2. `conversations.members` (paginated). If the bot isn't a member (or a private channel returns `channel_not_found`), `teamsync_slack_bot_not_in_channel` is logged and the channel is skipped; run `/invite @Kita` there.
+  3. `conversations.invite` for each missing user, one at a time, about 1.2s apart (Tier 3). `already_in_channel` counts as success. `cant_invite`, `restricted_action`, `user_is_restricted` and similar are final for that user and logged as `teamsync_slack_cant_invite`. `ratelimited` / HTTP 429 waits `Retry-After` seconds and retries (up to 3 times).
+  * **Slack Connect.** The bot can invite Kita's own internal users into a shared channel it's in. Customer orgs whose policy restricts who can add people will answer `restricted_action`/`cant_invite`; that is logged, and someone on their side, or a Kita member with rights, adds the person manually.
+  * Scopes (in `manifests/slack-app-manifest.yaml`): `channels:read`, `groups:read` (members), `channels:manage`, `groups:write` (invite), `users:read.email` (lookup). **Reinstall the app** after updating the manifest so the bot token gets them.
+* **Teams** (`teams:<id>`, the Kita user's delegated Graph token):
+  * A channel is recognised by the bridge's own Graph subscription for it, which gives the team id. Anything else is treated as a chat.
+  * **Standard channel:** membership is inherited from the team, so missing people are added to the **team** (`POST /teams/{team}/members`). Requires the Kita user to be a team **owner**.
+  * **Private or shared channel:** `POST /teams/{team}/channels/{channel}/members` (Graph only allows this for `private`/`shared`). Requires the Kita user to be a channel **owner**. Only Kita-hosted channels can be managed this way.
+  * **Group chat:** `POST /chats/{id}/members` with `visibleHistoryStartDateTime: "0001-01-01T00:00:00Z"` (the whole history).
+  * Current members are read first (`GET …/members`) and matched by Entra user id and email; roster emails are resolved with `GET /users/{email}` (404 is logged and skipped). Adds are about 2s apart (Microsoft's recommended buffer); 429/503 wait `Retry-After`. 409 (already a member) is success.
+  * **403** means the Kita user isn't an owner there (or consent is missing): `teamsync_teams_forbidden` is logged with the fix, the channel stops for this run and is retried next refresh.
+  * Delegated permissions (verified against Microsoft Graph v1.0 docs, 2026-09-24):
+    * `TeamMember.ReadWrite.All`: [Add member to team](https://learn.microsoft.com/en-us/graph/api/team-post-members?view=graph-rest-1.0) (least privileged is `TeamMember.ReadWriteNonOwnerRole.All`, but [List team members](https://learn.microsoft.com/en-us/graph/api/team-list-members?view=graph-rest-1.0) needs `TeamMember.Read.All` or `TeamMember.ReadWrite.All`, so one permission covers both).
+    * `ChannelMember.ReadWrite.All`: [Add member to channel](https://learn.microsoft.com/en-us/graph/api/channel-post-members?view=graph-rest-1.0) (only delegated option) and [List channel members](https://learn.microsoft.com/en-us/graph/api/channel-list-members?view=graph-rest-1.0).
+    * `ChatMember.ReadWrite`: [Add member to a chat](https://learn.microsoft.com/en-us/graph/api/chat-post-members?view=graph-rest-1.0) (least privileged) and [List chat members](https://learn.microsoft.com/en-us/graph/api/chat-list-members?view=graph-rest-1.0).
+* **Logs.** `teamsync_would_add`, `teamsync_added`, `teamsync_done {mode, roster, channels, skipped_unchanged, added, would_add, not_applicable}`; emails and ids only.
+
 ## Run and test locally
 
 ```bash
 cd kita-bridges
-npm test                       # node --test, 89 tests, no install step (Node >= 24)
+npm test                       # node --test, 129 tests, no install step (Node >= 24)
 cp .env.example .env && node src/server.ts
 ```
 
@@ -170,7 +197,7 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
 2. **Register the Entra app.** In the Entra admin center → App registrations → New registration: name it `Kita Support Bridge`, choose *Accounts in this organizational directory only*, and set the Redirect URI (type **Web**) to `https://support.internal.kita.ai/bridges/teams/connect/callback`.
    * Copy the Application (client) ID → `TEAMS_CLIENT_ID` and the Directory (tenant) ID → `TEAMS_TENANT_ID`.
    * Under Certificates & secrets → New client secret → `TEAMS_CLIENT_SECRET`. Note the expiry and set a reminder to rotate it.
-   * Under API permissions → Add → Microsoft Graph → **Delegated**, add exactly: `offline_access`, `openid`, `profile`, `User.Read`, `User.ReadBasic.All`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All`, `ChannelMessage.Send`, `Chat.Read`, `ChatMessage.Send`. Then click **Grant admin consent for Kita**.
+   * Under API permissions → Add → Microsoft Graph → **Delegated**, add exactly: `offline_access`, `openid`, `profile`, `User.Read`, `User.ReadBasic.All`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Read.All`, `ChannelMessage.Send`, `Chat.Read`, `ChatMessage.Send`, plus for [team sync](#team-in-every-customer-channel-teamsync) `TeamMember.ReadWrite.All`, `ChannelMember.ReadWrite.All`, `ChatMember.ReadWrite`. Then click **Grant admin consent for Kita**. (Adding the team-sync permissions to an existing install: add them, grant admin consent, then re-run the connect flow in step 4 so the stored refresh token carries the new scopes.)
    * No application permissions, no Azure Bot, no Teams app manifest.
 3. **Configure the bridge.** Set `TEAMS_KITA_USER_UPN`, a long random `TEAMS_CONNECT_KEY` and `BRIDGE_ENCRYPTION_KEY` (`openssl rand -base64 32` for each), plus the Teams API inbox identifier and secret. Deploy.
 4. **Run the connect flow once.** In a private browser window, open `https://support.internal.kita.ai/bridges/teams/connect?key=<TEAMS_CONNECT_KEY>` and sign in **as the Kita user**. Any other account is refused. The page confirms "Connected as kita@…", the bridge stores the refresh token encrypted, and it creates the subscriptions.
