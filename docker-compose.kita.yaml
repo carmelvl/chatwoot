@@ -47,10 +47,24 @@ services:
     volumes:
       - redis_data:/data
 
+  # Slack / Teams / Viber <-> Chatwoot bridge (see kita-bridges/README.md). Secrets in kita-bridges/.env.
+  bridges:
+    build: ./kita-bridges
+    restart: unless-stopped
+    depends_on: [rails]
+    env_file:
+      - path: kita-bridges/.env
+        required: false # bridge idles (all platforms disabled) until configured
+    environment:
+      - CHATWOOT_BASE_URL=http://rails:3000
+      - BRIDGE_DB_PATH=/data/bridges.sqlite
+    volumes:
+      - bridges_data:/data
+
   caddy:
     image: caddy:2
     restart: unless-stopped
-    depends_on: [rails]
+    depends_on: [rails, bridges]
     ports: ['80:80', '443:443']
     volumes:
       - ./Caddyfile.kita:/etc/caddy/Caddyfile:ro
@@ -61,3 +75,4 @@ volumes:
   storage_data:
   postgres_data:
   redis_data:
+  bridges_data:

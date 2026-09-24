@@ -1,3 +1,9 @@
 support.internal.kita.ai {
-	reverse_proxy rails:3000
+	# Channel bridges (Slack/Teams/Viber webhooks + Chatwoot API-channel webhooks); prefix is stripped.
+	handle_path /bridges/* {
+		reverse_proxy bridges:8080
+	}
+	handle {
+		reverse_proxy rails:3000
+	}
 }

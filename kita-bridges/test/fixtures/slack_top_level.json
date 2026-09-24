@@ -1,0 +1,4 @@
+{"token":"x","team_id":"TKITA0001","api_app_id":"A01","type":"event_callback","event_id":"Ev01TOP","event_time":1790000000,
+ "authorizations":[{"team_id":"TKITA0001","user_id":"UBOTKITA","is_bot":true}],
+ "event":{"type":"message","channel":"C0SHARED1","channel_type":"channel","user":"UCUST001","user_team":"TCUST0001","team":"TCUST0001",
+  "text":"Hi, our webhook fails with *401* since today &amp; see <https://status.example.com|status page>","ts":"1790000000.000100"}}
