@@ -3,6 +3,10 @@ support.internal.kita.ai {
 	handle_path /bridges/* {
 		reverse_proxy bridges:8080
 	}
+	# Chatwoot account webhook -> Grip sync (signed with the webhook secret); prefix is stripped.
+	handle_path /grip-sync/* {
+		reverse_proxy grip-sync:8080
+	}
 	handle {
 		reverse_proxy rails:3000
 	}
