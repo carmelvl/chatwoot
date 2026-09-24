@@ -44,7 +44,7 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number } = {}
       if (p === '/api/v1/support/tickets') {
         const t = tickets.get(body.chatwoot_conversation_id) ?? { id: `t-${tickets.size + 1}`, status: 'todo' };
         tickets.set(body.chatwoot_conversation_id, { ...t, ...body });
-        return Response.json({ ticket_id: t.id, ticket_url: `https://internal.kita.ai/tasks/${t.id}` });
+        return Response.json({ success: true, data: { ticket_id: t.id, ticket_url: `https://internal.kita.ai/tasks/${t.id}` } });
       }
       const m = p.match(/^\/api\/v1\/support\/tickets\/(\d+)$/);
       if (m && init.method === 'PATCH') {

@@ -26,13 +26,12 @@ export class GripClient {
       method,
       headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    }).then((r: any) => (r && typeof r.data === 'object' && r.data !== null ? r.data : r)); // Grip wraps responses as { success, data }
   }
 
   /** `in_scope` is false when the linked account is not on Grip's Customers page (paused, closed, no pilot). */
   upsertConversation(body: Record<string, unknown>): Promise<{ account_id: string | null; support_status: string; in_scope?: boolean }> {
-    // Accept both the flat shape and Grip's `{ success, data: {...} }` envelope.
-    return this.call('POST', 'conversations', body).then((r: any) => (r && typeof r.data === 'object' && r.data !== null ? r.data : r));
+    return this.call('POST', 'conversations', body);
   }
 
   /** Upserts by chatwoot_conversation_id: Grip holds at most one support ticket per conversation. */
