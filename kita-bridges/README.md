@@ -27,7 +27,7 @@ Viber webhook ────┘         ▲              └─ SQLite /data: cont
 | Teams | `teams:<Entra user id>` | a **channel thread** (team + channel + root message id), or a **chat**. A chat is long-lived, so once its conversation is resolved the next message opens a new one (the bridge tracks `conversation_status_changed`). | Graph `POST …/messages/{root}/replies` or `POST /chats/{id}/messages` as the agent (their own token) or, as a fallback, the Kita user with "Carmel: …"; plain HTML, Adaptive Card only as a fallback |
 | Viber | `viber:<user id>` | the user (Viber bots are 1:1) | `pa/send_message` |
 
-Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifications` + `POST /teams/lifecycle` (Graph change and lifecycle notifications), `GET /teams/connect?key=…` + `/teams/connect/callback` (one-time sign-in), `POST /viber/webhook`, `POST /chatwoot/{slack,teams,viber}`, `GET /media/<token>/<name>` (attachment proxy, expires after `MEDIA_TTL_DAYS`), `GET /healthz`.
+Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifications` + `POST /teams/lifecycle` (Graph change and lifecycle notifications), `GET /teams/connect?key=…` + `/teams/connect/callback` (one-time sign-in), `POST /viber/webhook`, `GET|POST /whatsapp/webhook` (Cloud API; handshake + signed events), `POST /chatwoot/whatsapp/<phoneNumberId>`, `GET /connect` (+ `/connect/{slack,teams}/start`, `/connect/slack/callback`), `POST /chatwoot/{slack,teams,viber}`, `GET /media/<token>/<name>` (attachment proxy, expires after `MEDIA_TTL_DAYS`), `GET /healthz`.
 
 **Safety and correctness**
 * Every inbound request is verified before it's processed:
@@ -195,6 +195,16 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
 * **Mirror mode (`WHATSAPP_MODE=mirror`, default).** Nothing typed in the desk for these inboxes is sent. The agent gets a private note instead: *"Reply from WhatsApp on your phone — this inbox is a mirror."* `WHATSAPP_MODE=send` would send desk replies through Cloud API as text ("Carmel: …", only inside the 24h window). It's off by default because the team replies from their phones.
 * **Security.** Webhooks are verified with the `hub.challenge` handshake (`WHATSAPP_VERIFY_TOKEN`) and the `X-Hub-Signature-256` HMAC with the Meta **app secret**. Deliveries are de-duplicated on the `wamid`, so Meta's retries are harmless.
 * **Multiple numbers.** Use one entry in `WHATSAPP_NUMBERS` and one Chatwoot API inbox per teammate's number. The inbox webhook URL is `…/bridges/chatwoot/whatsapp/<phoneNumberId>`.
+
+**Native Chatwoot vs this bridge.** Chatwoot core (this fork) already supports coexistence in its **native WhatsApp Cloud inbox**. Its Embedded Signup has a *Coexistence* option, it subscribes to `messages` + `smb_message_echoes`, `WhatsappEventsJob` stores echoes as outgoing messages (`external_echo`, status delivered so they're never re-sent), and it handles Meta's BSUID identity rotation. What the native inbox does **not** do:
+* **Mirror mode.** Anything an agent types in the desk is sent to the customer through Cloud API, and billed.
+* **Owner attribution.** Echoes have no sender.
+* **Grip `channel_key`.** Grip derives it from the phone number for native inboxes, so this matters less.
+
+The bridge adds those three and uses one API inbox per number. Its BSUID handling is basic: it prefers the phone and uses the BSUID only when the phone is withheld, without core's rotation logic.
+* **Recommendation:** use the bridge while "the desk must never send" is a hard rule.
+* **Alternative:** if that rule relaxes, the native inbox is the lower-maintenance choice. Onboarding is identical, and core needs Chatwoot's installation config for WhatsApp Embedded Signup (Meta app id, configuration id, app secret) instead of the bridge's `WHATSAPP_*` settings.
+* **Don't run both** on the same number: one webhook per app would split the stream.
 
 **Constraints to know**
 * **Business app required.** Only the **WhatsApp Business app** (version 2.24.17 or newer) can do coexistence. Personal WhatsApp isn't supported. Teammates on personal WhatsApp switch the number to WhatsApp Business on the same phone; WhatsApp carries existing chats over on that switch.
