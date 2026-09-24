@@ -2,6 +2,7 @@ import type { ConversationState, Speaker } from './store.ts';
 
 export const NOT_A_TICKET = 'not-a-ticket';
 export const TICKET_LABEL = 'ticket';
+export const OUT_OF_SCOPE_LABEL = 'out-of-scope';
 const PLATFORMS = ['slack', 'teams', 'whatsapp', 'viber'] as const;
 
 /** E.164: "+" then 8-15 digits. Accepts common formatting ("+63 917-123 4567") and "whatsapp:" prefixes. */

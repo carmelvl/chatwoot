@@ -314,3 +314,105 @@ test('retries: Claude 429 and a failed ticket POST retry without duplicating tic
   assert.equal(w2.of('rails', 'POST', /\/messages$/).length, 1, 'note not repeated');
   assert.equal(w2.of('grip', 'POST', '/api/v1/support/tickets').length, 1, 'ticket not re-created');
 });
+
+// ---------- out-of-scope accounts (Grip answers in_scope: false) ----------
+
+test('out of scope: resolved via toggle_status + label out-of-scope (existing labels kept), never classified', async () => {
+  const w = world();
+  w.grip.inScope = false;
+  w.labels.set(42, ['vip']);
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  assert.ok(w.store.getJob('classify:42'), 'classification armed before Grip has answered');
+  await w.drain();
+  assert.equal(w.store.getConversation(42)!.outOfScope, true);
+  assert.equal(w.store.getJob('classify:42'), undefined, 'pending classification cancelled');
+  const [toggle] = w.of('rails', 'POST', '/api/v1/accounts/1/conversations/42/toggle_status');
+  assert.deepEqual(toggle.body, { status: 'resolved' });
+  assert.equal(toggle.headers.api_access_token, 'cw-bot-token');
+  assert.equal(w.statuses.get(42), 'resolved');
+  assert.deepEqual(w.labels.get(42), ['vip', 'out-of-scope']);
+  w.advance(10 * 60 * 1000);
+  await w.drain();
+  assert.equal(w.of('anthropic').length, 0);
+  assert.equal(w.of('grip', 'POST', '/api/v1/support/tickets').length, 0);
+  assert.equal(w.of('rails', 'POST', /\/messages$/).length, 0, 'no private note');
+});
+
+test('out of scope: done once per conversation; later messages and our own status/label echoes do nothing more', async () => {
+  const w = world();
+  w.grip.inScope = false;
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  await w.drain();
+  // echoes of what we did, then the customer writes again (Chatwoot reopens) and Grip still says out of scope
+  w.sync.ingest(fixture('conversation_resolved.json'), 'echo-status');
+  w.sync.ingest({ ...fixture('conversation_labeled_not_a_ticket.json'), labels: ['out-of-scope'] }, 'echo-label');
+  w.sync.ingest({ ...customer(5040, 'anyone there?'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open', labels: ['out-of-scope'] } }, 'd2');
+  assert.equal(w.store.getJob('classify:42'), undefined, 'no classification is armed while out of scope');
+  w.advance(10 * 60 * 1000);
+  await w.drain();
+  assert.equal(w.of('rails', 'POST', /toggle_status$/).length, 1);
+  assert.equal(w.of('rails', 'POST', /\/labels$/).length, 1);
+  assert.equal(w.of('anthropic').length, 0);
+  assert.ok(w.of('grip', 'POST', '/api/v1/support/conversations').length >= 2, 'Grip still gets the conversation snapshot');
+});
+
+test('out of scope: resolve/label retries are idempotent (Chatwoot 503 then success, one label)', async () => {
+  const w = world();
+  w.grip.inScope = false;
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  await w.sync.runDue(); // sync job -> Grip says out of scope -> enqueues out_of_scope
+  w.fail.rails.push(503);
+  await w.drain();
+  const job = w.store.getJob('out_of_scope:42')!;
+  assert.equal(job.attempts, 1, 'toggle_status 503 is retried with backoff');
+  w.advance(job.runAt - w.now());
+  await w.drain();
+  assert.equal(w.store.getJob('out_of_scope:42'), undefined);
+  assert.equal(w.statuses.get(42), 'resolved');
+  assert.deepEqual(w.labels.get(42), ['out-of-scope']);
+});
+
+test('out of scope -> back in scope: block lifted, no auto-reopen, new customer messages classify again', async () => {
+  const w = world();
+  w.grip.inScope = false;
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  await w.drain();
+  w.grip.inScope = true; // account became Active in Grip
+  w.classifications.push(ISSUE);
+  w.sync.ingest({ ...customer(5050, 'still broken'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open' } }, 'd2');
+  await w.drain();
+  assert.equal(w.store.getConversation(42)!.outOfScope, false);
+  assert.equal(w.of('rails', 'POST', /toggle_status$/).length, 1, 'never toggled back open by us');
+  assert.equal(w.store.getJob('classify:42'), undefined, 'the message that arrived while blocked is not retro-armed');
+  w.sync.ingest({ ...customer(5051, 'please help'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open' } }, 'd3');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.equal(w.of('anthropic').length, 1);
+  assert.equal(w.of('grip', 'POST', '/api/v1/support/tickets').length, 1);
+});
+
+test('in scope or an older Grip without in_scope: nothing is resolved or labelled', async () => {
+  for (const v of [true, undefined]) {
+    const w = world();
+    w.grip.inScope = v;
+    w.classifications.push(NOT_ISSUE);
+    w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+    w.advance(60 * SEC);
+    await w.drain();
+    assert.equal(w.of('rails', 'POST', /toggle_status$/).length, 0);
+    assert.equal(w.of('anthropic').length, 1);
+    assert.equal(!!w.store.getConversation(42)!.outOfScope, false);
+  }
+});
+
+test('in_scope is read from both the flat response and Grip\'s { success, data } envelope', async () => {
+  for (const envelope of [false, true]) {
+    const w = world();
+    w.grip.envelope = envelope;
+    w.grip.inScope = false;
+    w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+    await w.drain();
+    assert.equal(w.store.getConversation(42)!.outOfScope, true, `envelope=${envelope}`);
+    assert.deepEqual(w.labels.get(42), ['out-of-scope']);
+  }
+});

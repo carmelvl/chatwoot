@@ -24,6 +24,8 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number } = {}
   const labels = new Map<number, string[]>();
   let clock = Date.parse('2026-09-24T02:00:00Z');
   let noteId = 9000;
+  const grip: { inScope?: boolean; envelope?: boolean } = {}; // what POST /support/conversations answers for in_scope (unset = older Grip)
+  const statuses = new Map<number, string>();
 
   const fetchImpl = (async (input: any, init: any = {}) => {
     const url = new URL(String(input));
@@ -35,7 +37,10 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number } = {}
     if (f) return new Response('{"error":"x"}', { status: f });
     const p = url.pathname;
     if (host === 'grip') {
-      if (p === '/api/v1/support/conversations') return Response.json({ account_id: 'acc-1', support_status: 'waiting_on_kita' });
+      if (p === '/api/v1/support/conversations') {
+        const r = { account_id: 'acc-1', support_status: 'waiting_on_kita', ...(grip.inScope === undefined ? {} : { in_scope: grip.inScope }) };
+        return Response.json(grip.envelope ? { success: true, data: r } : r);
+      }
       if (p === '/api/v1/support/tickets') {
         const t = tickets.get(body.chatwoot_conversation_id) ?? { id: `t-${tickets.size + 1}`, status: 'todo' };
         tickets.set(body.chatwoot_conversation_id, { ...t, ...body });
@@ -48,6 +53,11 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number } = {}
       }
     }
     if (host === 'rails') {
+      const ts = p.match(/^\/api\/v1\/accounts\/1\/conversations\/(\d+)\/toggle_status$/);
+      if (ts) {
+        statuses.set(Number(ts[1]), body.status);
+        return Response.json({ payload: { success: true, current_status: body.status, conversation_id: Number(ts[1]) } });
+      }
       const m = p.match(/^\/api\/v1\/accounts\/1\/conversations\/(\d+)\/(messages|labels)$/);
       if (m?.[2] === 'messages') return Response.json({ id: ++noteId, private: body.private });
       if (m?.[2] === 'labels' && (init.method ?? 'GET') === 'GET') return Response.json({ payload: labels.get(Number(m[1])) ?? [] });
@@ -76,7 +86,7 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number } = {}
     now: () => clock,
   });
   return {
-    sync, store, calls, classifications, fail, tickets, labels, fetchImpl,
+    sync, store, calls, classifications, fail, tickets, labels, statuses, grip, fetchImpl,
     advance: (ms: number) => { clock += ms; },
     now: () => clock,
     of: (host: string, method?: string, path?: string | RegExp) =>

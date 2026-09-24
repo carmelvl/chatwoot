@@ -22,7 +22,7 @@ export function verifyChatwootSignature(
 
 /**
  * Chatwoot Application API, limited to the endpoints an agent bot token may call
- * (AccessTokenAuthHelper::BOT_ACCESSIBLE_ENDPOINTS): messages#create and labels#index/create.
+ * (AccessTokenAuthHelper::BOT_ACCESSIBLE_ENDPOINTS): messages#create, labels#index/create and conversations#toggle_status.
  */
 export class ChatwootApi {
   private baseUrl: string;
@@ -47,6 +47,11 @@ export class ChatwootApi {
   async privateNote(accountId: number, conversationId: number, content: string): Promise<number> {
     const r = await this.call('POST', accountId, `conversations/${conversationId}/messages`, { content, message_type: 'outgoing', private: true });
     return Number(r.id);
+  }
+
+  /** conversations#toggle_status with an explicit status (idempotent: resolving a resolved conversation is a no-op). */
+  async resolve(accountId: number, conversationId: number): Promise<void> {
+    await this.call('POST', accountId, `conversations/${conversationId}/toggle_status`, { status: 'resolved' });
   }
 
   async labels(accountId: number, conversationId: number): Promise<string[]> {

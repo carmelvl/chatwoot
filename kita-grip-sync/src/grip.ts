@@ -29,8 +29,10 @@ export class GripClient {
     });
   }
 
-  upsertConversation(body: Record<string, unknown>): Promise<{ account_id: string | null; support_status: string }> {
-    return this.call('POST', 'conversations', body);
+  /** `in_scope` is false when the linked account is not on Grip's Customers page (paused, closed, no pilot). */
+  upsertConversation(body: Record<string, unknown>): Promise<{ account_id: string | null; support_status: string; in_scope?: boolean }> {
+    // Accept both the flat shape and Grip's `{ success, data: {...} }` envelope.
+    return this.call('POST', 'conversations', body).then((r: any) => (r && typeof r.data === 'object' && r.data !== null ? r.data : r));
   }
 
   /** Upserts by chatwoot_conversation_id: Grip holds at most one support ticket per conversation. */

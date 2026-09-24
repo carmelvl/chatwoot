@@ -1,6 +1,6 @@
 import type { ChatwootApi } from './chatwoot.ts';
 import type { ClaudeClassifier } from './claude.ts';
-import { chatwootUrl, conversationBody, deriveChannelKey, NOT_A_TICKET, platformOf, preview, speakerOf, TICKET_LABEL, toIso } from './derive.ts';
+import { chatwootUrl, conversationBody, deriveChannelKey, NOT_A_TICKET, OUT_OF_SCOPE_LABEL, platformOf, preview, speakerOf, TICKET_LABEL, toIso } from './derive.ts';
 import type { GripClient } from './grip.ts';
 import { backoffMs, isRetryable } from './http.ts';
 import { log } from './log.ts';
@@ -117,7 +117,28 @@ export class Sync {
   }
 
   private eligible(s: ConversationState) {
-    return !s.dismissed && !s.labels.includes(NOT_A_TICKET) && s.status !== 'resolved';
+    return !s.dismissed && !s.outOfScope && !s.labels.includes(NOT_A_TICKET) && s.status !== 'resolved';
+  }
+
+  /**
+   * Grip's verdict on the conversation's account. Out of scope (a channel that auto-linked to a paused
+   * or closed account): once per conversation, cancel classification and enqueue resolve + label.
+   * Back in scope: lift the block so new customer messages classify again; the conversation is not reopened.
+   */
+  private applyScope(id: number, inScope: boolean) {
+    const { store } = this.d;
+    const s = store.getConversation(id); // re-read: ingest may have run while Grip answered
+    if (!s || !!s.outOfScope === !inScope) return;
+    store.putConversation({ ...s, outOfScope: !inScope });
+    if (inScope) {
+      store.cancelJob(`out_of_scope:${id}`);
+      log.info('back_in_scope', { conversation: id, channel_key: s.channelKey });
+      return;
+    }
+    store.cancelJob(`classify:${id}`);
+    log.info('out_of_scope', { conversation: id, channel_key: s.channelKey });
+    if (this.d.chatwoot) store.enqueue(`out_of_scope:${id}`, 'out_of_scope', id, { runAt: this.now(), mode: 'coalesce', now: this.now() });
+    else log.warn('out_of_scope_not_resolved', { conversation: id, reason: 'no CHATWOOT_API_TOKEN' });
   }
 
   /** Runs every due job once. Single-flight: overlapping ticks are no-ops. */
@@ -157,7 +178,8 @@ export class Sync {
         const s = store.getConversation(id);
         if (!s?.channelKey || !this.d.grip) return;
         const r = await this.d.grip.upsertConversation(conversationBody(s, this.d.publicUrl));
-        log.info('conversation_synced', { conversation: id, account: r?.account_id ?? null, support_status: r?.support_status ?? null });
+        log.info('conversation_synced', { conversation: id, account: r?.account_id ?? null, support_status: r?.support_status ?? null, in_scope: r?.in_scope ?? null });
+        if (typeof r?.in_scope === 'boolean') this.applyScope(id, r.in_scope);
         return;
       }
       case 'ticket_status': {
@@ -166,6 +188,14 @@ export class Sync {
         await this.d.grip.setTicketStatus(id, job.payload.status);
         store.putTicket({ ...t, status: job.payload.status });
         log.info('ticket_status', { conversation: id, status: job.payload.status });
+        return;
+      }
+      case 'out_of_scope': {
+        const s = store.getConversation(id);
+        if (!s?.outOfScope || !this.d.chatwoot) return; // back in scope before we got to it
+        await this.d.chatwoot.resolve(s.accountId, id);
+        await this.d.chatwoot.addLabel(s.accountId, id, OUT_OF_SCOPE_LABEL);
+        log.info('out_of_scope_resolved', { conversation: id, channel_key: s.channelKey });
         return;
       }
       case 'classify':

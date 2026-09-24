@@ -65,6 +65,11 @@ Like `kita-bridges`, it is **Node 24 + TypeScript with no dependencies**: Node s
      * the conversation is marked dismissed **forever**, even if the label is later removed;
      * the dismissal is written to the `dismissals` table (ticket title, priority, summary and the thread) for prompt tuning, plus a `ticket_dismissed` log line.
   7. The dismissal state is checked again after the Claude call and after the ticket POST, so a `not-a-ticket` that lands mid-flight still wins.
+* **Out-of-scope accounts.** Grip's `POST /support/conversations` answers `in_scope: boolean`, flat or inside Grip's `{ success, data }` envelope (false when the linked account isn't on Grip's Customers page: paused, closed, or no pilot). kita-bridges already drops messages from channels Grip lists as out of scope; this catches what slips through, e.g. a brand-new channel that auto-linked to a paused account.
+  * On the first `in_scope: false` for a conversation: the pending classification is cancelled, the conversation is resolved (`POST …/conversations/:id/toggle_status {status: resolved}`) and gets label `out-of-scope` (read-merge-write, existing labels kept). No note, no ticket, and it is never classified while out of scope.
+  * Once per conversation: a flag in SQLite means later messages don't resolve or relabel it again (if the customer writes again, Chatwoot reopens it and it stays open). Both calls are idempotent, so a retried job is safe.
+  * If Grip later answers `in_scope: true` (the account became Active or Pending), the block is lifted and new customer messages classify again. The conversation is **not** reopened and the label is left as history.
+  * A Grip that doesn't send `in_scope` yet changes nothing.
 * **Loop safety.** The service's own notes come back as `message_created` with `private: true` and are ignored for counting and classification. The `ticket` label comes back as `conversation_updated` and changes nothing.
 * **Logs contain ids and event kinds only**, never message bodies or tokens. Message text lives only in the local SQLite volume (last 40 public messages per conversation) so the classifier has context.
 
@@ -115,6 +120,7 @@ The tests use recorded Chatwoot webhook payloads (`test/fixtures/`) and one inje
 * ticket create-once, update and escalation;
 * resolve and reopen;
 * dismissal before and after a ticket exists;
+* out-of-scope resolve + label, no classification, and recovery when back in scope;
 * loop safety;
 * retries, backoff and dead jobs;
 * signature checks over real HTTP.
@@ -150,9 +156,9 @@ values ('kita-grip-sync', 'grip-sync@usekita.com', '<HASH>');
 2. **Do not connect it to any inbox.** A connected bot takes over new conversations as `pending`.
 3. Open the bot and copy its **access token**. That is `CHATWOOT_API_TOKEN`.
 
-Agent bot tokens may call `messages#create` and `labels#index/create` (`AccessTokenAuthHelper::BOT_ACCESSIBLE_ENDPOINTS`), which is all this service uses. Notes show up authored by "Kita Grip Sync". Alternatively, use an administrator's access token from Profile settings.
+Agent bot tokens may call `messages#create`, `labels#index/create` and `conversations#toggle_status` (`AccessTokenAuthHelper::BOT_ACCESSIBLE_ENDPOINTS`), which is all this service uses. Notes show up authored by "Kita Grip Sync". Alternatively, use an administrator's access token from Profile settings.
 
-4. Create the labels `ticket` and `not-a-ticket` (Settings → Labels) so agents can pick `not-a-ticket` from the sidebar.
+4. Create the labels `ticket`, `not-a-ticket` and `out-of-scope` (Settings → Labels) so agents can pick `not-a-ticket` from the sidebar and filter on `out-of-scope`.
 
 ### 3. Chatwoot: account webhook
 

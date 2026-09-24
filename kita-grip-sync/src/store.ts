@@ -21,6 +21,8 @@ export interface ConversationState {
   lastCustomerMessageId: number;
   classifiedUpto: number;
   dismissed: boolean;
+  /** Grip said the channel's account is out of scope: resolved + labelled once, never classified. Cleared when it comes back in scope. */
+  outOfScope?: boolean;
 }
 
 export interface TicketRow {
@@ -68,7 +70,8 @@ export class Store {
         status TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '[]',
         last_message_at TEXT, last_customer_message_at TEXT, last_speaker TEXT, preview TEXT,
         message_count INTEGER NOT NULL DEFAULT 0, last_customer_message_id INTEGER NOT NULL DEFAULT 0,
-        classified_upto INTEGER NOT NULL DEFAULT 0, dismissed INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+        classified_upto INTEGER NOT NULL DEFAULT 0, dismissed INTEGER NOT NULL DEFAULT 0, out_of_scope INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS messages_by_conv ON messages (conversation_id, id);
@@ -83,6 +86,9 @@ export class Store {
         run_at INTEGER NOT NULL, first_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
         version INTEGER NOT NULL DEFAULT 1, dead INTEGER NOT NULL DEFAULT 0, last_error TEXT);
     `);
+    // Databases created before the out-of-scope column existed.
+    const cols = (this.db.prepare('PRAGMA table_info(conversations)').all() as any[]).map((c) => c.name);
+    if (!cols.includes('out_of_scope')) this.db.exec('ALTER TABLE conversations ADD COLUMN out_of_scope INTEGER NOT NULL DEFAULT 0');
   }
 
   // ---- dedupe ----
@@ -103,15 +109,16 @@ export class Store {
       status: r.status, labels: JSON.parse(r.labels), lastMessageAt: r.last_message_at, lastCustomerMessageAt: r.last_customer_message_at,
       lastSpeaker: r.last_speaker, preview: r.preview, messageCount: Number(r.message_count),
       lastCustomerMessageId: Number(r.last_customer_message_id), classifiedUpto: Number(r.classified_upto), dismissed: !!r.dismissed,
+      outOfScope: !!r.out_of_scope,
     };
   }
 
   putConversation(c: ConversationState): void {
     this.db.prepare(`INSERT OR REPLACE INTO conversations (id, account_id, channel_key, platform, channel_label, status, labels,
-        last_message_at, last_customer_message_at, last_speaker, preview, message_count, last_customer_message_id, classified_upto, dismissed, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        last_message_at, last_customer_message_at, last_speaker, preview, message_count, last_customer_message_id, classified_upto, dismissed, out_of_scope, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(c.id, c.accountId, c.channelKey, c.platform, c.channelLabel, c.status, JSON.stringify(c.labels), c.lastMessageAt,
-        c.lastCustomerMessageAt, c.lastSpeaker, c.preview, c.messageCount, c.lastCustomerMessageId, c.classifiedUpto, c.dismissed ? 1 : 0, Date.now());
+        c.lastCustomerMessageAt, c.lastSpeaker, c.preview, c.messageCount, c.lastCustomerMessageId, c.classifiedUpto, c.dismissed ? 1 : 0, c.outOfScope ? 1 : 0, Date.now());
   }
 
   // ---- thread (recent public messages, for the classifier) ----
