@@ -1,0 +1,4 @@
+{"type":"event_callback","event_id":"Ev02REPLY","authorizations":[{"user_id":"UBOTKITA","is_bot":true}],
+ "event":{"type":"message","subtype":"file_share","channel":"C0SHARED1","user":"UCUST002","user_team":"TCUST0001",
+  "text":"screenshot attached","ts":"1790000050.000200","thread_ts":"1790000000.000100",
+  "files":[{"id":"F01","name":"error.png","mimetype":"image/png","url_private":"https://files.slack.com/files-pri/T-F01/error.png","url_private_download":"https://files.slack.com/files-pri/T-F01/download/error.png"}]}}

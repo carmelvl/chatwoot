@@ -1,0 +1,2 @@
+{"event":"message_created","id":9002,"content":"internal: customer is on legacy plan","message_type":"outgoing","private":true,
+ "sender":{"id":3,"name":"Carmel","type":"user"},"conversation":{"id":42},"inbox":{"id":7}}

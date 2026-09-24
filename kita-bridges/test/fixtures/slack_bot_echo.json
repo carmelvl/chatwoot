@@ -1,0 +1,2 @@
+{"type":"event_callback","event_id":"Ev03ECHO","authorizations":[{"user_id":"UBOTKITA","is_bot":true}],
+ "event":{"type":"message","channel":"C0SHARED1","user":"UBOTKITA","bot_id":"B0KITA","text":"Thanks, looking into it","ts":"1790000100.000300","thread_ts":"1790000000.000100"}}

@@ -1,0 +1,7 @@
+{"type":"message","id":"1790000000001","timestamp":"2026-09-24T10:00:00.000Z","channelId":"msteams",
+ "serviceUrl":"https://smba.trafficmanager.net/amer/",
+ "from":{"id":"29:1abcCUSTOMER","name":"Dana Reyes","aadObjectId":"aad-dana-0001"},
+ "conversation":{"id":"a:1personalCONV","conversationType":"personal","tenantId":"tenant-cust-01"},
+ "recipient":{"id":"28:kita-bot-app-id","name":"Kita Support"},
+ "textFormat":"plain","text":"Hello, I cannot log in","channelData":{"tenant":{"id":"tenant-cust-01"}},
+ "attachments":[{"contentType":"application/vnd.microsoft.teams.file.download.info","name":"log.txt","content":{"downloadUrl":"https://cust.sharepoint.com/download/log.txt","fileType":"txt"}}]}
