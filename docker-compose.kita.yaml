@@ -1,7 +1,7 @@
 # Kita support desk (support.internal.kita.ai). Secrets live in .env, never here.
 services:
   base: &base
-    image: chatwoot/chatwoot:latest
+    image: ghcr.io/carmelvl/kita-support:latest
     env_file: .env
     volumes:
       - storage_data:/app/storage
@@ -13,6 +13,7 @@ services:
       - NODE_ENV=production
       - RAILS_ENV=production
       - INSTALLATION_ENV=docker
+      - DISABLE_ENTERPRISE=true
     entrypoint: docker/entrypoints/rails.sh
     command: ['bundle', 'exec', 'rails', 's', '-p', '3000', '-b', '0.0.0.0']
     restart: unless-stopped
@@ -24,6 +25,7 @@ services:
       - NODE_ENV=production
       - RAILS_ENV=production
       - INSTALLATION_ENV=docker
+      - DISABLE_ENTERPRISE=true
     command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
     restart: unless-stopped
 

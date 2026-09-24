@@ -1,0 +1,17 @@
+// Kita brand type: Geist for text (variable, covers the UI's 400–700 range),
+// Satoshi for display. Satoshi is always Bold, so every weight maps to Bold.
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('shared/assets/fonts/Kita/Geist-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Satoshi';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('shared/assets/fonts/Kita/Satoshi-Bold.woff2') format('woff2');
+}

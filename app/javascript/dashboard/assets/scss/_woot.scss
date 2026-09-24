@@ -3,8 +3,7 @@
 @import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
 
-@import 'shared/assets/fonts/InterDisplay/inter-display';
-@import 'shared/assets/fonts/inter';
+@import 'shared/assets/fonts/Kita/kita';
 
 // Next Colors
 @import 'next-colors';
@@ -18,7 +17,7 @@
 html,
 body {
   font-family:
-    'Inter',
+    'Geist',
     -apple-system,
     system-ui,
     BlinkMacSystemFont,

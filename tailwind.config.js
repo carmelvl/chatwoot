@@ -41,8 +41,8 @@ const tailwindConfig = {
     extend: {
       fontFamily: {
         sans: defaultSansFonts,
-        inter: ['Inter', ...defaultSansFonts],
-        interDisplay: ['InterDisplay', ...defaultSansFonts],
+        inter: ['Geist', ...defaultSansFonts],
+        interDisplay: ['Satoshi', ...defaultSansFonts],
       },
       fontWeight: {
         420: '420',
