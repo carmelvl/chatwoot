@@ -47,14 +47,15 @@ export function parseViberEvent(payload: any, rawBody?: string): ViberParsed {
 
 const IMAGE_RE = /\.(jpe?g|png|gif)(\?|$)/i;
 
-export function buildViberMessages(replyRef: Record<string, unknown>, msg: OutboundMessage, sender: { name: string; avatar?: string }) {
+/** One Viber message per part: text first, then native picture/file messages (bridge media URLs, never Chatwoot's). */
+export function buildViberMessages(replyRef: Record<string, unknown>, msg: OutboundMessage, sender: { name: string; avatar?: string }, sizes?: Record<string, number>) {
   const base = { receiver: replyRef.receiver as string, min_api_version: 1, sender: { name: sender.name.slice(0, 28), ...(sender.avatar ? { avatar: sender.avatar } : {}) } };
   const out: Record<string, unknown>[] = [];
-  const pictures = msg.attachments.filter((a) => a.fileType === 'image' || IMAGE_RE.test(a.name));
-  const others = msg.attachments.filter((a) => !pictures.includes(a));
-  const text = [msg.text, ...others.map((a) => `${a.name}: ${a.url}`)].filter((s) => s && s.trim()).join('\n');
-  if (text) out.push({ ...base, type: 'text', text });
-  for (const p of pictures) out.push({ ...base, type: 'picture', text: '', media: p.url });
+  if (msg.text.trim()) out.push({ ...base, type: 'text', text: msg.text });
+  for (const a of msg.attachments) {
+    if (a.fileType === 'image' || IMAGE_RE.test(a.name)) out.push({ ...base, type: 'picture', text: '', media: a.url });
+    else out.push({ ...base, type: 'file', media: a.url, file_name: a.name.slice(0, 256), size: sizes?.[a.url] ?? 0 });
+  }
   return out;
 }
 
@@ -69,7 +70,14 @@ export class ViberSender implements Sender {
   }
 
   async send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<void> {
-    for (const body of buildViberMessages(replyRef, msg, this.who)) {
+    // Viber file messages require the byte size up front.
+    const sizes: Record<string, number> = {};
+    for (const a of msg.attachments) {
+      if (a.fileType === 'image' || IMAGE_RE.test(a.name)) continue;
+      const head = await this.fetchImpl(a.sourceUrl, { method: 'HEAD', redirect: 'follow' });
+      sizes[a.url] = Number(head.headers.get('content-length') ?? 0);
+    }
+    for (const body of buildViberMessages(replyRef, msg, this.who, sizes)) {
       const res = await this.fetchImpl('https://chatapi.viber.com/pa/send_message', {
         method: 'POST',
         headers: { 'X-Viber-Auth-Token': this.token, 'content-type': 'application/json' },

@@ -30,26 +30,19 @@ export function toOutbound(payload: any): OutboundDecision {
   if (payload?.event !== 'message_created') return { send: false, reason: `event:${payload?.event}` };
   if (payload.message_type !== 'outgoing') return { send: false, reason: `type:${payload.message_type}` };
   if (payload.private) return { send: false, reason: 'private_note' };
+  // CSAT surveys (outgoing input_csat) carry a Chatwoot survey link; interactive types render as Chatwoot UI.
+  if (payload.content_type && payload.content_type !== 'text') return { send: false, reason: `content_type:${payload.content_type}` };
   if (payload.content_attributes?.external_created_at || payload.content_attributes?.kita_bridge_origin)
     return { send: false, reason: 'external_echo' };
   const conversationId = Number(payload.conversation?.id ?? payload.conversation?.display_id);
   if (!conversationId) return { send: false, reason: 'no_conversation' };
   const attachments = (payload.attachments ?? [])
     .filter((a: any) => a?.data_url)
-    .map((a: any) => ({ url: a.data_url, name: a.file_name ?? a.data_url.split('/').pop()?.split('?')[0] ?? 'file', fileType: a.file_type }));
+    .map((a: any) => ({ url: a.data_url, sourceUrl: a.data_url, name: a.file_name ?? a.data_url.split('/').pop()?.split('?')[0] ?? 'file', fileType: a.file_type }));
   const text = typeof payload.content === 'string' ? payload.content : '';
+  if (/\/survey\/responses\//.test(text)) return { send: false, reason: 'survey_link' };
   if (!text.trim() && attachments.length === 0) return { send: false, reason: 'empty' };
-  const sender = payload.sender;
-  return {
-    send: true,
-    message: {
-      messageId: Number(payload.id),
-      conversationId,
-      text,
-      agentName: sender?.available_name ?? sender?.name,
-      attachments,
-    },
-  };
+  return { send: true, message: { messageId: Number(payload.id), conversationId, text, attachments } };
 }
 
 /** Thin client for Chatwoot's public (inbox-identifier) client API. No agent token required. */
@@ -72,9 +65,14 @@ export class ChatwootClient {
     return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
   }
 
-  /** Creates (or re-attaches, matched on identifier) a contact; returns the contact_inbox source_id. */
+  /**
+   * Creates (or re-attaches, matched on identifier) a contact; returns the contact_inbox source_id.
+   * Deliberately never sends email/phone: a contact without an email can never receive Chatwoot
+   * email notifications or conversation-continuity emails (SendEmailNotificationService).
+   */
   async createContact(inbox: string, contact: { identifier: string; name?: string; custom_attributes?: Record<string, string> }): Promise<string> {
-    const r = await this.call(`${inbox}/contacts`, this.json(contact));
+    const { identifier, name, custom_attributes } = contact;
+    const r = await this.call(`${inbox}/contacts`, this.json({ identifier, name, custom_attributes }));
     return r.source_id;
   }
 

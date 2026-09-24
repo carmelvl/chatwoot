@@ -15,6 +15,8 @@ export function loadConfig() {
   });
   return {
     port: Number(env('PORT', '8080')),
+    publicUrl: env('BRIDGE_PUBLIC_URL', 'https://support.internal.kita.ai/bridges').replace(/\/$/, ''),
+    mediaTtlMs: Number(env('MEDIA_TTL_DAYS', '90')) * 24 * 3600 * 1000,
     dbPath: env('BRIDGE_DB_PATH', './data/bridges.sqlite'),
     chatwootBaseUrl: env('CHATWOOT_BASE_URL', 'http://rails:3000').replace(/\/$/, ''),
     inboxes: { slack: inbox('slack'), teams: inbox('teams'), viber: inbox('viber') } as Record<Platform, PlatformInbox>,
@@ -23,6 +25,8 @@ export function loadConfig() {
       botToken: env('SLACK_BOT_TOKEN'),
       internalTeamIds: list('SLACK_INTERNAL_TEAM_IDS'),
       allowedChannels: list('SLACK_ALLOWED_CHANNELS'),
+      botName: env('SLACK_BOT_NAME', 'Kita'),
+      botIconUrl: env('SLACK_BOT_ICON_URL'),
     },
     teams: {
       appId: env('TEAMS_APP_ID'),
@@ -31,7 +35,7 @@ export function loadConfig() {
     },
     viber: {
       authToken: env('VIBER_AUTH_TOKEN'),
-      botName: env('VIBER_BOT_NAME', 'Kita Support'),
+      botName: env('VIBER_BOT_NAME', 'Kita'),
       botAvatar: env('VIBER_BOT_AVATAR'),
     },
   };

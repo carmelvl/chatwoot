@@ -1,13 +1,16 @@
+import { randomBytes } from 'node:crypto';
 import { ChatwootClient, downloadAttachments, toOutbound } from './chatwoot.ts';
 import { log } from './log.ts';
 import type { Store } from './store.ts';
-import type { InboundMessage, Platform, Sender } from './types.ts';
+import type { InboundMessage, OutboundAttachment, Platform, Sender } from './types.ts';
 
 export interface BridgeDeps {
   store: Store;
   chatwoot: ChatwootClient;
   inboxes: Record<Platform, { inboxIdentifier: string }>;
   senders: Partial<Record<Platform, Sender>>;
+  /** Public base URL of the bridge, used for customer-facing /media links. */
+  publicUrl: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -65,17 +68,27 @@ export class Bridge {
     }
   }
 
+  /**
+   * Customers must never see Chatwoot URLs: each attachment gets an unguessable bridge URL
+   * (<public>/media/<token>/<name>) that streams the bytes from Chatwoot storage.
+   */
+  private proxied(a: OutboundAttachment): OutboundAttachment {
+    const token = randomBytes(24).toString('base64url');
+    this.d.store.putMedia(token, a.sourceUrl, a.name);
+    return { ...a, url: `${this.d.publicUrl.replace(/\/$/, '')}/media/${token}/${encodeURIComponent(a.name)}` };
+  }
+
   /** Chatwoot webhook -> platform. Returns why it was skipped, or 'sent'. Idempotent on message id. */
   async outbound(platform: Platform, payload: unknown): Promise<string> {
     const decision = toOutbound(payload);
     if (!decision.send) return `skip:${decision.reason}`;
-    const msg = decision.message;
-    const conv = this.d.store.getByConversation(platform, msg.conversationId);
+    const conv = this.d.store.getByConversation(platform, decision.message.conversationId);
     if (!conv) return 'skip:unmapped_conversation';
     const sender = this.d.senders[platform];
     if (!sender) return 'skip:platform_disabled';
-    const seenKey = `out:${platform}:${msg.messageId}`;
+    const seenKey = `out:${platform}:${decision.message.messageId}`;
     if (!this.d.store.markSeen(seenKey)) return 'skip:duplicate';
+    const msg = { ...decision.message, attachments: decision.message.attachments.map((a) => this.proxied(a)) };
     try {
       await sender.send(conv.replyRef, msg);
     } catch (e) {
@@ -92,10 +105,4 @@ export function composeInboundText(text: string, speaker: string | undefined, fa
   if (speaker) out = `**${speaker}:** ${out}`;
   if (failedUrls.length) out += `${out ? '\n\n' : ''}Attachments (not copied):\n${failedUrls.map((u) => `- ${u}`).join('\n')}`;
   return out;
-}
-
-/** Plain-text rendering of an agent reply for channels that take attachments as links. */
-export function outboundTextWithLinks(msg: { text: string; attachments: { url: string; name: string }[] }): string {
-  const links = msg.attachments.map((a) => `${a.name}: ${a.url}`);
-  return [msg.text, ...links].filter((s) => s && s.trim()).join('\n');
 }

@@ -30,6 +30,7 @@ export class Store {
         PRIMARY KEY (platform, thread_key));
       CREATE INDEX IF NOT EXISTS conversations_by_cw ON conversations (platform, conversation_id);
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS media (token TEXT PRIMARY KEY, source_url TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL);
     `);
   }
 
@@ -76,6 +77,19 @@ export class Store {
 
   pruneSeen(olderThanMs = 7 * 24 * 3600 * 1000): void {
     this.db.prepare('DELETE FROM seen WHERE at < ?').run(Date.now() - olderThanMs);
+  }
+
+  putMedia(token: string, sourceUrl: string, name: string): void {
+    this.db.prepare('INSERT INTO media (token, source_url, name, at) VALUES (?, ?, ?, ?)').run(token, sourceUrl, name, Date.now());
+  }
+
+  getMedia(token: string, maxAgeMs: number): { sourceUrl: string; name: string } | undefined {
+    const r = this.db.prepare('SELECT source_url, name FROM media WHERE token = ? AND at >= ?').get(token, Date.now() - maxAgeMs) as any;
+    return r ? { sourceUrl: r.source_url, name: r.name } : undefined;
+  }
+
+  pruneMedia(maxAgeMs: number): void {
+    this.db.prepare('DELETE FROM media WHERE at < ?').run(Date.now() - maxAgeMs);
   }
 
   close(): void {

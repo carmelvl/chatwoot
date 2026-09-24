@@ -1,0 +1,32 @@
+# Slack app manifest for the Kita support bridge.
+# api.slack.com/apps > Create New App > From an app manifest > paste this.
+display_information:
+  name: Kita
+  description: Talk to the Kita team from your shared Slack channel.
+features:
+  bot_user:
+    display_name: Kita
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:history     # message events in public / Slack Connect channels
+      - groups:history       # message events in private shared channels
+      - im:history
+      - mpim:history
+      - chat:write           # post agent replies into the thread
+      - chat:write.customize # post as "Kita" with the Kita icon
+      - files:read           # copy customer attachments into the desk
+      - files:write          # send agent attachments as native Slack files
+      - users:read           # customer display names
+settings:
+  event_subscriptions:
+    request_url: https://support.internal.kita.ai/bridges/slack/events
+    bot_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

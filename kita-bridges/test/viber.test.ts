@@ -43,15 +43,16 @@ test('viber non-message events are acked and ignored', () => {
   assert.deepEqual(parseViberEvent({ event: 'conversation_started', user: { id: 'x' } }), { kind: 'ignore', reason: 'event:conversation_started' });
 });
 
-test('viber outbound transform: text (+file links) then one picture message per image', () => {
+test('viber outbound transform: text, then native picture and file messages as the Kita bot', () => {
   const msgs = buildViberMessages({ receiver: 'U1' }, {
     messageId: 1, conversationId: 1, text: 'Done', attachments: [
-      { url: 'https://x/steps.png', name: 'steps.png', fileType: 'image' },
-      { url: 'https://x/guide.pdf', name: 'guide.pdf', fileType: 'file' },
+      { url: 'https://b/media/t1/steps.png', sourceUrl: 'https://cw/steps.png', name: 'steps.png', fileType: 'image' },
+      { url: 'https://b/media/t2/guide.pdf', sourceUrl: 'https://cw/guide.pdf', name: 'guide.pdf', fileType: 'file' },
     ],
-  }, { name: 'Kita Support Philippines Team Extra Long' });
-  assert.equal(msgs.length, 2);
-  assert.deepEqual(msgs[0], { receiver: 'U1', min_api_version: 1, sender: { name: 'Kita Support Philippines Tea' }, type: 'text', text: 'Done\nguide.pdf: https://x/guide.pdf' });
-  assert.equal(msgs[1].type, 'picture');
-  assert.equal(msgs[1].media, 'https://x/steps.png');
+  }, { name: 'Kita' }, { 'https://b/media/t2/guide.pdf': 1234 });
+  assert.equal(msgs.length, 3);
+  assert.deepEqual(msgs[0], { receiver: 'U1', min_api_version: 1, sender: { name: 'Kita' }, type: 'text', text: 'Done' });
+  assert.deepEqual([msgs[1].type, msgs[1].media], ['picture', 'https://b/media/t1/steps.png']);
+  assert.deepEqual([msgs[2].type, msgs[2].media, msgs[2].file_name, msgs[2].size], ['file', 'https://b/media/t2/guide.pdf', 'guide.pdf', 1234]);
+  assert.equal(buildViberMessages({ receiver: 'U1' }, { messageId: 1, conversationId: 1, text: 'x', attachments: [] }, { name: 'A very long sender name over 28 chars' })[0].sender.name.length, 28);
 });

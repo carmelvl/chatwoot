@@ -4,6 +4,7 @@ import { ChatwootClient } from '../src/chatwoot.ts';
 import { Store } from '../src/store.ts';
 import type { OutboundMessage, Platform, Sender } from '../src/types.ts';
 
+export const PUBLIC_URL = 'https://support.internal.kita.ai/bridges';
 export const raw = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 export const fixture = (name: string) => JSON.parse(raw(name));
 
@@ -46,6 +47,6 @@ export function makeBridge() {
   const store = new Store(':memory:');
   const senders = { slack: new RecordingSender(), teams: new RecordingSender(), viber: new RecordingSender() };
   const inboxes = { slack: { inboxIdentifier: 'IN_SLACK' }, teams: { inboxIdentifier: 'IN_TEAMS' }, viber: { inboxIdentifier: 'IN_VIBER' } } as Record<Platform, { inboxIdentifier: string }>;
-  const bridge = new Bridge({ store, chatwoot: cw.client, inboxes, senders, fetchImpl: cw.fetchImpl });
+  const bridge = new Bridge({ store, chatwoot: cw.client, inboxes, senders, publicUrl: PUBLIC_URL, fetchImpl: cw.fetchImpl });
   return { bridge, store, cw, senders };
 }

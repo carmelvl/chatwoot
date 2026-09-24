@@ -26,13 +26,21 @@ export interface InboundMessage {
   conversationAttributes?: Record<string, string>;
 }
 
-/** An agent reply normalised from Chatwoot's message_created webhook. */
+export interface OutboundAttachment {
+  /** Customer-facing URL (the bridge's own /media proxy; never a Chatwoot URL). */
+  url: string;
+  /** Where the bridge itself fetches the bytes from (Chatwoot storage). Never shown to customers. */
+  sourceUrl: string;
+  name: string;
+  fileType?: string;
+}
+
+/** An agent reply normalised from Chatwoot's message_created webhook. Always sent as the "Kita" bot. */
 export interface OutboundMessage {
   messageId: number;
   conversationId: number;
   text: string;
-  agentName?: string;
-  attachments: { url: string; name: string; fileType?: string }[];
+  attachments: OutboundAttachment[];
 }
 
 export interface Sender {

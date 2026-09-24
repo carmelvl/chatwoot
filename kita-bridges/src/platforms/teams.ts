@@ -140,6 +140,7 @@ export function authorizeTeamsAttachments(msg: InboundMessage, token: string): I
 
 const IMAGE_RE = /\.(jpe?g|png|gif)(\?|$)/i;
 
+/** Sent as the "Kita" bot (name/icon come from the Azure Bot + Teams manifest). Media URLs are the bridge's. */
 export function buildTeamsActivity(replyRef: Record<string, unknown>, msg: OutboundMessage) {
   const images = msg.attachments.filter((x) => x.fileType === 'image' || IMAGE_RE.test(x.name));
   const others = msg.attachments.filter((x) => !images.includes(x));

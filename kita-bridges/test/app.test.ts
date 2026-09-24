@@ -14,8 +14,12 @@ cfg.slack.internalTeamIds = ['TKITA0001'];
 cfg.viber.authToken = 'viber-tok';
 cfg.teams.appId = 'kita-bot-app-id';
 cfg.inboxes.viber.webhookSecret = 'cw-viber';
-const { bridge, senders } = makeBridge();
-const server = createServer(createHandler({ cfg, bridge, enabled: ['slack', 'teams', 'viber'], jwks: async () => undefined }));
+const { bridge, senders, store } = makeBridge();
+const upstream = (async (url: any, init: any = {}) => {
+  assert.equal(String(url), 'https://support.internal.kita.ai/rails/active_storage/blobs/redirect/abc/steps.png');
+  return new Response(init.method === 'HEAD' ? null : new Uint8Array([137, 80, 78, 71]), { headers: { 'content-type': 'image/png', 'content-length': '4', server: 'chatwoot-rails' } });
+}) as typeof fetch;
+const server = createServer(createHandler({ cfg, store, fetchImpl: upstream, bridge, enabled: ['slack', 'teams', 'viber'], jwks: async () => undefined }));
 await new Promise<void>((r) => server.listen(0, r));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/bridges`;
 after(() => server.close());
@@ -51,6 +55,18 @@ test('http: chatwoot webhook requires the inbox signature; unmapped conversation
   assert.equal(res.status, 200);
   assert.equal((await res.json()).result, 'skip:unmapped_conversation');
   assert.equal(senders.viber.sent.length, 0);
+});
+
+test('http: media proxy serves agent attachments under the bridge URL without upstream headers; bad tokens 404', async () => {
+  const token = 'A'.repeat(32);
+  store.putMedia(token, 'https://support.internal.kita.ai/rails/active_storage/blobs/redirect/abc/steps.png', 'steps.png');
+  const res = await fetch(`${base}/media/${token}/steps.png`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  assert.equal(res.headers.get('server'), null);
+  assert.deepEqual([...new Uint8Array(await res.arrayBuffer())], [137, 80, 78, 71]);
+  assert.equal((await fetch(`${base}/media/${'B'.repeat(32)}/steps.png`)).status, 404);
+  assert.equal((await fetch(`${base}/media/short/steps.png`)).status, 404);
 });
 
 test('http: healthz and unknown routes', async () => {

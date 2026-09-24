@@ -13,15 +13,18 @@ import type { Platform, Sender } from './types.ts';
 const cfg = loadConfig();
 const enabled = enabledPlatforms(cfg);
 const store = new Store(cfg.dbPath);
-const slack = enabled.includes('slack') ? new SlackSender(cfg.slack.botToken) : undefined;
+const slack = enabled.includes('slack') ? new SlackSender(cfg.slack.botToken, { name: cfg.slack.botName, iconUrl: cfg.slack.botIconUrl || undefined }) : undefined;
 const teams = enabled.includes('teams') ? new TeamsSender(cfg.teams) : undefined;
 const viber = enabled.includes('viber') ? new ViberSender(cfg.viber.authToken, { name: cfg.viber.botName, avatar: cfg.viber.botAvatar || undefined }) : undefined;
 const senders: Partial<Record<Platform, Sender>> = { slack, teams, viber };
 
-const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders });
-const server = createServer(createHandler({ cfg, bridge, enabled, slack, teams, jwks: botFrameworkJwks() }));
+const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl });
+const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, jwks: botFrameworkJwks() }));
 
-setInterval(() => store.pruneSeen(), 6 * 3600 * 1000).unref();
+setInterval(() => {
+  store.pruneSeen();
+  store.pruneMedia(cfg.mediaTtlMs);
+}, 6 * 3600 * 1000).unref();
 server.listen(cfg.port, () => log.info('listening', { port: cfg.port, platforms: enabled }));
 for (const sig of ['SIGTERM', 'SIGINT'] as const)
   process.on(sig, () => server.close(() => { store.close(); process.exit(0); }));

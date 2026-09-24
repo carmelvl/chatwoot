@@ -1,5 +1,4 @@
 import { hmacHex, safeEqual } from '../crypto.ts';
-import { outboundTextWithLinks } from '../bridge.ts';
 import type { InboundMessage, OutboundMessage, Sender } from '../types.ts';
 
 const MAX_SKEW_S = 300;
@@ -94,22 +93,31 @@ export function markdownToSlack(text: string): string {
     .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<$2|$1>');
 }
 
-export function buildSlackPost(replyRef: Record<string, unknown>, msg: OutboundMessage) {
+export interface SlackIdentity {
+  name: string;
+  iconUrl?: string;
+}
+
+/** Text part of an agent reply. Always posted as the "Kita" bot identity; files are uploaded natively. */
+export function buildSlackPost(replyRef: Record<string, unknown>, msg: OutboundMessage, who: SlackIdentity = { name: 'Kita' }) {
   return {
     channel: replyRef.channel as string,
     thread_ts: replyRef.threadTs as string,
-    text: markdownToSlack(outboundTextWithLinks(msg)),
-    // Needs chat:write.customize; shows the agent's name instead of the app name.
-    ...(msg.agentName ? { username: `${msg.agentName} (Kita)` } : {}),
+    text: markdownToSlack(msg.text),
+    username: who.name, // chat:write.customize
+    ...(who.iconUrl ? { icon_url: who.iconUrl } : {}),
     unfurl_links: false,
+    unfurl_media: false,
   };
 }
 
 export class SlackSender implements Sender {
   private token: string;
+  private who: SlackIdentity;
   private fetchImpl: typeof fetch;
-  constructor(token: string, fetchImpl: typeof fetch = fetch) {
+  constructor(token: string, who: SlackIdentity = { name: 'Kita' }, fetchImpl: typeof fetch = fetch) {
     this.token = token;
+    this.who = who;
     this.fetchImpl = fetchImpl;
   }
 
@@ -125,7 +133,26 @@ export class SlackSender implements Sender {
   }
 
   async send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<void> {
-    await this.api('chat.postMessage', buildSlackPost(replyRef, msg));
+    if (msg.text.trim()) await this.api('chat.postMessage', buildSlackPost(replyRef, msg, this.who));
+    for (const a of msg.attachments) await this.upload(replyRef, a);
+  }
+
+  /** Native Slack file in the thread (files:write): getUploadURLExternal -> POST bytes -> completeUploadExternal. */
+  private async upload(replyRef: Record<string, unknown>, a: OutboundMessage['attachments'][number]): Promise<void> {
+    const src = await this.fetchImpl(a.sourceUrl, { redirect: 'follow' });
+    if (!src.ok) throw new Error(`attachment fetch ${src.status}`);
+    const bytes = new Uint8Array(await src.arrayBuffer());
+    const q = new URLSearchParams({ filename: a.name, length: String(bytes.byteLength) });
+    const res = await this.fetchImpl(`https://slack.com/api/files.getUploadURLExternal?${q}`, { headers: { authorization: `Bearer ${this.token}` } });
+    const up: any = await res.json();
+    if (!up.ok) throw new Error(`slack files.getUploadURLExternal: ${up.error}`);
+    const put = await this.fetchImpl(up.upload_url, { method: 'POST', body: bytes });
+    if (!put.ok) throw new Error(`slack upload ${put.status}`);
+    await this.api('files.completeUploadExternal', {
+      files: [{ id: up.file_id, title: a.name }],
+      channel_id: replyRef.channel,
+      thread_ts: replyRef.threadTs,
+    });
   }
 
   private names = new Map<string, string>();

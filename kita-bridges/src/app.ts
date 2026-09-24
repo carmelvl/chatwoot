@@ -6,12 +6,15 @@ import { log } from './log.ts';
 import { parseSlackEvent, verifySlackSignature, type SlackSender } from './platforms/slack.ts';
 import { authorizeTeamsAttachments, parseTeamsActivity, verifyTeamsJwt, type JwksProvider, type TeamsSender } from './platforms/teams.ts';
 import { parseViberEvent, verifyViberSignature } from './platforms/viber.ts';
+import type { Store } from './store.ts';
 import type { Platform } from './types.ts';
 
 const MAX_BODY = 5 * 1024 * 1024;
 
 export interface AppDeps {
   cfg: Config;
+  store: Store;
+  fetchImpl?: typeof fetch;
   bridge: Bridge;
   enabled: Platform[];
   slack?: SlackSender;
@@ -44,6 +47,28 @@ const h = (req: IncomingMessage, k: string) => {
 /** Run work after acking; platform retries + idempotency keys cover failures. */
 const background = (what: string, p: Promise<unknown>) => p.catch((e) => log.error(`${what}_failed`, { error: String(e?.message ?? e) }));
 
+/**
+ * Streams an agent attachment to Viber/Teams/customers under the bridge's own URL, so no Chatwoot
+ * URL or branding is ever exposed. Tokens are 192-bit random and only minted for verified webhooks.
+ */
+async function serveMedia(d: AppDeps, token: string, method: string, res: ServerResponse) {
+  const m = d.store.getMedia(token, d.cfg.mediaTtlMs);
+  if (!m) return send(res, 404);
+  const up = await (d.fetchImpl ?? fetch)(m.sourceUrl, { method, redirect: 'follow' });
+  if (!up.ok) return send(res, 502);
+  const headers: Record<string, string> = {
+    'content-type': up.headers.get('content-type') ?? 'application/octet-stream',
+    'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(m.name)}`,
+    'cache-control': 'private, max-age=86400',
+    'x-content-type-options': 'nosniff',
+  };
+  const len = up.headers.get('content-length');
+  if (len) headers['content-length'] = len;
+  res.writeHead(200, headers);
+  if (method === 'HEAD' || !up.body) return res.end();
+  res.end(Buffer.from(await up.arrayBuffer()));
+}
+
 export function createHandler(d: AppDeps) {
   const { cfg, bridge } = d;
 
@@ -53,6 +78,8 @@ export function createHandler(d: AppDeps) {
     const path = url.pathname.replace(/^\/bridges(?=\/)/, '');
     try {
       if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true, platforms: d.enabled });
+      const media = path.match(/^\/media\/([A-Za-z0-9_-]{32})\/[^/]+$/);
+      if ((req.method === 'GET' || req.method === 'HEAD') && media) return serveMedia(d, media[1], req.method, res);
       if (req.method !== 'POST') return send(res, 404);
       const raw = await readBody(req);
 

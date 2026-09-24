@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { hmacHex } from '../src/crypto.ts';
-import { buildSlackPost, markdownToSlack, parseSlackEvent, slackToMarkdown, verifySlackSignature } from '../src/platforms/slack.ts';
+import { buildSlackPost, markdownToSlack, parseSlackEvent, SlackSender, slackToMarkdown, verifySlackSignature } from '../src/platforms/slack.ts';
 import { fixture, raw } from './helpers.ts';
 
 const opts = { botToken: 'xoxb-test', internalTeamIds: ['TKITA0001'], allowedChannels: [] as string[] };
@@ -63,15 +63,43 @@ test('slack channel allow-list', () => {
   assert.deepEqual(parseSlackEvent(fixture('slack_top_level.json'), { ...opts, allowedChannels: ['COTHER'] }), { kind: 'ignore', reason: 'channel_not_allowed' });
 });
 
-test('slack outbound transform: thread reply, mrkdwn, agent name, attachment links', () => {
+test('slack outbound transform: thread reply as the Kita bot, mrkdwn, no attachment links in text', () => {
   const post = buildSlackPost({ channel: 'C0SHARED1', threadTs: '1790000000.000100' }, {
-    messageId: 1, conversationId: 42, text: 'We **fixed** it, see [docs](https://kita.ai/d)', agentName: 'Carmel',
-    attachments: [{ url: 'https://support.internal.kita.ai/f/a.pdf', name: 'a.pdf' }],
-  });
+    messageId: 1, conversationId: 42, text: 'We **fixed** it, see [docs](https://kita.ai/d)',
+    attachments: [{ url: 'https://support.internal.kita.ai/bridges/media/t/a.pdf', sourceUrl: 'https://cw/a.pdf', name: 'a.pdf' }],
+  }, { name: 'Kita', iconUrl: 'https://kita.ai/icon.png' });
   assert.equal(post.channel, 'C0SHARED1');
   assert.equal(post.thread_ts, '1790000000.000100');
-  assert.equal(post.username, 'Carmel (Kita)');
-  assert.equal(post.text, 'We *fixed* it, see <https://kita.ai/d|docs>\na.pdf: https://support.internal.kita.ai/f/a.pdf');
+  assert.equal(post.username, 'Kita');
+  assert.equal(post.icon_url, 'https://kita.ai/icon.png');
+  assert.equal(post.text, 'We *fixed* it, see <https://kita.ai/d|docs>');
+});
+
+test('slack sender: text then native file upload into the same thread (files v2)', async () => {
+  const calls: string[] = [];
+  const bodies: Record<string, any> = {};
+  const f = (async (url: any, init: any = {}) => {
+    const u = String(url);
+    calls.push(`${init.method ?? 'GET'} ${u.split('?')[0]}`);
+    if (u.startsWith('https://cw/')) return new Response(new Uint8Array(5));
+    if (u.includes('getUploadURLExternal')) { assert.match(u, /filename=guide\.pdf&length=5/); return Response.json({ ok: true, upload_url: 'https://files.slack.com/upload/v1/x', file_id: 'F9' }); }
+    if (u.startsWith('https://files.slack.com/upload')) return new Response('OK');
+    bodies[u.split('/').pop()!] = JSON.parse(init.body);
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  await new SlackSender('xoxb', { name: 'Kita' }, f).send({ channel: 'C1', threadTs: '1.2' }, {
+    messageId: 1, conversationId: 1, text: 'Here you go',
+    attachments: [{ url: 'https://support.internal.kita.ai/bridges/media/t/guide.pdf', sourceUrl: 'https://cw/guide.pdf', name: 'guide.pdf' }],
+  });
+  assert.deepEqual(calls, [
+    'POST https://slack.com/api/chat.postMessage',
+    'GET https://cw/guide.pdf',
+    'GET https://slack.com/api/files.getUploadURLExternal',
+    'POST https://files.slack.com/upload/v1/x',
+    'POST https://slack.com/api/files.completeUploadExternal',
+  ]);
+  assert.deepEqual(bodies['files.completeUploadExternal'], { files: [{ id: 'F9', title: 'guide.pdf' }], channel_id: 'C1', thread_ts: '1.2' });
+  assert.equal(bodies['chat.postMessage'].username, 'Kita');
 });
 
 test('slack mrkdwn round trip helpers', () => {

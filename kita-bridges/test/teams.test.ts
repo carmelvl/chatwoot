@@ -69,7 +69,7 @@ test('teams: non-message activities and bot echoes are ignored', () => {
 test('teams outbound transform: markdown text, file links, image attachments', () => {
   const a = buildTeamsActivity({ botId: '28:kita-bot-app-id' }, {
     messageId: 1, conversationId: 1, text: 'Fixed',
-    attachments: [{ url: 'https://x/s.png', name: 's.png', fileType: 'image' }, { url: 'https://x/g.pdf', name: 'g.pdf' }],
+    attachments: [{ url: 'https://x/s.png', sourceUrl: 'https://cw/s.png', name: 's.png', fileType: 'image' }, { url: 'https://x/g.pdf', sourceUrl: 'https://cw/g.pdf', name: 'g.pdf' }],
   });
   assert.equal(a.textFormat, 'markdown');
   assert.equal(a.text, 'Fixed\n\n[g.pdf](https://x/g.pdf)');

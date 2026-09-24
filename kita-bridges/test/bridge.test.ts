@@ -5,7 +5,7 @@ import { parseSlackEvent } from '../src/platforms/slack.ts';
 import { parseTeamsActivity } from '../src/platforms/teams.ts';
 import { parseViberEvent } from '../src/platforms/viber.ts';
 import { Store } from '../src/store.ts';
-import { fixture, makeBridge } from './helpers.ts';
+import { fixture, makeBridge, PUBLIC_URL } from './helpers.ts';
 
 const slackOpts = { botToken: 'xoxb', internalTeamIds: ['TKITA0001'], allowedChannels: [] as string[] };
 const slackMsg = (name: string) => {
@@ -75,6 +75,14 @@ test('end to end: viber in, agent reply out to same user; private note and echo 
   const reply = { ...fixture('chatwoot_outgoing.json'), conversation: { id: 100 } };
   assert.equal(await bridge.outbound('viber', reply), 'sent');
   assert.deepEqual(senders.viber.sent[0].ref, { receiver: '01234567890A=' });
+  // customer-facing attachment URLs are the bridge's media proxy, never Chatwoot's
+  const out = senders.viber.sent[0].msg;
+  for (const a of out.attachments) {
+    assert.ok(a.url.startsWith(`${PUBLIC_URL}/media/`), a.url);
+    assert.doesNotMatch(a.url, /rails|active_storage/);
+  }
+  assert.doesNotMatch(JSON.stringify({ text: out.text, urls: out.attachments.map((a) => a.url) }), /chatwoot|active_storage|survey/i);
+  assert.equal(await bridge.outbound('viber', { ...fixture('chatwoot_csat.json'), conversation: { id: 100 } }), 'skip:content_type:input_csat');
   assert.equal(await bridge.outbound('viber', reply), 'skip:duplicate'); // Chatwoot webhook retry
   assert.equal(await bridge.outbound('viber', { ...fixture('chatwoot_private_note.json'), conversation: { id: 100 } }), 'skip:private_note');
   assert.equal(await bridge.outbound('viber', { ...fixture('chatwoot_incoming_echo.json'), conversation: { id: 100 } }), 'skip:type:incoming');
