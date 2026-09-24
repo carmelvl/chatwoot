@@ -141,7 +141,7 @@ test('parseResource handles channel roots, channel replies and chats', () => {
   assert.equal(parseResource('users/abc'), undefined);
 });
 
-test('loop prevention: the Kita user, Kita staff and apps are never ingested; guests and other tenants are customers', async () => {
+test('classification: Kita user and apps ignored; Kita staff -> staff messages; guests and other tenants are customers', async () => {
   const lookups: string[] = [];
   const { graph } = fakeGraph({
     'GET /users/guest-lee': () => (lookups.push('guest-lee'), { id: 'guest-lee', userType: 'Guest' }),
@@ -156,8 +156,10 @@ test('loop prevention: the Kita user, Kita staff and apps are never ingested; gu
   assert.equal(await c.classify({ user: { id: 'ext-no-tenant' } }), 'customer'); // 404 in Kita's directory
   assert.equal(await c.classify({ application: { id: 'some-bot' } }), 'not_a_user');
   assert.deepEqual(lookups, ['guest-lee', 'staff-sam']); // cached
-  for (const kind of ['self', 'internal', 'not_a_user'] as const)
+  for (const kind of ['self', 'not_a_user'] as const)
     assert.deepEqual(parseGraphMessage(fixture('graph_chat_message_from_kita.json'), { kind: 'chat', chatId: 'c', messageId: '1' }, kind), { kind: 'ignore', reason: kind });
+  const staff = parseGraphMessage(fixture('graph_chat_message_from_kita.json'), { kind: 'chat', chatId: 'c', messageId: '1' }, 'internal');
+  assert.equal(staff.kind === 'message' && staff.message.author, 'staff');
   assert.deepEqual(parseGraphMessage(fixture('graph_system_event.json'), { kind: 'chat', chatId: 'c', messageId: '1' }, 'customer'), { kind: 'ignore', reason: 'type:systemEventMessage' });
 });
 
@@ -235,8 +237,8 @@ test('sender: plain HTML reply into the channel thread as the Kita user; returns
   const { calls, graph } = fakeGraph({
     'POST /teams/T/channels/19:c@thread.tacv2/messages/1/replies': () => ({ id: '555' }),
   });
-  const echoes = await new TeamsSender(graph, 'auto', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: '19:c@thread.tacv2', rootId: '1' }, reply);
-  assert.deepEqual(echoes, ['19:c@thread.tacv2:555']);
+  const r = await new TeamsSender(graph, 'auto', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: '19:c@thread.tacv2', rootId: '1' }, reply);
+  assert.deepEqual(r, { echoes: ['19:c@thread.tacv2:555'] });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].body.hostedContents[0].contentBytes, Buffer.from([1, 2, 3]).toString('base64'));
 });
@@ -244,7 +246,7 @@ test('sender: plain HTML reply into the channel thread as the Kita user; returns
 test('sender: Adaptive Card fallback only when a channel rejects the HTML post; never for chats or auth errors', async () => {
   let attempt = 0;
   const ch = fakeGraph({ 'POST /teams/T/channels/C/messages/1/replies': (b) => (++attempt === 1 ? graphErr(403, 'Forbidden') : (assert.ok(b.attachments), { id: '9' })) });
-  assert.deepEqual(await new TeamsSender(ch.graph, 'auto', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply), ['C:9']);
+  assert.deepEqual(await new TeamsSender(ch.graph, 'auto', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply), { echoes: ['C:9'] });
   assert.equal(ch.calls[1].body.attachments[0].contentType, 'application/vnd.microsoft.card.adaptive');
 
   const chat = fakeGraph({ 'POST /chats/X/messages': () => graphErr(403, 'Forbidden') });
@@ -273,7 +275,7 @@ test('connect flow: only the Kita user is accepted; refresh token is stored encr
       assert.equal(p.get('scope'), TEAMS_SCOPES.join(' '));
       return Response.json({ access_token: `AT${rt}`, refresh_token: `RT-${++rt}`, expires_in: 1 });
     }
-    if (u.endsWith('/me?$select=id,userPrincipalName')) return Response.json({ id: 'kita-user-id', userPrincipalName: who });
+    if (u.endsWith('/me?$select=id,userPrincipalName,mail')) return Response.json({ id: 'kita-user-id', userPrincipalName: who });
     return new Response('?', { status: 500 });
   }) as typeof fetch;
   const auth = new GraphAuth({ tenantId: 'kita-tenant', clientId: 'cid', clientSecret: 'sec', redirectUri: 'https://b/teams/connect/callback', kitaUserUpn: 'Kita@kita.ai', encryptionKey: 'k'.repeat(32) }, store, f);

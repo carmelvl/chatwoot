@@ -1,5 +1,5 @@
 import { log } from '../../log.ts';
-import type { InboundAttachment, InboundMessage, OutboundMessage, Sender } from '../../types.ts';
+import { withNamePrefix, type InboundAttachment, type InboundMessage, type OutboundMessage, type Sender, type SendResult } from '../../types.ts';
 import { GraphError, type Graph } from './graph.ts';
 
 // ---------- change notifications ----------
@@ -61,8 +61,8 @@ export const teamsEventId = (container: string, messageId: string) => `${contain
 export type SenderKind = 'self' | 'internal' | 'customer' | 'not_a_user';
 
 /**
- * Kita user -> self; members of Kita's tenant -> internal (staff, never ingested);
- * guests in Kita's tenant and users of other tenants (Teams Connect) -> customer.
+ * Kita user -> self (ignored); members of Kita's tenant -> internal (staff: synced as outgoing agent
+ * messages, never as customer messages); guests in Kita's tenant and users of other tenants -> customer.
  */
 export class SenderClassifier {
   private graph: Graph;
@@ -119,12 +119,14 @@ export type ParsedTeams = { kind: 'ignore'; reason: string } | { kind: 'message'
 
 /**
  * Mapping: a channel thread (root message id) is one conversation; a chat is one conversation
- * that re-opens as a new one after the previous was resolved.
+ * that re-opens as a new one after the previous was resolved. Staff messages come back with
+ * author 'staff' (messages the bridge posted itself are dropped earlier via their tracked ids).
  */
 export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKind): ParsedTeams {
   if (m?.messageType !== 'message') return { kind: 'ignore', reason: `type:${m?.messageType}` };
   if (m.deletedDateTime) return { kind: 'ignore', reason: 'deleted' };
-  if (sender !== 'customer') return { kind: 'ignore', reason: sender };
+  if (sender === 'self' || sender === 'not_a_user') return { kind: 'ignore', reason: sender };
+  const author = sender === 'internal' ? 'staff' : 'customer';
   const user = m.from.user;
   const html = m.body?.contentType === 'html';
   const text = html ? htmlToText(m.body.content ?? '') : String(m.body?.content ?? '').trim();
@@ -142,7 +144,7 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
   }
   if (!text && attachments.length === 0) return { kind: 'ignore', reason: 'empty' };
 
-  const base = { platform: 'teams' as const, userKey: user.id, userName: user.displayName, text, attachments };
+  const base = { platform: 'teams' as const, userKey: user.id, userName: user.displayName, text, attachments, author } as const;
   if (loc.kind === 'chat') {
     return {
       kind: 'message',
@@ -151,7 +153,7 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
         eventId: teamsEventId(loc.chatId, m.id),
         threadKey: `chat:${loc.chatId}`,
         replyRef: { kind: 'chat', chatId: loc.chatId },
-        conversationAttributes: { teams_chat: loc.chatId },
+        conversationAttributes: { channel_key: `teams:${loc.chatId}`, teams_chat: loc.chatId },
         newConversationIfResolved: true,
       },
     };
@@ -164,7 +166,7 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
       eventId: teamsEventId(loc.channelId, m.id),
       threadKey: `channel:${loc.teamId}:${loc.channelId}:${rootId}`,
       replyRef: { kind: 'channel', teamId: loc.teamId, channelId: loc.channelId, rootId },
-      conversationAttributes: { teams_team: loc.teamId, teams_channel: loc.channelId },
+      conversationAttributes: { channel_key: `teams:${loc.channelId}`, teams_team: loc.teamId, teams_channel: loc.channelId },
     },
   };
 }
@@ -248,15 +250,21 @@ export function sendPath(ref: Record<string, unknown>): string {
 export type TeamsMessageFormat = 'auto' | 'html' | 'card';
 const MAX_INLINE_IMAGE_BYTES = 3 * 1024 * 1024;
 
+/**
+ * Sends as the agent (their own delegated token) when they've connected; otherwise, or if their
+ * account can't post there (403/404: not a member), as the shared Kita user with "First: " prefix.
+ */
 export class TeamsSender implements Sender {
   private graph: Graph;
   private format: TeamsMessageFormat;
   private fetchImpl: typeof fetch;
+  private agentGraph: (agentId: number) => Graph | undefined;
 
-  constructor(graph: Graph, format: TeamsMessageFormat = 'auto', fetchImpl: typeof fetch = fetch) {
+  constructor(graph: Graph, format: TeamsMessageFormat = 'auto', fetchImpl: typeof fetch = fetch, agentGraph: (agentId: number) => Graph | undefined = () => undefined) {
     this.graph = graph;
     this.format = format;
     this.fetchImpl = fetchImpl;
+    this.agentGraph = agentGraph;
   }
 
   private async inlineImages(msg: OutboundMessage): Promise<(InlineImage | undefined)[]> {
@@ -275,20 +283,34 @@ export class TeamsSender implements Sender {
     );
   }
 
-  async send(ref: Record<string, unknown>, msg: OutboundMessage): Promise<string[]> {
+  async send(ref: Record<string, unknown>, msg: OutboundMessage): Promise<SendResult> {
+    const agentGraph = msg.agent ? this.agentGraph(msg.agent.id) : undefined;
+    if (agentGraph) {
+      try {
+        return { echoes: await this.post(agentGraph, ref, msg) };
+      } catch (e) {
+        if (!(e instanceof GraphError && (e.status === 403 || e.status === 404))) throw e;
+        log.warn('teams_agent_cannot_post', { agent: msg.agent!.id, status: e.status });
+      }
+    }
+    const echoes = await this.post(this.graph, ref, withNamePrefix(msg));
+    return msg.agent ? { echoes, fallback: agentGraph ? 'not_member' : 'not_connected' } : { echoes };
+  }
+
+  private async post(graph: Graph, ref: Record<string, unknown>, msg: OutboundMessage): Promise<string[]> {
     const path = sendPath(ref);
     const container = String(ref.kind === 'chat' ? ref.chatId : ref.channelId);
     let created: any;
-    if (this.format === 'card' && ref.kind === 'channel') created = await this.graph.request('POST', path, buildCardMessage(msg));
+    if (this.format === 'card' && ref.kind === 'channel') created = await graph.request('POST', path, buildCardMessage(msg));
     else {
       try {
-        created = await this.graph.request('POST', path, buildHtmlMessage(msg, await this.inlineImages(msg)));
+        created = await graph.request('POST', path, buildHtmlMessage(msg, await this.inlineImages(msg)));
       } catch (e) {
         // Only a content rejection in a channel triggers the card fallback; auth/throttling/5xx surface as failures.
         const rejected = e instanceof GraphError && (e.status === 400 || e.status === 403);
         if (!(this.format === 'auto' && ref.kind === 'channel' && rejected)) throw e;
         log.warn('teams_card_fallback', { status: (e as GraphError).status, code: (e as GraphError).code });
-        created = await this.graph.request('POST', path, buildCardMessage(msg));
+        created = await graph.request('POST', path, buildCardMessage(msg));
       }
     }
     return created?.id ? [teamsEventId(container, created.id)] : [];

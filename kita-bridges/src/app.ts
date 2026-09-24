@@ -6,6 +6,9 @@ import { log } from './log.ts';
 import { parseSlackEvent, verifySlackSignature, type SlackSender } from './platforms/slack.ts';
 import { validationToken } from './platforms/teams/messages.ts';
 import type { TeamsIntegration } from './platforms/teams/index.ts';
+import type { AgentConnect } from './connect.ts';
+import type { ChatwootAppClient } from './chatwoot.ts';
+import { parseWhatsAppWebhook, resolveMedia, verifyWhatsAppSignature, verifyWhatsAppSubscription } from './platforms/whatsapp.ts';
 import { parseViberEvent, verifyViberSignature } from './platforms/viber.ts';
 import type { Store } from './store.ts';
 import type { Platform } from './types.ts';
@@ -20,6 +23,34 @@ export interface AppDeps {
   enabled: Platform[];
   slack?: SlackSender;
   teams?: TeamsIntegration;
+  connect?: AgentConnect;
+  /** Per business number: that owner's own Chatwoot client (native attribution of phone-app echoes). */
+  whatsappOwnerApps?: Map<string, ChatwootAppClient>;
+}
+
+export const MIRROR_NOTE = 'Reply from WhatsApp on your phone — this inbox is a mirror. Nothing typed here is sent to the customer.';
+
+/** Cloud API webhook batch -> customer messages (incoming) and phone-app echoes (outgoing, owner). */
+async function processWhatsApp(d: AppDeps, body: unknown) {
+  const w = d.cfg.whatsapp;
+  const { items, skipped } = parseWhatsAppWebhook(body, w.numbers);
+  if (skipped.length) log.info('whatsapp_skipped', { skipped });
+  for (const it of items) {
+    try {
+      const attachments = await resolveMedia(it.media, w.accessToken, d.fetchImpl);
+      if (attachments.length < it.media.length) log.warn('whatsapp_media_unresolved', { missing: it.media.length - attachments.length });
+      const msg = { ...it.message, attachments };
+      if (it.kind === 'customer') await d.bridge.inbound(msg);
+      else await d.bridge.businessEcho(msg, { ownerName: it.number.ownerName, ownerApp: d.whatsappOwnerApps?.get(it.number.phoneNumberId) });
+    } catch (e: any) {
+      log.error('whatsapp_item_failed', { kind: it.kind, error: String(e?.message ?? e) });
+    }
+  }
+}
+
+function html(res: ServerResponse, status: number, body: string) {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'x-frame-options': 'DENY', 'cache-control': 'no-store' });
+  res.end(body);
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -77,7 +108,32 @@ export function createHandler(d: AppDeps) {
     // Tolerate being mounted with or without the /bridges prefix.
     const path = url.pathname.replace(/^\/bridges(?=\/)/, '');
     try {
+      if (d.enabled.includes('whatsapp') && req.method === 'GET' && path === '/whatsapp/webhook') {
+        const challenge = verifyWhatsAppSubscription(cfg.whatsapp.verifyToken, url.searchParams);
+        return challenge === undefined ? send(res, 403) : send(res, 200, challenge);
+      }
       if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true, platforms: d.enabled, teamsConnected: d.teams?.auth.isConnected() ?? false });
+
+      if (d.connect && req.method === 'GET' && path === '/connect') {
+        const p = d.connect.page(url.searchParams);
+        return html(res, p.status, p.html);
+      }
+      const start = path.match(/^\/connect\/(slack|teams)\/start$/);
+      if (d.connect && req.method === 'GET' && start) {
+        const target = d.connect.start(start[1] as 'slack' | 'teams', url.searchParams);
+        if (!target) return html(res, 403, d.connect.layout('<p>This link is invalid or has expired.</p>'));
+        res.writeHead(302, { location: target });
+        return res.end();
+      }
+      if (d.connect && req.method === 'GET' && path === '/connect/slack/callback') {
+        try {
+          const email = await d.connect.slackCallback(url.searchParams.get('code'), url.searchParams.get('state'));
+          return html(res, 200, d.connect.layout(`<p>Slack connected for ${email.replace(/[<>&"]/g, '')}. Replies you write in the desk will now post as you. You can close this tab.</p>`));
+        } catch (e: any) {
+          log.warn('slack_connect_failed', { error: String(e?.message ?? e) });
+          return html(res, 400, d.connect.layout(`<p>Connect failed: ${String(e?.message ?? e).replace(/[<>&"]/g, '')}</p>`));
+        }
+      }
 
       if (d.teams && req.method === 'GET' && path === '/teams/connect') {
         const target = d.teams.connectUrl(url.searchParams.get('key'));
@@ -131,6 +187,24 @@ export function createHandler(d: AppDeps) {
         send(res, 200);
         if (parsed.kind === 'message') background('viber_inbound', bridge.inbound(parsed.message));
         return;
+      }
+
+      if (path === '/whatsapp/webhook' && d.enabled.includes('whatsapp')) {
+        if (!verifyWhatsAppSignature(cfg.whatsapp.appSecret, raw, h(req, 'x-hub-signature-256'))) return send(res, 401);
+        const body = JSON.parse(raw);
+        send(res, 200); // Meta retries non-2xx; items are idempotent on wamid
+        background('whatsapp_webhook', processWhatsApp(d, body));
+        return;
+      }
+
+      const wa = path.match(/^\/chatwoot\/whatsapp\/([0-9]+)$/);
+      if (wa && d.enabled.includes('whatsapp')) {
+        const number = cfg.whatsapp.numbers.find((n) => n.phoneNumberId === wa[1]);
+        if (!number || !verifyChatwootSignature(number.webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))
+          return send(res, 401);
+        const payload = JSON.parse(raw);
+        const result = cfg.whatsapp.mode === 'mirror' ? await bridge.mirrorNotice('whatsapp', payload, MIRROR_NOTE) : await bridge.outbound('whatsapp', payload);
+        return send(res, 200, { ok: true, result });
       }
 
       const cw = path.match(/^\/chatwoot\/(slack|teams|viber)$/);

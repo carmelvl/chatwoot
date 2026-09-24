@@ -34,7 +34,7 @@ test('slack top-level message opens a thread keyed by channel + ts', () => {
   assert.equal(p.message.threadKey, 'C0SHARED1:1790000000.000100');
   assert.deepEqual(p.message.replyRef, { channel: 'C0SHARED1', threadTs: '1790000000.000100' });
   assert.equal(p.message.userKey, 'UCUST001');
-  assert.equal(p.message.eventId, 'Ev01TOP');
+  assert.equal(p.message.eventId, 'C0SHARED1:1790000000.000100'); // channel:ts, matches our own postMessage ts
   assert.equal(p.message.text, 'Hi, our webhook fails with **401** since today & see [status page](https://status.example.com)');
 });
 
@@ -48,12 +48,16 @@ test('slack thread reply maps to the root thread and carries authenticated file 
   assert.deepEqual(p.message.attachments[0].headers, { authorization: 'Bearer xoxb-test' });
 });
 
-test('slack loop prevention: bot echoes and Kita staff are ignored', () => {
+test('slack loop prevention: bot echoes ignored; Kita staff typing directly become staff messages', () => {
   assert.deepEqual(parseSlackEvent(fixture('slack_bot_echo.json'), opts), { kind: 'ignore', reason: 'bot' });
   const self = fixture('slack_bot_echo.json');
   delete self.event.bot_id;
   assert.deepEqual(parseSlackEvent(self, opts), { kind: 'ignore', reason: 'self' });
-  assert.deepEqual(parseSlackEvent(fixture('slack_internal_staff.json'), opts), { kind: 'ignore', reason: 'internal_user' });
+  const staff = parseSlackEvent(fixture('slack_internal_staff.json'), opts);
+  assert.equal(staff.kind === 'message' && staff.message.author, 'staff');
+  assert.equal(staff.kind === 'message' && staff.message.threadKey, 'C0SHARED1:1790000000.000100');
+  const customer = parseSlackEvent(fixture('slack_top_level.json'), opts);
+  assert.equal(customer.kind === 'message' && customer.message.author, 'customer');
   const edited = fixture('slack_top_level.json');
   edited.event.subtype = 'message_changed';
   assert.deepEqual(parseSlackEvent(edited, opts), { kind: 'ignore', reason: 'subtype:message_changed' });

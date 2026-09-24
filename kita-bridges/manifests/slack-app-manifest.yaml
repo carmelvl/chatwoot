@@ -8,17 +8,24 @@ features:
     display_name: Kita
     always_online: true
 oauth_config:
+  # Per-agent "Connect your Slack account" (replies post as the real person).
+  redirect_urls:
+    - https://support.internal.kita.ai/bridges/connect/slack/callback
   scopes:
+    user:
+      - chat:write           # post replies as the agent
+      - files:write          # attachments as the agent
     bot:
       - channels:history     # message events in public / Slack Connect channels
       - groups:history       # message events in private shared channels
       - im:history
       - mpim:history
       - chat:write           # post agent replies into the thread
-      - chat:write.customize # post as "Kita" with the Kita icon
+      - chat:write.customize # fallback: bot posts with the agent's name + avatar
       - files:read           # copy customer attachments into the desk
       - files:write          # send agent attachments as native Slack files
-      - users:read           # customer display names
+      - users:read           # display names
+      - users:read.email     # match a connecting Slack account to the agent's desk email
 settings:
   event_subscriptions:
     request_url: https://support.internal.kita.ai/bridges/slack/events

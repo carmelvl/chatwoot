@@ -30,7 +30,7 @@ test('mapping: slack thread -> one conversation; first message creates contact +
   const reply = cw.calls.at(-1)!.body;
   assert.equal(reply.content, '**Ben (Customer Co):** screenshot attached');
   assert.deepEqual(reply.files, ['error.png']);
-  assert.equal(reply.echo_id, 'slack:Ev02REPLY');
+  assert.equal(reply.echo_id, 'slack:C0SHARED1:1790000050.000200');
   // the file download used the Slack bot token
   const dl = cw.calls.find((c) => c.path.includes('/files-pri/'));
   assert.ok(dl);
@@ -130,7 +130,7 @@ test('teams group chat: new conversation once the previous one is resolved (conv
 test('sender echo ids are pre-marked, so our own Teams post coming back via Graph is dropped', async () => {
   const { bridge, senders } = makeBridge();
   await bridge.inbound(teamsChatMsg('1'));
-  (senders.teams as any).send = async () => ['19:acme-group@thread.v2:777'];
+  (senders.teams as any).send = async () => ({ echoes: ['19:acme-group@thread.v2:777'] });
   assert.equal(await bridge.outbound('teams', { ...fixture('chatwoot_outgoing.json'), conversation: { id: 100 } }), 'sent');
   assert.equal(await bridge.inbound({ ...teamsChatMsg('777') }), 'duplicate');
 });
@@ -162,4 +162,13 @@ test('store survives restart (file-backed)', async () => {
 test('composeInboundText', () => {
   assert.equal(composeInboundText('hi', undefined, []), 'hi');
   assert.equal(composeInboundText('', 'Ben', ['https://x']), '**Ben:** \n\nAttachments (not copied):\n- https://x');
+});
+
+test('every platform stamps channel_key on the conversation (Grip sync contract)', () => {
+  const s = parseSlackEvent(fixture('slack_top_level.json'), slackOpts);
+  assert.equal(s.kind === 'message' && s.message.conversationAttributes!.channel_key, 'slack:C0SHARED1');
+  const v = parseViberEvent(fixture('viber_message.json'));
+  assert.equal(v.kind === 'message' && v.message.conversationAttributes!.channel_key, 'viber:01234567890A=');
+  assert.equal(teamsChannelMsg().message.conversationAttributes!.channel_key, 'teams:19:acme-shared@thread.tacv2');
+  assert.equal(teamsChatMsg('1').conversationAttributes!.channel_key, 'teams:19:acme-group@thread.v2');
 });

@@ -1,4 +1,4 @@
-export type Platform = 'slack' | 'teams' | 'viber';
+export type Platform = 'slack' | 'teams' | 'viber' | 'whatsapp';
 
 export interface InboundAttachment {
   url: string;
@@ -26,6 +26,36 @@ export interface InboundMessage {
   conversationAttributes?: Record<string, string>;
   /** Long-lived containers (Teams group chats): start a fresh conversation once the last one was resolved. */
   newConversationIfResolved?: boolean;
+  /**
+   * 'staff' = a Kita team member typed directly in Slack/Teams (outside the desk). Synced into the
+   * mapped conversation as an outgoing agent message; never treated as a customer, never echoed back.
+   */
+  author?: 'customer' | 'staff';
+  /** Extra ids that identify this message as one the bridge itself posted (e.g. Slack file ids). */
+  echoKeys?: string[];
+  /** Per-message inbox (WhatsApp: one inbox per business number). Defaults to the platform's inbox. */
+  inboxIdentifier?: string;
+  /** Contact identifier override (WhatsApp: whatsapp:+E164, shared across numbers). */
+  contactIdentifier?: string;
+}
+
+/** The Chatwoot agent who wrote a reply. Replies go out as this person where the platform allows. */
+export interface AgentIdentity {
+  id: number;
+  name: string;
+  firstName: string;
+  email?: string;
+  /** Customer-safe avatar URL (bridge media proxy), filled in when known. */
+  avatarUrl?: string;
+}
+
+export type FallbackReason = 'not_connected' | 'not_member';
+
+export interface SendResult {
+  /** Inbound event ids of what was posted, so the platform echo is recognised as ours. */
+  echoes?: string[];
+  /** Set when the reply went out from the shared Kita identity instead of the agent's own account. */
+  fallback?: FallbackReason;
 }
 
 export interface OutboundAttachment {
@@ -37,18 +67,21 @@ export interface OutboundAttachment {
   fileType?: string;
 }
 
-/** An agent reply normalised from Chatwoot's message_created webhook. Always sent as the "Kita" bot. */
+/** An agent reply normalised from Chatwoot's message_created webhook. */
 export interface OutboundMessage {
   messageId: number;
   conversationId: number;
   text: string;
   attachments: OutboundAttachment[];
+  /** Absent for automated messages (they go out as plain Kita). */
+  agent?: AgentIdentity;
 }
 
 export interface Sender {
-  /**
-   * Delivers an agent reply. May return inbound event ids of the messages it created, so the
-   * platform echo of our own post is recognised as a duplicate (belt-and-braces loop prevention).
-   */
-  send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<void | string[]>;
+  send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<SendResult | void>;
+}
+
+/** "Carmel: …" for channels that can only speak as one business identity. */
+export function withNamePrefix(msg: OutboundMessage): OutboundMessage {
+  return msg.agent ? { ...msg, text: `${msg.agent.firstName}:${msg.text.trim() ? ` ${msg.text}` : ''}` } : msg;
 }
