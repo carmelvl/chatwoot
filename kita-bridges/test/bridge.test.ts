@@ -30,7 +30,7 @@ test('mapping: slack thread -> one conversation; first message creates contact +
   const reply = cw.calls.at(-1)!.body;
   assert.equal(reply.content, '**Ben (Customer Co):** screenshot attached');
   assert.deepEqual(reply.files, ['error.png']);
-  assert.equal(reply.echo_id, 'slack:Ev02REPLY');
+  assert.equal(reply.echo_id, 'slack:C0SHARED1:1790000050.000200');
   // the file download used the Slack bot token
   const dl = cw.calls.find((c) => c.path.includes('/files-pri/'));
   assert.ok(dl);
@@ -130,7 +130,7 @@ test('teams group chat: new conversation once the previous one is resolved (conv
 test('sender echo ids are pre-marked, so our own Teams post coming back via Graph is dropped', async () => {
   const { bridge, senders } = makeBridge();
   await bridge.inbound(teamsChatMsg('1'));
-  (senders.teams as any).send = async () => ['19:acme-group@thread.v2:777'];
+  (senders.teams as any).send = async () => ({ echoes: ['19:acme-group@thread.v2:777'] });
   assert.equal(await bridge.outbound('teams', { ...fixture('chatwoot_outgoing.json'), conversation: { id: 100 } }), 'sent');
   assert.equal(await bridge.inbound({ ...teamsChatMsg('777') }), 'duplicate');
 });

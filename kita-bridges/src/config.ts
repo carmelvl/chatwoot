@@ -19,6 +19,12 @@ export function loadConfig() {
     mediaTtlMs: Number(env('MEDIA_TTL_DAYS', '90')) * 24 * 3600 * 1000,
     dbPath: env('BRIDGE_DB_PATH', './data/bridges.sqlite'),
     chatwootBaseUrl: env('CHATWOOT_BASE_URL', 'http://rails:3000').replace(/\/$/, ''),
+    // Application API (agent access token) for private notes, staff-typed sync and avatars. Optional.
+    chatwootApiToken: env('CHATWOOT_API_ACCESS_TOKEN'),
+    chatwootAccountId: env('CHATWOOT_ACCOUNT_ID'),
+    /** Signs per-agent connect links. */
+    linkSecret: env('BRIDGE_LINK_SECRET'),
+    encryptionKey: env('BRIDGE_ENCRYPTION_KEY'),
     inboxes: { slack: inbox('slack'), teams: inbox('teams'), viber: inbox('viber') } as Record<Platform, PlatformInbox>,
     slack: {
       signingSecret: env('SLACK_SIGNING_SECRET'),
@@ -27,6 +33,9 @@ export function loadConfig() {
       allowedChannels: list('SLACK_ALLOWED_CHANNELS'),
       botName: env('SLACK_BOT_NAME', 'Kita'),
       botIconUrl: env('SLACK_BOT_ICON_URL'),
+      // Per-agent user OAuth (replies post as the real person). Optional.
+      clientId: env('SLACK_CLIENT_ID'),
+      clientSecret: env('SLACK_CLIENT_SECRET'),
     },
     teams: {
       tenantId: env('TEAMS_TENANT_ID'),
@@ -44,6 +53,7 @@ export function loadConfig() {
       authToken: env('VIBER_AUTH_TOKEN'),
       botName: env('VIBER_BOT_NAME', 'Kita'),
       botAvatar: env('VIBER_BOT_AVATAR'),
+      prefixAgentName: env('VIBER_PREFIX_AGENT_NAME', 'true') !== 'false',
     },
   };
 }

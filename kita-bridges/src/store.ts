@@ -120,6 +120,10 @@ export class Store {
     return Number(res.changes) === 1;
   }
 
+  isSeen(key: string): boolean {
+    return this.db.prepare('SELECT 1 FROM seen WHERE key = ?').get(key) !== undefined;
+  }
+
   forget(key: string): void {
     this.db.prepare('DELETE FROM seen WHERE key = ?').run(key);
   }

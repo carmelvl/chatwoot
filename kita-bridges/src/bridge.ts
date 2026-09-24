@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { ChatwootClient, downloadAttachments, toOutbound } from './chatwoot.ts';
+import { ChatwootAppClient, ChatwootClient, downloadAttachments, toOutbound } from './chatwoot.ts';
 import { log } from './log.ts';
 import type { Store } from './store.ts';
-import type { InboundMessage, OutboundAttachment, Platform, Sender } from './types.ts';
+import type { AgentIdentity, FallbackReason, InboundMessage, OutboundAttachment, Platform, Sender } from './types.ts';
 
 export interface BridgeDeps {
   store: Store;
@@ -11,62 +11,127 @@ export interface BridgeDeps {
   senders: Partial<Record<Platform, Sender>>;
   /** Public base URL of the bridge, used for customer-facing /media links. */
   publicUrl: string;
+  /** Application API client: private notes, staff-typed sync, avatars. Optional. */
+  app?: ChatwootAppClient;
+  /** Signed per-agent connect link, included in "connect your account" notes. */
+  connectLink?: (agent: AgentIdentity) => string | undefined;
   fetchImpl?: typeof fetch;
 }
 
-export type InboundResult = 'duplicate' | 'created' | 'appended';
+export type InboundResult = 'duplicate' | 'created' | 'appended' | 'staff_synced' | 'ignored';
 
 /** Maps a platform user to a Chatwoot contact identifier. Namespaced so ids never collide across platforms. */
 export const contactIdentifier = (platform: Platform, userKey: string) => `${platform}:${userKey}`;
 
+const PLATFORM_NAME: Record<Platform, string> = { slack: 'Slack', teams: 'Microsoft Teams', viber: 'Viber' };
+const FINGERPRINT_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Letters/digits only, lowercased, URLs dropped: survives markdown <-> Slack mrkdwn / Teams HTML
+ * conversion (which reorder or drop link targets) and name prefixes.
+ */
+export const normalizeForEcho = (s: string) =>
+  s
+    .replace(/\]\([^)]*\)/g, ']')
+    .replace(/https?:\/\/[^\s|>)\]]+/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+
 export class Bridge {
   private d: BridgeDeps;
+  /**
+   * Text fingerprints of replies being sent, per thread. Closes the race where the platform delivers
+   * our own post (from an agent's account) before send() has returned its message id.
+   */
+  private recentOut = new Map<string, { norm: string; exp: number }[]>();
+  private avatars = new Map<number, { url?: string; exp: number }>();
+
   constructor(deps: BridgeDeps) {
     this.d = deps;
   }
 
-  /** Customer message -> Chatwoot (contact + conversation + incoming message). Idempotent on eventId. */
+  private isOurEcho(msg: InboundMessage): boolean {
+    const now = Date.now();
+    const list = (this.recentOut.get(`${msg.platform}:${msg.threadKey}`) ?? []).filter((f) => f.exp > now);
+    const norm = normalizeForEcho(msg.text);
+    return norm.length > 0 && list.some((f) => f.norm.length > 0 && norm.includes(f.norm));
+  }
+
+  private rememberOut(platform: Platform, threadKey: string, text: string) {
+    const key = `${platform}:${threadKey}`;
+    const now = Date.now();
+    const list = (this.recentOut.get(key) ?? []).filter((f) => f.exp > now);
+    list.push({ norm: normalizeForEcho(text), exp: now + FINGERPRINT_TTL_MS });
+    this.recentOut.set(key, list);
+  }
+
+  /** Platform message -> Chatwoot. Customers become incoming messages; Kita staff typing directly become outgoing. */
   async inbound(msg: InboundMessage): Promise<InboundResult> {
-    const { store, chatwoot } = this.d;
-    const inbox = this.d.inboxes[msg.platform].inboxIdentifier;
+    const { store } = this.d;
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
+    if (msg.echoKeys?.some((k) => store.isSeen(`in:${msg.platform}:${k}`))) return 'duplicate';
     if (!store.markSeen(seenKey)) return 'duplicate';
     try {
-      let sourceId = store.getContactSourceId(msg.platform, msg.userKey);
-      if (!sourceId) {
-        sourceId = await chatwoot.createContact(inbox, {
-          identifier: contactIdentifier(msg.platform, msg.userKey),
-          name: msg.userName || `${msg.platform} user ${msg.userKey}`,
-          custom_attributes: { channel: msg.platform },
-        });
-        store.putContact(msg.platform, msg.userKey, sourceId);
-      }
-
-      let conv = store.getByThread(msg.platform, msg.threadKey);
-      let result: InboundResult = 'appended';
-      if (conv && conv.status === 'resolved' && msg.newConversationIfResolved) conv = undefined;
-      if (!conv) {
-        const conversationId = await chatwoot.createConversation(inbox, sourceId, { channel: msg.platform, ...msg.conversationAttributes });
-        conv = { platform: msg.platform, threadKey: msg.threadKey, conversationId, sourceId, replyRef: msg.replyRef };
-        result = 'created';
-      } else {
-        // Keep the reply reference fresh (merge, so thread roots are never lost).
-        conv = { ...conv, replyRef: { ...conv.replyRef, ...msg.replyRef } };
-      }
-      store.putConversation(conv);
-
-      // A Chatwoot conversation belongs to one contact. Others joining the same Slack/Teams thread are
-      // posted under the owner contact, with their name prefixed so agents can tell who spoke.
-      const foreign = conv.sourceId !== sourceId;
-      const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
-      const content = composeInboundText(msg.text, foreign ? msg.userName ?? msg.userKey : undefined, failed.map((f) => f.url));
-      await chatwoot.createMessage(inbox, conv.sourceId, conv.conversationId, content, files, `${msg.platform}:${msg.eventId}`);
-      log.info('inbound', { platform: msg.platform, conversation: conv.conversationId, result, files: files.length });
-      return result;
+      return msg.author === 'staff' ? await this.staffInbound(msg) : await this.customerInbound(msg);
     } catch (e) {
       store.forget(seenKey); // allow the platform's retry to succeed
       throw e;
     }
+  }
+
+  private async customerInbound(msg: InboundMessage): Promise<InboundResult> {
+    const { store, chatwoot } = this.d;
+    const inbox = this.d.inboxes[msg.platform].inboxIdentifier;
+    let sourceId = store.getContactSourceId(msg.platform, msg.userKey);
+    if (!sourceId) {
+      sourceId = await chatwoot.createContact(inbox, {
+        identifier: contactIdentifier(msg.platform, msg.userKey),
+        name: msg.userName || `${msg.platform} user ${msg.userKey}`,
+        custom_attributes: { channel: msg.platform },
+      });
+      store.putContact(msg.platform, msg.userKey, sourceId);
+    }
+
+    let conv = store.getByThread(msg.platform, msg.threadKey);
+    let result: InboundResult = 'appended';
+    if (conv && conv.status === 'resolved' && msg.newConversationIfResolved) conv = undefined;
+    if (!conv) {
+      const conversationId = await chatwoot.createConversation(inbox, sourceId, { channel: msg.platform, ...msg.conversationAttributes });
+      conv = { platform: msg.platform, threadKey: msg.threadKey, conversationId, sourceId, replyRef: msg.replyRef };
+      result = 'created';
+    } else {
+      // Keep the reply reference fresh (merge, so thread roots are never lost).
+      conv = { ...conv, replyRef: { ...conv.replyRef, ...msg.replyRef } };
+    }
+    store.putConversation(conv);
+
+    // A Chatwoot conversation belongs to one contact. Others joining the same Slack/Teams thread are
+    // posted under the owner contact, with their name prefixed so agents can tell who spoke.
+    const foreign = conv.sourceId !== sourceId;
+    const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
+    const content = composeInboundText(msg.text, foreign ? msg.userName ?? msg.userKey : undefined, failed.map((f) => f.url));
+    await chatwoot.createMessage(inbox, conv.sourceId, conv.conversationId, content, files, `${msg.platform}:${msg.eventId}`);
+    log.info('inbound', { platform: msg.platform, conversation: conv.conversationId, result, files: files.length });
+    return result;
+  }
+
+  /**
+   * A Kita team member wrote in Slack/Teams outside the desk: mirror it into the thread's conversation
+   * as an outgoing message so the desk shows the full thread. Only for threads already mapped;
+   * marked kita_bridge_origin (and its id pre-marked) so it is never sent back out.
+   */
+  private async staffInbound(msg: InboundMessage): Promise<InboundResult> {
+    const { store, app } = this.d;
+    if (this.isOurEcho(msg)) return 'duplicate';
+    const conv = store.getByThread(msg.platform, msg.threadKey);
+    if (!conv || !app) return 'ignored';
+    if (conv.status === 'resolved' && msg.newConversationIfResolved) return 'ignored';
+    const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
+    const content = composeInboundText(msg.text, `${msg.userName ?? msg.userKey} (in ${PLATFORM_NAME[msg.platform]})`, failed.map((f) => f.url));
+    const created = await app.createMessage(conv.conversationId, { content, private: false, files });
+    store.markSeen(`out:${msg.platform}:${created.id}`);
+    log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId });
+    return 'staff_synced';
   }
 
   /**
@@ -79,7 +144,18 @@ export class Bridge {
     return { ...a, url: `${this.d.publicUrl.replace(/\/$/, '')}/media/${token}/${encodeURIComponent(a.name)}` };
   }
 
-  /** Chatwoot webhook -> platform. Returns why it was skipped, or 'sent'. Idempotent on message id. */
+  private async withAvatar(agent: AgentIdentity | undefined): Promise<AgentIdentity | undefined> {
+    if (!agent || !this.d.app) return agent;
+    let hit = this.avatars.get(agent.id);
+    if (!hit || hit.exp < Date.now()) {
+      const src = await this.d.app.avatarUrl(agent.id).catch(() => undefined);
+      hit = { url: src ? this.proxied({ url: '', sourceUrl: src, name: 'avatar.png' }).url : undefined, exp: Date.now() + 24 * 3600_000 };
+      this.avatars.set(agent.id, hit);
+    }
+    return hit.url ? { ...agent, avatarUrl: hit.url } : agent;
+  }
+
+  /** Chatwoot webhook -> platform. Returns why it was skipped, or 'sent' / 'sent:fallback:<reason>'. */
   async outbound(platform: Platform, payload: any): Promise<string> {
     // Track resolution so long-lived chats can open a fresh conversation next time (webhook ids are display ids).
     if (payload?.event === 'conversation_status_changed' && payload.id && payload.status) {
@@ -94,16 +170,36 @@ export class Bridge {
     if (!sender) return 'skip:platform_disabled';
     const seenKey = `out:${platform}:${decision.message.messageId}`;
     if (!this.d.store.markSeen(seenKey)) return 'skip:duplicate';
-    const msg = { ...decision.message, attachments: decision.message.attachments.map((a) => this.proxied(a)) };
+    let fallback: FallbackReason | undefined;
     try {
-      const echoes = await sender.send(conv.replyRef, msg);
-      for (const id of echoes ?? []) this.d.store.markSeen(`in:${platform}:${id}`);
+      const msg = {
+        ...decision.message,
+        attachments: decision.message.attachments.map((a) => this.proxied(a)),
+        agent: platform === 'slack' ? await this.withAvatar(decision.message.agent) : decision.message.agent,
+      };
+      this.rememberOut(platform, conv.threadKey, msg.text);
+      const result = await sender.send(conv.replyRef, msg);
+      for (const id of result?.echoes ?? []) this.d.store.markSeen(`in:${platform}:${id}`);
+      fallback = result?.fallback;
     } catch (e) {
       this.d.store.forget(seenKey);
       throw e;
     }
-    log.info('outbound', { platform, conversation: msg.conversationId, message: msg.messageId });
-    return 'sent';
+    if (fallback && decision.message.agent) await this.fallbackNote(platform, conv.conversationId, decision.message.agent, fallback);
+    log.info('outbound', { platform, conversation: decision.message.conversationId, message: decision.message.messageId, fallback });
+    return fallback ? `sent:fallback:${fallback}` : 'sent';
+  }
+
+  /** Private note (agents only) explaining why the reply went out from the shared Kita identity. */
+  private async fallbackNote(platform: Platform, conversationId: number, agent: AgentIdentity, reason: FallbackReason) {
+    if (!this.d.app) return;
+    const name = PLATFORM_NAME[platform];
+    const link = this.d.connectLink?.(agent);
+    const content =
+      reason === 'not_connected'
+        ? `${agent.firstName}, this reply was sent from the shared Kita account (as "${agent.firstName}: …") because your ${name} account isn't connected.${link ? ` Connect it once so replies come from you: ${link}` : ' Ask an admin for your connect link.'}`
+        : `${agent.firstName}, this reply was sent from the shared Kita account because your ${name} account isn't a member of this ${platform === 'teams' ? 'channel or chat' : 'channel'}. Ask to be added, and your next replies will come from you.`;
+    await this.d.app.createMessage(conversationId, { content, private: true }).catch((e) => log.warn('fallback_note_failed', { error: String(e?.message ?? e) }));
   }
 }
 

@@ -6,6 +6,7 @@ import { log } from './log.ts';
 import { parseSlackEvent, verifySlackSignature, type SlackSender } from './platforms/slack.ts';
 import { validationToken } from './platforms/teams/messages.ts';
 import type { TeamsIntegration } from './platforms/teams/index.ts';
+import type { AgentConnect } from './connect.ts';
 import { parseViberEvent, verifyViberSignature } from './platforms/viber.ts';
 import type { Store } from './store.ts';
 import type { Platform } from './types.ts';
@@ -20,6 +21,12 @@ export interface AppDeps {
   enabled: Platform[];
   slack?: SlackSender;
   teams?: TeamsIntegration;
+  connect?: AgentConnect;
+}
+
+function html(res: ServerResponse, status: number, body: string) {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'x-frame-options': 'DENY', 'cache-control': 'no-store' });
+  res.end(body);
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -78,6 +85,27 @@ export function createHandler(d: AppDeps) {
     const path = url.pathname.replace(/^\/bridges(?=\/)/, '');
     try {
       if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true, platforms: d.enabled, teamsConnected: d.teams?.auth.isConnected() ?? false });
+
+      if (d.connect && req.method === 'GET' && path === '/connect') {
+        const p = d.connect.page(url.searchParams);
+        return html(res, p.status, p.html);
+      }
+      const start = path.match(/^\/connect\/(slack|teams)\/start$/);
+      if (d.connect && req.method === 'GET' && start) {
+        const target = d.connect.start(start[1] as 'slack' | 'teams', url.searchParams);
+        if (!target) return html(res, 403, d.connect.layout('<p>This link is invalid or has expired.</p>'));
+        res.writeHead(302, { location: target });
+        return res.end();
+      }
+      if (d.connect && req.method === 'GET' && path === '/connect/slack/callback') {
+        try {
+          const email = await d.connect.slackCallback(url.searchParams.get('code'), url.searchParams.get('state'));
+          return html(res, 200, d.connect.layout(`<p>Slack connected for ${email.replace(/[<>&"]/g, '')}. Replies you write in the desk will now post as you. You can close this tab.</p>`));
+        } catch (e: any) {
+          log.warn('slack_connect_failed', { error: String(e?.message ?? e) });
+          return html(res, 400, d.connect.layout(`<p>Connect failed: ${String(e?.message ?? e).replace(/[<>&"]/g, '')}</p>`));
+        }
+      }
 
       if (d.teams && req.method === 'GET' && path === '/teams/connect') {
         const target = d.teams.connectUrl(url.searchParams.get('key'));

@@ -4,7 +4,10 @@ import { ChatwootClient } from './chatwoot.ts';
 import { enabledPlatforms, loadConfig } from './config.ts';
 import { createHandler } from './app.ts';
 import { log } from './log.ts';
-import { SlackSender } from './platforms/slack.ts';
+import { SlackSender, SlackUserOAuth } from './platforms/slack.ts';
+import { AgentConnect } from './connect.ts';
+import { ChatwootAppClient } from './chatwoot.ts';
+import { signConnectLink } from './links.ts';
 import { TeamsIntegration } from './platforms/teams/index.ts';
 import { SYNC_INTERVAL_MS } from './platforms/teams/subscriptions.ts';
 import { ViberSender } from './platforms/viber.ts';
@@ -14,13 +17,22 @@ import type { Platform, Sender } from './types.ts';
 const cfg = loadConfig();
 const enabled = enabledPlatforms(cfg);
 const store = new Store(cfg.dbPath);
-const slack = enabled.includes('slack') ? new SlackSender(cfg.slack.botToken, { name: cfg.slack.botName, iconUrl: cfg.slack.botIconUrl || undefined }) : undefined;
+const slackOAuth =
+  enabled.includes('slack') && cfg.slack.clientId && cfg.slack.clientSecret && cfg.encryptionKey
+    ? new SlackUserOAuth({ clientId: cfg.slack.clientId, clientSecret: cfg.slack.clientSecret, redirectUri: `${cfg.publicUrl}/connect/slack/callback`, botToken: cfg.slack.botToken, encryptionKey: cfg.encryptionKey }, store)
+    : undefined;
+const slack = enabled.includes('slack')
+  ? new SlackSender(cfg.slack.botToken, { name: cfg.slack.botName, iconUrl: cfg.slack.botIconUrl || undefined }, fetch, (id) => slackOAuth?.userToken(id))
+  : undefined;
 const teams = enabled.includes('teams') ? new TeamsIntegration(cfg.teams, cfg.publicUrl, store) : undefined;
-const viber = enabled.includes('viber') ? new ViberSender(cfg.viber.authToken, { name: cfg.viber.botName, avatar: cfg.viber.botAvatar || undefined }) : undefined;
+const viber = enabled.includes('viber') ? new ViberSender(cfg.viber.authToken, { name: cfg.viber.botName, avatar: cfg.viber.botAvatar || undefined }, fetch, cfg.viber.prefixAgentName) : undefined;
 const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender, viber };
 
-const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl });
-const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams }));
+const app = cfg.chatwootApiToken && cfg.chatwootAccountId ? new ChatwootAppClient(cfg.chatwootBaseUrl, cfg.chatwootApiToken, cfg.chatwootAccountId) : undefined;
+const connectLink = cfg.linkSecret ? (a: { id: number; email?: string }) => (a.email ? signConnectLink(cfg.linkSecret, cfg.publicUrl, { id: a.id, email: a.email }) : undefined) : undefined;
+const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, connectLink });
+const connect = cfg.linkSecret && (teams || slackOAuth) ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth }) : undefined;
+const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, connect }));
 
 // Keep Graph subscriptions alive (renewed well before the 3-day cap) and pick up newly joined channels.
 if (teams) {

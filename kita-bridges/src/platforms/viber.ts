@@ -1,5 +1,5 @@
 import { hmacHex, safeEqual } from '../crypto.ts';
-import type { InboundMessage, OutboundMessage, Sender } from '../types.ts';
+import { withNamePrefix, type InboundMessage, type OutboundMessage, type Sender } from '../types.ts';
 
 /** Viber signs the raw body: X-Viber-Content-Signature = HEX(HMAC_SHA256(auth token, body)). */
 export function verifyViberSignature(authToken: string, rawBody: string, signature?: string): boolean {
@@ -63,13 +63,17 @@ export class ViberSender implements Sender {
   private token: string;
   private who: { name: string; avatar?: string };
   private fetchImpl: typeof fetch;
-  constructor(token: string, who: { name: string; avatar?: string }, fetchImpl: typeof fetch = fetch) {
+  private prefixAgentName: boolean;
+  /** Viber is one business identity, so the agent is named in-text ("Carmel: …") unless disabled. */
+  constructor(token: string, who: { name: string; avatar?: string }, fetchImpl: typeof fetch = fetch, prefixAgentName = true) {
     this.token = token;
     this.who = who;
     this.fetchImpl = fetchImpl;
+    this.prefixAgentName = prefixAgentName;
   }
 
-  async send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<void> {
+  async send(replyRef: Record<string, unknown>, original: OutboundMessage): Promise<void> {
+    const msg = this.prefixAgentName ? withNamePrefix(original) : original;
     // Viber file messages require the byte size up front.
     const sizes: Record<string, number> = {};
     for (const a of msg.attachments) {

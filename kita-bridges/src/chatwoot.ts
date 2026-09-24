@@ -42,7 +42,12 @@ export function toOutbound(payload: any): OutboundDecision {
   const text = typeof payload.content === 'string' ? payload.content : '';
   if (/\/survey\/responses\//.test(text)) return { send: false, reason: 'survey_link' };
   if (!text.trim() && attachments.length === 0) return { send: false, reason: 'empty' };
-  return { send: true, message: { messageId: Number(payload.id), conversationId, text, attachments } };
+  const s = payload.sender;
+  const agent =
+    s?.type === 'user' && s.id
+      ? { id: Number(s.id), name: String(s.name ?? s.available_name ?? '').trim(), firstName: String(s.available_name ?? s.name ?? '').trim().split(/\s+/)[0], email: s.email }
+      : undefined;
+  return { send: true, message: { messageId: Number(payload.id), conversationId, text, attachments, ...(agent?.name ? { agent } : {}) } };
 }
 
 /** Thin client for Chatwoot's public (inbox-identifier) client API. No agent token required. */
@@ -113,4 +118,64 @@ export async function downloadAttachments(atts: InboundAttachment[], fetchImpl: 
     }
   }
   return { files, failed };
+}
+
+/**
+ * Chatwoot Application API (agent-level token) for what the public inbox API can't do:
+ * private notes to agents, outgoing messages for staff who typed directly in Slack/Teams,
+ * and agent avatars. Everything it writes carries content_attributes.kita_bridge_origin, which
+ * toOutbound() refuses to send, so nothing it creates can bounce back out.
+ */
+export class ChatwootAppClient {
+  private base: string;
+  private token: string;
+  private accountId: string;
+  private fetchImpl: typeof fetch;
+  private agents?: { at: number; byId: Map<number, string | undefined> };
+
+  constructor(baseUrl: string, token: string, accountId: string, fetchImpl: typeof fetch = fetch) {
+    this.base = `${baseUrl}/api/v1/accounts/${accountId}`;
+    this.token = token;
+    this.accountId = accountId;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async createMessage(
+    conversationId: number,
+    m: { content: string; private: boolean; files?: { blob: Blob; name: string }[] },
+  ): Promise<{ id: number }> {
+    const attrs = { kita_bridge_origin: true };
+    let init: RequestInit;
+    if (m.files?.length) {
+      const form = new FormData();
+      form.set('content', m.content);
+      form.set('message_type', 'outgoing');
+      form.set('private', String(m.private));
+      form.set('content_attributes', JSON.stringify(attrs));
+      for (const f of m.files) form.append('attachments[]', f.blob, f.name);
+      init = { method: 'POST', body: form };
+    } else {
+      init = {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: m.content, message_type: 'outgoing', private: m.private, content_attributes: attrs }),
+      };
+    }
+    init.headers = { ...(init.headers as Record<string, string>), api_access_token: this.token };
+    const res = await this.fetchImpl(`${this.base}/conversations/${conversationId}/messages`, init);
+    if (!res.ok) throw new Error(`chatwoot app api messages -> ${res.status}`);
+    const j: any = await res.json();
+    return { id: Number(j.id) };
+  }
+
+  /** Agent avatar (thumbnail) by Chatwoot user id; cached for an hour. */
+  async avatarUrl(agentId: number): Promise<string | undefined> {
+    if (!this.agents || Date.now() - this.agents.at > 3600_000) {
+      const res = await this.fetchImpl(`${this.base}/agents`, { headers: { api_access_token: this.token } });
+      if (!res.ok) return undefined;
+      const list: any[] = await res.json();
+      this.agents = { at: Date.now(), byId: new Map(list.map((a) => [Number(a.id), a.thumbnail || undefined])) };
+    }
+    return this.agents.byId.get(agentId);
+  }
 }

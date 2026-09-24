@@ -21,6 +21,7 @@ export interface TeamsConfig {
 }
 
 const STATE_TTL_MS = 10 * 60 * 1000;
+type ConnectState = { exp: number } & ({ kind: 'service' } | { kind: 'agent'; agentId: number; email: string });
 
 /** Wires Graph auth, subscriptions, inbound resolution and the sender for the Kita service account. */
 export class TeamsIntegration {
@@ -30,15 +31,18 @@ export class TeamsIntegration {
   classifier: SenderClassifier;
   sender: TeamsSender;
   private cfg: TeamsConfig;
-  private states = new Map<string, number>();
+  private states = new Map<string, ConnectState>();
+  private store: Store;
+  private fetchImpl: typeof fetch;
+  private authCfg;
+  private agentAuths = new Map<number, GraphAuth>();
 
   constructor(cfg: TeamsConfig, publicUrl: string, store: Store, fetchImpl: typeof fetch = fetch) {
     this.cfg = cfg;
-    this.auth = new GraphAuth(
-      { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret, redirectUri: `${publicUrl}/teams/connect/callback`, kitaUserUpn: cfg.kitaUserUpn, encryptionKey: cfg.encryptionKey },
-      store,
-      fetchImpl,
-    );
+    this.store = store;
+    this.fetchImpl = fetchImpl;
+    this.authCfg = { tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret, redirectUri: `${publicUrl}/teams/connect/callback`, kitaUserUpn: cfg.kitaUserUpn, encryptionKey: cfg.encryptionKey };
+    this.auth = new GraphAuth(this.authCfg, store, fetchImpl);
     this.graph = new Graph(this.auth, fetchImpl);
     this.subs = new SubscriptionManager(
       this.graph,
@@ -47,21 +51,40 @@ export class TeamsIntegration {
       () => discoverResources(this.graph, { kitaUserId: this.auth.kitaUserId()!, tenantId: cfg.tenantId, teamIds: cfg.teamIds, extraChannels: cfg.extraChannels }),
     );
     this.classifier = new SenderClassifier(this.graph, { kitaUserId: () => this.auth.kitaUserId(), internalTenantIds: cfg.internalTenantIds });
-    this.sender = new TeamsSender(this.graph, cfg.messageFormat, fetchImpl);
+    this.sender = new TeamsSender(this.graph, cfg.messageFormat, fetchImpl, (id) => {
+      const a = this.agentAuth(id);
+      return a.isConnected() ? new Graph(a, fetchImpl) : undefined;
+    });
+  }
+
+  /** Per-agent delegated auth (their own refresh token, encrypted, in the kv table). */
+  agentAuth(agentId: number): GraphAuth {
+    let a = this.agentAuths.get(agentId);
+    if (!a) this.agentAuths.set(agentId, (a = new GraphAuth(this.authCfg, this.store, this.fetchImpl, String(agentId))));
+    return a;
+  }
+
+  /** Per-agent connect: the caller has already verified the signed link. */
+  agentConnectUrl(agentId: number, email: string): string {
+    const state = randomBytes(24).toString('base64url');
+    this.states.set(state, { exp: Date.now() + STATE_TTL_MS, kind: 'agent', agentId, email });
+    return this.agentAuth(agentId).authorizeUrl(state, email);
   }
 
   /** Step 1 of the one-time connect flow; guarded by TEAMS_CONNECT_KEY so strangers can't start it. */
   connectUrl(key: string | null): string | undefined {
     if (!key || !safeEqual(key, this.cfg.connectKey)) return undefined;
     const state = randomBytes(24).toString('base64url');
-    this.states.set(state, Date.now() + STATE_TTL_MS);
+    this.states.set(state, { exp: Date.now() + STATE_TTL_MS, kind: 'service' });
     return this.auth.authorizeUrl(state);
   }
 
+  /** Shared callback for the Kita-user connect and per-agent connects (one redirect URI). */
   async connectCallback(code: string | null, state: string | null): Promise<string> {
-    const exp = state ? this.states.get(state) : undefined;
+    const st = state ? this.states.get(state) : undefined;
     if (state) this.states.delete(state);
-    if (!code || !exp || exp < Date.now()) throw new Error('invalid or expired state');
+    if (!code || !st || st.exp < Date.now()) throw new Error('invalid or expired state');
+    if (st.kind === 'agent') return (await this.agentAuth(st.agentId).completeConnect(code, st.email)).upn;
     const who = await this.auth.completeConnect(code);
     await this.subs.sync();
     return who.upn;
