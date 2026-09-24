@@ -33,6 +33,13 @@ export function loadConfig() {
       apiKey: env('GRIP_API_KEY'),
       scopeRefreshMs: Number(env('SCOPE_REFRESH_SECONDS', '300')) * 1000,
     },
+    teamSync: {
+      /** off | dry-run (default: log what would be added) | on */
+      mode: env('TEAM_SYNC', 'dry-run'),
+      /** Kita team emails. Blank = every active Chatwoot agent. */
+      roster: list('TEAM_ROSTER').map((e) => e.toLowerCase()),
+      exclude: (list('TEAM_ROSTER_EXCLUDE').length ? list('TEAM_ROSTER_EXCLUDE') : ['bridge@kita.ai']).map((e) => e.toLowerCase()),
+    },
     whatsapp: {
       /** mirror (default): desk is read-only for WhatsApp, the team replies from the phone app. send: desk replies go out via Cloud API. */
       mode: (env('WHATSAPP_MODE', 'mirror') === 'send' ? 'send' : 'mirror') as 'mirror' | 'send',

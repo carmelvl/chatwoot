@@ -21,6 +21,10 @@ export const TEAMS_SCOPES = [
   'ChannelMessage.Send',
   'Chat.Read',
   'ChatMessage.Send',
+  // Team sync (src/teamsync.ts): add Kita staff to in-scope customer channels and chats.
+  'TeamMember.ReadWrite.All', // list + add team members (standard channels inherit team membership)
+  'ChannelMember.ReadWrite.All', // list + add members of private/shared channels
+  'ChatMember.ReadWrite', // list + add group chat members
 ];
 
 export interface GraphAuthConfig {
@@ -36,10 +40,13 @@ export interface GraphAuthConfig {
 export class GraphError extends Error {
   status: number;
   code?: string;
-  constructor(status: number, code: string | undefined, message: string) {
+  /** Seconds from a 429/503 Retry-After header, when Graph sent one. */
+  retryAfter?: number;
+  constructor(status: number, code: string | undefined, message: string, retryAfter?: number) {
     super(`graph ${status}${code ? ` ${code}` : ''}: ${message}`);
     this.status = status;
     this.code = code;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -166,7 +173,10 @@ export class Graph {
     });
     if (res.status === 204) return undefined;
     const j: any = await res.json().catch(() => ({}));
-    if (!res.ok) throw new GraphError(res.status, j.error?.code, j.error?.message ?? res.statusText);
+    if (!res.ok) {
+      const ra = Number(res.headers.get('retry-after'));
+      throw new GraphError(res.status, j.error?.code, j.error?.message ?? res.statusText, Number.isFinite(ra) && ra > 0 ? ra : undefined);
+    }
     return j;
   }
 
