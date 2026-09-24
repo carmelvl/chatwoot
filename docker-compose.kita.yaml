@@ -61,10 +61,24 @@ services:
     volumes:
       - bridges_data:/data
 
+  # Chatwoot -> Grip support sync + automatic tickets (see kita-grip-sync/README.md). Secrets in kita-grip-sync/.env.
+  grip-sync:
+    build: ./kita-grip-sync
+    restart: unless-stopped
+    depends_on: [rails]
+    env_file:
+      - path: kita-grip-sync/.env
+        required: false # rejects every webhook until CHATWOOT_WEBHOOK_SECRET is configured
+    environment:
+      - CHATWOOT_BASE_URL=http://rails:3000
+      - GRIP_SYNC_DB_PATH=/data/grip-sync.sqlite
+    volumes:
+      - grip_sync_data:/data
+
   caddy:
     image: caddy:2
     restart: unless-stopped
-    depends_on: [rails, bridges]
+    depends_on: [rails, bridges, grip-sync]
     ports: ['80:80', '443:443']
     volumes:
       - ./Caddyfile.kita:/etc/caddy/Caddyfile:ro
@@ -76,3 +90,4 @@ volumes:
   postgres_data:
   redis_data:
   bridges_data:
+  grip_sync_data:
