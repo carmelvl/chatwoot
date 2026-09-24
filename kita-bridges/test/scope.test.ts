@@ -29,7 +29,8 @@ function fakeGrip(initial: any) {
   }) as typeof fetch;
   return { calls, fetchImpl, set: (v: any) => { next = v; } };
 }
-const scopeBody = (out: string[], inn: string[] = []) => ({ in_scope: inn, out_of_scope: out, generated_at: '2026-09-24T10:00:00Z' });
+/** Grip's real shape: { success, data: { in_scope, out_of_scope, generated_at } }. */
+const scopeBody = (out: string[], inn: string[] = []) => ({ success: true, data: { in_scope: inn, out_of_scope: out, generated_at: '2026-09-24T10:00:00Z' } });
 
 async function loadedScope(out: string[], inn: string[] = []) {
   const g = fakeGrip(scopeBody(out, inn));
@@ -51,6 +52,10 @@ test('scope cache: GET {GRIP_BASE_URL}/api/v1/support/scope with the Bearer key;
   assert.equal(s.allows('slack:CNEW'), true, 'unknown channels pass so auto-link keeps working');
   assert.equal(s.allows(undefined), true);
   assert.equal(s.generatedAt, '2026-09-24T10:00:00Z');
+  g.set({ in_scope: [], out_of_scope: ['slack:CFLAT'] }); // an unwrapped body is accepted too
+  assert.equal(await s.refresh(), true);
+  assert.equal(s.allows('slack:CFLAT'), false);
+  assert.equal(s.allows('slack:CZED'), true);
 });
 
 test('scope cache: fails open, keeps the last good list on HTTP errors, network errors and malformed bodies', async () => {
@@ -61,7 +66,7 @@ test('scope cache: fails open, keeps the last good list on HTTP errors, network 
   assert.equal(s.allows('slack:CZED'), true, 'never loaded -> allow all');
   g.set(scopeBody(['slack:CZED']));
   assert.equal(await s.refresh(), true);
-  for (const bad of [() => { throw new Error('down'); }, new Response('nope', { status: 503 }), { out_of_scope: 'not-a-list' }, new Response('<html>', { status: 200 })]) {
+  for (const bad of [() => { throw new Error('down'); }, new Response('nope', { status: 503 }), { out_of_scope: 'not-a-list' }, { success: true, data: { out_of_scope: null } }, new Response('<html>', { status: 200 })]) {
     g.set(bad);
     assert.equal(await s.refresh(), false);
     assert.equal(s.allows('slack:CZED'), false, 'last good list still applies');

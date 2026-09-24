@@ -52,7 +52,8 @@ export class ScopeCache implements ScopeCheck {
       const url = `${this.o.baseUrl!.replace(/\/$/, '')}/api/v1/support/scope`;
       const res = await (this.o.fetchImpl ?? fetch)(url, { headers: { authorization: `Bearer ${this.o.apiKey}`, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body: any = await res.json();
+      const json: any = await res.json();
+      const body = json?.data && typeof json.data === 'object' ? json.data : json; // Grip wraps it in { success, data }
       if (!Array.isArray(body?.out_of_scope)) throw new Error('malformed scope response');
       this.outOfScope = new Set(body.out_of_scope.map(String));
       this.generatedAt = body.generated_at;
