@@ -12,6 +12,7 @@ import { TeamsIntegration } from './platforms/teams/index.ts';
 import { SYNC_INTERVAL_MS } from './platforms/teams/subscriptions.ts';
 import { ViberSender } from './platforms/viber.ts';
 import { WhatsAppSender } from './platforms/whatsapp.ts';
+import { ScopeCache } from './scope.ts';
 import { Store } from './store.ts';
 import type { Platform, Sender } from './types.ts';
 
@@ -32,7 +33,10 @@ const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender
 
 const app = cfg.chatwootApiToken && cfg.chatwootAccountId ? new ChatwootAppClient(cfg.chatwootBaseUrl, cfg.chatwootApiToken, cfg.chatwootAccountId) : undefined;
 const connectLink = cfg.linkSecret ? (a: { id: number; email?: string }) => (a.email ? signConnectLink(cfg.linkSecret, cfg.publicUrl, { id: a.id, email: a.email }) : undefined) : undefined;
-const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, connectLink });
+// Grip scope (fails open; disabled when GRIP_* is unset). First refresh runs in the background.
+const scope = new ScopeCache({ baseUrl: cfg.grip.baseUrl, apiKey: cfg.grip.apiKey, refreshMs: cfg.grip.scopeRefreshMs });
+void scope.start();
+const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, connectLink, scope });
 const connect = cfg.linkSecret && (teams || slackOAuth) ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth }) : undefined;
 const whatsappOwnerApps = new Map(
   cfg.whatsapp.numbers
@@ -54,4 +58,4 @@ setInterval(() => {
 }, 6 * 3600 * 1000).unref();
 server.listen(cfg.port, () => log.info('listening', { port: cfg.port, platforms: enabled }));
 for (const sig of ['SIGTERM', 'SIGINT'] as const)
-  process.on(sig, () => server.close(() => { store.close(); process.exit(0); }));
+  process.on(sig, () => server.close(() => { scope.stop(); store.close(); process.exit(0); }));

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { ChatwootAppClient, ChatwootClient, downloadAttachments, toOutbound } from './chatwoot.ts';
 import { log } from './log.ts';
+import type { ScopeCheck } from './scope.ts';
 import type { Store } from './store.ts';
 import type { AgentIdentity, FallbackReason, InboundMessage, OutboundAttachment, Platform, Sender } from './types.ts';
 
@@ -16,9 +17,11 @@ export interface BridgeDeps {
   /** Signed per-agent connect link, included in "connect your account" notes. */
   connectLink?: (agent: AgentIdentity) => string | undefined;
   fetchImpl?: typeof fetch;
+  /** Grip scope: messages on out-of-scope channels are dropped before anything reaches Chatwoot. Absent = allow all. */
+  scope?: ScopeCheck;
 }
 
-export type InboundResult = 'duplicate' | 'created' | 'appended' | 'staff_synced' | 'ignored';
+export type InboundResult = 'duplicate' | 'created' | 'appended' | 'staff_synced' | 'ignored' | 'out_of_scope';
 
 /** Maps a platform user to a Chatwoot contact identifier. Namespaced so ids never collide across platforms. */
 export const contactIdentifier = (platform: Platform, userKey: string) => `${platform}:${userKey}`;
@@ -65,9 +68,18 @@ export class Bridge {
     this.recentOut.set(key, list);
   }
 
+  /** True if Grip says this channel is out of scope; logged with the key only (never content). */
+  outOfScope(msg: InboundMessage): boolean {
+    const key = msg.conversationAttributes?.channel_key;
+    if (!this.d.scope || this.d.scope.allows(key)) return false;
+    log.info('out_of_scope_dropped', { platform: msg.platform, channel_key: key });
+    return true;
+  }
+
   /** Platform message -> Chatwoot. Customers become incoming messages; Kita staff typing directly become outgoing. */
   async inbound(msg: InboundMessage): Promise<InboundResult> {
     const { store } = this.d;
+    if (this.outOfScope(msg)) return 'out_of_scope';
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
     if (msg.echoKeys?.some((k) => store.isSeen(`in:${msg.platform}:${k}`))) return 'duplicate';
     if (!store.markSeen(seenKey)) return 'duplicate';
@@ -151,6 +163,7 @@ export class Bridge {
     const app = o.ownerApp ?? this.d.app;
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
     if (!app) return 'ignored';
+    if (this.outOfScope(msg)) return 'out_of_scope';
     if (!store.markSeen(seenKey)) return 'duplicate';
     try {
       const { conv } = await this.ensureConversation(msg);

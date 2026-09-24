@@ -28,6 +28,11 @@ export function loadConfig() {
     encryptionKey: env('BRIDGE_ENCRYPTION_KEY'),
     // WhatsApp has one inbox per business number (see whatsapp.numbers), so its entry here is unused.
     inboxes: { slack: inbox('slack'), teams: inbox('teams'), viber: inbox('viber'), whatsapp: { inboxIdentifier: '', webhookSecret: '' } } as Record<Platform, PlatformInbox>,
+    grip: {
+      baseUrl: env('GRIP_BASE_URL').replace(/\/$/, ''),
+      apiKey: env('GRIP_API_KEY'),
+      scopeRefreshMs: Number(env('SCOPE_REFRESH_SECONDS', '300')) * 1000,
+    },
     whatsapp: {
       /** mirror (default): desk is read-only for WhatsApp, the team replies from the phone app. send: desk replies go out via Cloud API. */
       mode: (env('WHATSAPP_MODE', 'mirror') === 'send' ? 'send' : 'mirror') as 'mirror' | 'send',

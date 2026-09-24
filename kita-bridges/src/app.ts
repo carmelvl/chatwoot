@@ -36,6 +36,7 @@ async function processWhatsApp(d: AppDeps, body: unknown) {
   const { items, skipped } = parseWhatsAppWebhook(body, w.numbers);
   if (skipped.length) log.info('whatsapp_skipped', { skipped });
   for (const it of items) {
+    if (d.bridge.outOfScope(it.message)) continue; // before any media download or Chatwoot call
     try {
       const attachments = await resolveMedia(it.media, w.accessToken, d.fetchImpl);
       if (attachments.length < it.media.length) log.warn('whatsapp_media_unresolved', { missing: it.media.length - attachments.length });
@@ -164,6 +165,7 @@ export function createHandler(d: AppDeps) {
         send(res, 200); // Slack requires an ack within 3s
         if (parsed.kind === 'message') {
           const m = parsed.message;
+          if (bridge.outOfScope(m)) return; // before the Slack user lookup or any Chatwoot call
           background('slack_inbound', (async () => bridge.inbound({ ...m, userName: (await d.slack?.userName(m.userKey)) ?? m.userKey }))());
         }
         return;

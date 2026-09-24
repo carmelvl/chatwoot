@@ -50,6 +50,18 @@ Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifica
   * Outbound, Slack uploads native files (as the agent when connected). Viber sends picture/file messages. Teams embeds images inline (`hostedContents`, up to 3 MB) and sends other files as a named link to the bridge media URL.
 * Logs contain ids only, never message bodies or tokens.
 
+## Grip scope: only Customers-page accounts reach the desk
+
+The desk only shows channels whose account is on Grip's **Customers** page (Active or Pending). The bridge asks Grip which channels are out of scope and drops their messages at the door.
+
+* **Source.** `GET {GRIP_BASE_URL}/api/v1/support/scope` with `Authorization: Bearer {GRIP_API_KEY}` (the same `grip_` key grip-sync uses) returns `{ in_scope, out_of_scope, generated_at }`, lists of `channel_key`s (`slack:<channel>`, `teams:<channel or chat>`, `whatsapp:<E.164>`, `viber:<user>`). `src/scope.ts` caches it and refreshes every `SCOPE_REFRESH_SECONDS` (default 300).
+* **Where.** Every inbound path: Slack events, Teams Graph notifications, WhatsApp `messages` **and** `smb_message_echoes`, Viber. The key is the same `channel_key` the bridge stamps on the conversation. If it's in `out_of_scope`, the message is dropped before any Chatwoot contact or conversation is created (and, for Slack and WhatsApp, before the user lookup or media download). One `out_of_scope_dropped` info log with the platform and key only, never content. The platform still gets its 200/202, so it doesn't retry.
+* **Unknown keys pass.** A channel Grip hasn't linked yet isn't in either list, so it goes through and auto-link keeps working. If it then auto-links to a paused account, grip-sync resolves that conversation and labels it `out-of-scope`.
+* **Fails open.** If a refresh fails, the last good list stays in effect. With no list yet (Grip down at boot), everything is let through.
+* **Disabled** when `GRIP_BASE_URL` or `GRIP_API_KEY` is blank: everything is ingested, as before.
+* **Outbound is unchanged.** Agents can still reply in a conversation that's already in the desk.
+* **Mid-conversation changes.** Scope is checked per message, not per conversation. When an account is paused or closed in Grip, the next refresh (within `SCOPE_REFRESH_SECONDS`) puts its channel in `out_of_scope`, and **new customer messages in conversations that are already open stop arriving in the desk**; the open conversation just goes quiet. Dropped messages are not queued or replayed. If the account becomes Active or Pending again, new messages flow again from the next refresh.
+
 ## Run and test locally
 
 ```bash
