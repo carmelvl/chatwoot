@@ -1,8 +1,0 @@
-{"type":"message","id":"1790000000002","channelId":"msteams","serviceUrl":"https://smba.trafficmanager.net/amer/",
- "from":{"id":"29:1abcCUSTOMER2","name":"Lee Park","aadObjectId":"aad-lee-0002"},
- "conversation":{"id":"19:abc@thread.tacv2;messageid=1790000000000","conversationType":"channel","isGroup":true},
- "recipient":{"id":"28:kita-bot-app-id","name":"Kita Support"},
- "textFormat":"xml","text":"<p><at>Kita Support</at> payouts are delayed &amp; stuck</p>",
- "channelData":{"tenant":{"id":"tenant-cust-01"},"channel":{"id":"19:abc@thread.tacv2"}},
- "attachments":[{"contentType":"image/png","contentUrl":"https://smba.trafficmanager.net/amer/v3/attachments/xyz/views/original","name":"shot.png"},
-                {"contentType":"text/html","content":"<p>dup body</p>"}]}

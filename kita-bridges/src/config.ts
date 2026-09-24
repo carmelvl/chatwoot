@@ -29,9 +29,16 @@ export function loadConfig() {
       botIconUrl: env('SLACK_BOT_ICON_URL'),
     },
     teams: {
-      appId: env('TEAMS_APP_ID'),
-      appPassword: env('TEAMS_APP_PASSWORD'),
-      tenantId: env('TEAMS_APP_TENANT_ID'),
+      tenantId: env('TEAMS_TENANT_ID'),
+      clientId: env('TEAMS_CLIENT_ID'),
+      clientSecret: env('TEAMS_CLIENT_SECRET'),
+      kitaUserUpn: env('TEAMS_KITA_USER_UPN'),
+      internalTenantIds: list('TEAMS_INTERNAL_TENANT_IDS').length ? list('TEAMS_INTERNAL_TENANT_IDS') : [env('TEAMS_TENANT_ID')].filter(Boolean),
+      connectKey: env('TEAMS_CONNECT_KEY'),
+      teamIds: list('TEAMS_TEAM_IDS'),
+      extraChannels: list('TEAMS_EXTRA_CHANNELS'),
+      messageFormat: (env('TEAMS_MESSAGE_FORMAT', 'auto') as 'auto' | 'html' | 'card'),
+      encryptionKey: env('BRIDGE_ENCRYPTION_KEY'),
     },
     viber: {
       authToken: env('VIBER_AUTH_TOKEN'),
@@ -47,7 +54,8 @@ export function enabledPlatforms(cfg: Config): Platform[] {
   const out: Platform[] = [];
   const ok = (p: Platform) => cfg.inboxes[p].inboxIdentifier && cfg.inboxes[p].webhookSecret;
   if (ok('slack') && cfg.slack.signingSecret && cfg.slack.botToken) out.push('slack');
-  if (ok('teams') && cfg.teams.appId && cfg.teams.appPassword) out.push('teams');
+  const t = cfg.teams;
+  if (ok('teams') && t.tenantId && t.clientId && t.clientSecret && t.kitaUserUpn && t.connectKey.length >= 16 && t.encryptionKey.length >= 16) out.push('teams');
   if (ok('viber') && cfg.viber.authToken) out.push('viber');
   return out;
 }

@@ -44,12 +44,13 @@ export class Bridge {
 
       let conv = store.getByThread(msg.platform, msg.threadKey);
       let result: InboundResult = 'appended';
+      if (conv && conv.status === 'resolved' && msg.newConversationIfResolved) conv = undefined;
       if (!conv) {
         const conversationId = await chatwoot.createConversation(inbox, sourceId, { channel: msg.platform, ...msg.conversationAttributes });
         conv = { platform: msg.platform, threadKey: msg.threadKey, conversationId, sourceId, replyRef: msg.replyRef };
         result = 'created';
       } else {
-        // Refresh the reply reference (Teams serviceUrl can change; Slack keeps its thread root).
+        // Keep the reply reference fresh (merge, so thread roots are never lost).
         conv = { ...conv, replyRef: { ...conv.replyRef, ...msg.replyRef } };
       }
       store.putConversation(conv);
@@ -79,7 +80,12 @@ export class Bridge {
   }
 
   /** Chatwoot webhook -> platform. Returns why it was skipped, or 'sent'. Idempotent on message id. */
-  async outbound(platform: Platform, payload: unknown): Promise<string> {
+  async outbound(platform: Platform, payload: any): Promise<string> {
+    // Track resolution so long-lived chats can open a fresh conversation next time (webhook ids are display ids).
+    if (payload?.event === 'conversation_status_changed' && payload.id && payload.status) {
+      this.d.store.setConversationStatus(platform, Number(payload.id), String(payload.status));
+      return `status:${payload.status}`;
+    }
     const decision = toOutbound(payload);
     if (!decision.send) return `skip:${decision.reason}`;
     const conv = this.d.store.getByConversation(platform, decision.message.conversationId);
@@ -90,7 +96,8 @@ export class Bridge {
     if (!this.d.store.markSeen(seenKey)) return 'skip:duplicate';
     const msg = { ...decision.message, attachments: decision.message.attachments.map((a) => this.proxied(a)) };
     try {
-      await sender.send(conv.replyRef, msg);
+      const echoes = await sender.send(conv.replyRef, msg);
+      for (const id of echoes ?? []) this.d.store.markSeen(`in:${platform}:${id}`);
     } catch (e) {
       this.d.store.forget(seenKey);
       throw e;

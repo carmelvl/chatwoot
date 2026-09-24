@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { composeInboundText, contactIdentifier } from '../src/bridge.ts';
 import { parseSlackEvent } from '../src/platforms/slack.ts';
-import { parseTeamsActivity } from '../src/platforms/teams.ts';
+import { parseGraphMessage, parseResource } from '../src/platforms/teams/messages.ts';
 import { parseViberEvent } from '../src/platforms/viber.ts';
 import { Store } from '../src/store.ts';
 import { fixture, makeBridge, PUBLIC_URL } from './helpers.ts';
@@ -90,18 +90,49 @@ test('end to end: viber in, agent reply out to same user; private note and echo 
   assert.equal(senders.viber.sent.length, 1);
 });
 
-test('end to end: teams reply goes to the stored conversation reference; slack reply goes into the thread', async () => {
-  const { bridge, senders } = makeBridge();
-  const t = parseTeamsActivity(fixture('teams_channel_mention.json'));
+const teamsChannelMsg = () => {
+  const t = parseGraphMessage(fixture('graph_channel_reply_external.json'), parseResource(fixture('graph_notification_channel.json').value[0].resource)!, 'customer');
   if (t.kind !== 'message') throw new Error();
+  return t;
+};
+const teamsChatMsg = (id: string) => {
+  const t = parseGraphMessage({ ...fixture('graph_chat_message_guest.json'), id }, { kind: 'chat', chatId: '19:acme-group@thread.v2', messageId: id }, 'customer');
+  if (t.kind !== 'message') throw new Error();
+  return t.message;
+};
+
+test('end to end: teams reply goes to the channel thread root; slack reply goes into the thread', async () => {
+  const { bridge, senders } = makeBridge();
+  const t = teamsChannelMsg();
   await bridge.inbound({ ...t.message, attachments: [] }); // conv 100
   await bridge.inbound(slackMsg('slack_top_level.json')); // conv 101
   await bridge.outbound('teams', { ...fixture('chatwoot_outgoing.json'), conversation: { id: 100 } });
   await bridge.outbound('slack', { ...fixture('chatwoot_outgoing.json'), id: 9100, conversation: { id: 101 } });
-  assert.equal(senders.teams.sent[0].ref.conversationId, '19:abc@thread.tacv2;messageid=1790000000000');
+  assert.deepEqual(senders.teams.sent[0].ref, { kind: 'channel', teamId: 'team-acme', channelId: '19:acme-shared@thread.tacv2', rootId: '1790000000000' });
   assert.deepEqual(senders.slack.sent[0].ref, { channel: 'C0SHARED1', threadTs: '1790000000.000100' });
   // platform isolation: a Slack inbox webhook can't send into a Teams conversation
   assert.equal(await bridge.outbound('slack', { ...fixture('chatwoot_outgoing.json'), id: 9200, conversation: { id: 100 } }), 'skip:unmapped_conversation');
+});
+
+test('teams group chat: new conversation once the previous one is resolved (conversation_status_changed)', async () => {
+  const { bridge, store } = makeBridge();
+  assert.equal(await bridge.inbound(teamsChatMsg('1')), 'created'); // conv 100
+  assert.equal(await bridge.inbound(teamsChatMsg('2')), 'appended');
+  assert.equal(await bridge.outbound('teams', { event: 'conversation_status_changed', id: 100, status: 'resolved' }), 'status:resolved');
+  assert.equal(await bridge.inbound(teamsChatMsg('3')), 'created'); // conv 101
+  assert.equal(store.getByThread('teams', 'chat:19:acme-group@thread.v2')?.conversationId, 101);
+  // a resolved channel thread is simply appended to (Chatwoot reopens it)
+  await bridge.inbound(teamsChannelMsg().message);
+  await bridge.outbound('teams', { event: 'conversation_status_changed', id: 102, status: 'resolved' });
+  assert.equal(await bridge.inbound({ ...teamsChannelMsg().message, eventId: 'x:2' }), 'appended');
+});
+
+test('sender echo ids are pre-marked, so our own Teams post coming back via Graph is dropped', async () => {
+  const { bridge, senders } = makeBridge();
+  await bridge.inbound(teamsChatMsg('1'));
+  (senders.teams as any).send = async () => ['19:acme-group@thread.v2:777'];
+  assert.equal(await bridge.outbound('teams', { ...fixture('chatwoot_outgoing.json'), conversation: { id: 100 } }), 'sent');
+  assert.equal(await bridge.inbound({ ...teamsChatMsg('777') }), 'duplicate');
 });
 
 test('failed send is retryable and surfaces the error (Chatwoot marks the message failed)', async () => {

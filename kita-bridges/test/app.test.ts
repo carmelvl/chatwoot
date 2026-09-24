@@ -5,21 +5,25 @@ import type { AddressInfo } from 'node:net';
 import { createHandler } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { hmacHex } from '../src/crypto.ts';
-import { makeBridge, raw } from './helpers.ts';
+import { TeamsIntegration } from '../src/platforms/teams/index.ts';
+import { fixture, makeBridge, raw } from './helpers.ts';
 
 const cfg = loadConfig();
 cfg.slack.signingSecret = 'slack-secret';
 cfg.slack.botToken = 'xoxb';
 cfg.slack.internalTeamIds = ['TKITA0001'];
 cfg.viber.authToken = 'viber-tok';
-cfg.teams.appId = 'kita-bot-app-id';
 cfg.inboxes.viber.webhookSecret = 'cw-viber';
 const { bridge, senders, store } = makeBridge();
 const upstream = (async (url: any, init: any = {}) => {
   assert.equal(String(url), 'https://support.internal.kita.ai/rails/active_storage/blobs/redirect/abc/steps.png');
   return new Response(init.method === 'HEAD' ? null : new Uint8Array([137, 80, 78, 71]), { headers: { 'content-type': 'image/png', 'content-length': '4', server: 'chatwoot-rails' } });
 }) as typeof fetch;
-const server = createServer(createHandler({ cfg, store, fetchImpl: upstream, bridge, enabled: ['slack', 'teams', 'viber'], jwks: async () => undefined }));
+const teams = new TeamsIntegration(
+  { tenantId: 'kita-tenant', clientId: 'cid', clientSecret: 'sec', kitaUserUpn: 'kita@kita.ai', internalTenantIds: ['kita-tenant'], connectKey: 'connect-key-0123456789', teamIds: [], extraChannels: [], messageFormat: 'auto', encryptionKey: 'k'.repeat(32) },
+  'https://support.internal.kita.ai/bridges', store, (async () => new Response('unexpected', { status: 500 })) as typeof fetch,
+);
+const server = createServer(createHandler({ cfg, store, fetchImpl: upstream, bridge, enabled: ['slack', 'teams', 'viber'], teams }));
 await new Promise<void>((r) => server.listen(0, r));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/bridges`;
 after(() => server.close());
@@ -43,8 +47,31 @@ test('http: viber unsigned request rejected, signed accepted', async () => {
   assert.equal((await post('/viber/webhook', body, { 'x-viber-content-signature': hmacHex('viber-tok', body) })).status, 200);
 });
 
-test('http: teams without a valid JWT is rejected', async () => {
-  assert.equal((await post('/teams/messages', raw('teams_personal.json'))).status, 401);
+test('http: Graph subscription validation echoes the decoded token as text/plain on both endpoints', async () => {
+  for (const ep of ['/teams/notifications', '/teams/lifecycle']) {
+    const res = await fetch(`${base}${ep}?validationToken=${encodeURIComponent('Validation: Testing client application reachability <123>')}`, { method: 'POST', headers: { 'content-type': 'text/plain' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'text/plain');
+    assert.equal(await res.text(), 'Validation: Testing client application reachability <123>');
+  }
+});
+
+test('http: notifications with a bad clientState are acked (202) but never fetched', async () => {
+  const res = await post('/teams/notifications', raw('graph_notification_forged.json'));
+  assert.equal(res.status, 202);
+  const r = await teams.notifications(fixture('graph_notification_forged.json'), async () => assert.fail('must not deliver'));
+  assert.deepEqual(r, { accepted: 0, rejected: 2 });
+});
+
+test('http: connect flow requires the connect key and a valid state', async () => {
+  assert.equal((await fetch(`${base}/teams/connect?key=wrong`, { redirect: 'manual' })).status, 403);
+  const ok = await fetch(`${base}/teams/connect?key=connect-key-0123456789`, { redirect: 'manual' });
+  assert.equal(ok.status, 302);
+  const loc = new URL(ok.headers.get('location')!);
+  assert.equal(loc.host, 'login.microsoftonline.com');
+  assert.equal(loc.pathname, '/kita-tenant/oauth2/v2.0/authorize');
+  assert.equal(loc.searchParams.get('redirect_uri'), 'https://support.internal.kita.ai/bridges/teams/connect/callback');
+  assert.equal((await fetch(`${base}/teams/connect/callback?code=abc&state=forged`)).status, 400);
 });
 
 test('http: chatwoot webhook requires the inbox signature; unmapped conversation is a 200 skip', async () => {

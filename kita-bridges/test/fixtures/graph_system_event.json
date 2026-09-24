@@ -1,0 +1,2 @@
+{"id":"1790000300000","messageType":"systemEventMessage","chatId":"19:acme-group@thread.v2","from":null,
+ "body":{"contentType":"html","content":"<systemEventMessage/>"},"eventDetail":{"@odata.type":"#microsoft.graph.membersAddedEventMessageDetail"}}

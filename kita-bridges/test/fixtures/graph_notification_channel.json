@@ -1,0 +1,4 @@
+{"value":[{"subscriptionId":"sub-channel-1","changeType":"created","tenantId":"kita-tenant","clientState":"CLIENT_STATE_CHANNEL",
+ "subscriptionExpirationDateTime":"2026-09-27T10:00:00Z",
+ "resource":"teams('team-acme')/channels('19:acme-shared@thread.tacv2')/messages('1790000000000')/replies('1790000050000')",
+ "resourceData":{"id":"1790000050000","@odata.type":"#Microsoft.Graph.chatMessage","@odata.id":"teams('team-acme')/channels('19:acme-shared@thread.tacv2')/messages('1790000000000')/replies('1790000050000')"}}]}
