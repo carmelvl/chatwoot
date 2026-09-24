@@ -1,4 +1,5 @@
 import type { Platform } from './types.ts';
+import type { WhatsAppNumber } from './platforms/whatsapp.ts';
 
 const env = (k: string, d = ''): string => (process.env[k] ?? d).trim();
 const list = (k: string): string[] => env(k).split(',').map((s) => s.trim()).filter(Boolean);
@@ -25,7 +26,17 @@ export function loadConfig() {
     /** Signs per-agent connect links. */
     linkSecret: env('BRIDGE_LINK_SECRET'),
     encryptionKey: env('BRIDGE_ENCRYPTION_KEY'),
-    inboxes: { slack: inbox('slack'), teams: inbox('teams'), viber: inbox('viber') } as Record<Platform, PlatformInbox>,
+    // WhatsApp has one inbox per business number (see whatsapp.numbers), so its entry here is unused.
+    inboxes: { slack: inbox('slack'), teams: inbox('teams'), viber: inbox('viber'), whatsapp: { inboxIdentifier: '', webhookSecret: '' } } as Record<Platform, PlatformInbox>,
+    whatsapp: {
+      /** mirror (default): desk is read-only for WhatsApp, the team replies from the phone app. send: desk replies go out via Cloud API. */
+      mode: (env('WHATSAPP_MODE', 'mirror') === 'send' ? 'send' : 'mirror') as 'mirror' | 'send',
+      appSecret: env('WHATSAPP_APP_SECRET'),
+      verifyToken: env('WHATSAPP_VERIFY_TOKEN'),
+      accessToken: env('WHATSAPP_ACCESS_TOKEN'),
+      prefixAgentName: env('WHATSAPP_PREFIX_AGENT_NAME', 'true') !== 'false',
+      numbers: parseNumbers(env('WHATSAPP_NUMBERS', '[]')),
+    },
     slack: {
       signingSecret: env('SLACK_SIGNING_SECRET'),
       botToken: env('SLACK_BOT_TOKEN'),
@@ -58,6 +69,14 @@ export function loadConfig() {
   };
 }
 
+function parseNumbers(json: string): WhatsAppNumber[] {
+  const list = JSON.parse(json);
+  if (!Array.isArray(list)) throw new Error('WHATSAPP_NUMBERS must be a JSON array');
+  for (const n of list)
+    if (!n.phoneNumberId || !n.inboxIdentifier || !n.webhookSecret || !n.ownerName) throw new Error('each WHATSAPP_NUMBERS entry needs phoneNumberId, inboxIdentifier, webhookSecret, ownerName');
+  return list;
+}
+
 export type Config = ReturnType<typeof loadConfig>;
 
 export function enabledPlatforms(cfg: Config): Platform[] {
@@ -67,5 +86,7 @@ export function enabledPlatforms(cfg: Config): Platform[] {
   const t = cfg.teams;
   if (ok('teams') && t.tenantId && t.clientId && t.clientSecret && t.kitaUserUpn && t.connectKey.length >= 16 && t.encryptionKey.length >= 16) out.push('teams');
   if (ok('viber') && cfg.viber.authToken) out.push('viber');
+  const w = cfg.whatsapp;
+  if (w.numbers.length && w.appSecret && w.verifyToken && w.accessToken) out.push('whatsapp');
   return out;
 }

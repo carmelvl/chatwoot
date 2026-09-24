@@ -11,6 +11,7 @@ import { signConnectLink } from './links.ts';
 import { TeamsIntegration } from './platforms/teams/index.ts';
 import { SYNC_INTERVAL_MS } from './platforms/teams/subscriptions.ts';
 import { ViberSender } from './platforms/viber.ts';
+import { WhatsAppSender } from './platforms/whatsapp.ts';
 import { Store } from './store.ts';
 import type { Platform, Sender } from './types.ts';
 
@@ -26,13 +27,19 @@ const slack = enabled.includes('slack')
   : undefined;
 const teams = enabled.includes('teams') ? new TeamsIntegration(cfg.teams, cfg.publicUrl, store) : undefined;
 const viber = enabled.includes('viber') ? new ViberSender(cfg.viber.authToken, { name: cfg.viber.botName, avatar: cfg.viber.botAvatar || undefined }, fetch, cfg.viber.prefixAgentName) : undefined;
-const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender, viber };
+const whatsapp = enabled.includes('whatsapp') && cfg.whatsapp.mode === 'send' ? new WhatsAppSender(cfg.whatsapp.accessToken, cfg.whatsapp.prefixAgentName) : undefined;
+const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender, viber, whatsapp };
 
 const app = cfg.chatwootApiToken && cfg.chatwootAccountId ? new ChatwootAppClient(cfg.chatwootBaseUrl, cfg.chatwootApiToken, cfg.chatwootAccountId) : undefined;
 const connectLink = cfg.linkSecret ? (a: { id: number; email?: string }) => (a.email ? signConnectLink(cfg.linkSecret, cfg.publicUrl, { id: a.id, email: a.email }) : undefined) : undefined;
 const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, connectLink });
 const connect = cfg.linkSecret && (teams || slackOAuth) ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth }) : undefined;
-const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, connect }));
+const whatsappOwnerApps = new Map(
+  cfg.whatsapp.numbers
+    .filter((n) => n.agentAccessToken && cfg.chatwootAccountId)
+    .map((n) => [n.phoneNumberId, new ChatwootAppClient(cfg.chatwootBaseUrl, n.agentAccessToken!, cfg.chatwootAccountId)] as const),
+);
+const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, connect, whatsappOwnerApps }));
 
 // Keep Graph subscriptions alive (renewed well before the 3-day cap) and pick up newly joined channels.
 if (teams) {

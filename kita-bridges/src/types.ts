@@ -1,4 +1,4 @@
-export type Platform = 'slack' | 'teams' | 'viber';
+export type Platform = 'slack' | 'teams' | 'viber' | 'whatsapp';
 
 export interface InboundAttachment {
   url: string;
@@ -33,6 +33,10 @@ export interface InboundMessage {
   author?: 'customer' | 'staff';
   /** Extra ids that identify this message as one the bridge itself posted (e.g. Slack file ids). */
   echoKeys?: string[];
+  /** Per-message inbox (WhatsApp: one inbox per business number). Defaults to the platform's inbox. */
+  inboxIdentifier?: string;
+  /** Contact identifier override (WhatsApp: whatsapp:+E164, shared across numbers). */
+  contactIdentifier?: string;
 }
 
 /** The Chatwoot agent who wrote a reply. Replies go out as this person where the platform allows. */

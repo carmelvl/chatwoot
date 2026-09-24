@@ -40,7 +40,7 @@ export function parseViberEvent(payload: any, rawBody?: string): ViberParsed {
       replyRef: { receiver: s.id },
       text,
       attachments,
-      conversationAttributes: { viber_country: String(s.country ?? '') },
+      conversationAttributes: { channel_key: `viber:${s.id}`, viber_country: String(s.country ?? '') },
     },
   };
 }

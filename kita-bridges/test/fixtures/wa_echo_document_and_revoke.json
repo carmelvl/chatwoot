@@ -1,0 +1,6 @@
+{"object":"whatsapp_business_account","entry":[{"id":"WABA_ID","changes":[{"field":"smb_message_echoes","value":{
+ "messaging_product":"whatsapp",
+ "metadata":{"display_phone_number":"639175550000","phone_number_id":"222222222222222"},
+ "message_echoes":[
+  {"from":"639175550000","to":"639991112222","id":"wamid.ECHO2","timestamp":"1790000200","type":"document","document":{"filename":"offer.pdf","mime_type":"application/pdf","sha256":"x","id":"MEDIA_ID_2","caption":"Here's the offer"}},
+  {"from":"639175550000","to":"639991112222","id":"wamid.ECHO3","timestamp":"1790000210","type":"revoke","revoke":{"original_message_id":"wamid.ECHO2"}}]}}]}]}

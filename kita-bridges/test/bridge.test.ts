@@ -163,3 +163,12 @@ test('composeInboundText', () => {
   assert.equal(composeInboundText('hi', undefined, []), 'hi');
   assert.equal(composeInboundText('', 'Ben', ['https://x']), '**Ben:** \n\nAttachments (not copied):\n- https://x');
 });
+
+test('every platform stamps channel_key on the conversation (Grip sync contract)', () => {
+  const s = parseSlackEvent(fixture('slack_top_level.json'), slackOpts);
+  assert.equal(s.kind === 'message' && s.message.conversationAttributes!.channel_key, 'slack:C0SHARED1');
+  const v = parseViberEvent(fixture('viber_message.json'));
+  assert.equal(v.kind === 'message' && v.message.conversationAttributes!.channel_key, 'viber:01234567890A=');
+  assert.equal(teamsChannelMsg().message.conversationAttributes!.channel_key, 'teams:19:acme-shared@thread.tacv2');
+  assert.equal(teamsChatMsg('1').conversationAttributes!.channel_key, 'teams:19:acme-group@thread.v2');
+});

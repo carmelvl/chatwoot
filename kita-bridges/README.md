@@ -1,6 +1,6 @@
 # kita-bridges
 
-Lets customers talk to Kita natively in **Slack** (Slack Connect / shared channels), **Microsoft Teams** and **Viber**. Every conversation lands in Chatwoot (the internal desk), and agent replies go back out on the same channel and thread. WhatsApp is native to Chatwoot and isn't handled here.
+Lets customers talk to Kita natively in **Slack** (Slack Connect / shared channels), **Microsoft Teams**, **Viber** and **WhatsApp**. Every conversation lands in Chatwoot (the internal desk). For Slack, Teams and Viber, agent replies go back out on the same channel and thread. WhatsApp is a **mirror**: the team keeps replying from the WhatsApp Business app on their phones, and the desk shows the whole conversation.
 
 **Customers never see Chatwoot.**
 * Replies come from **the Kita team member who wrote them** (see [Who replies are from](#who-replies-are-from)). There's no "via" text and there are no Chatwoot links. Customers install nothing.
@@ -54,7 +54,7 @@ Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifica
 
 ```bash
 cd kita-bridges
-npm test                       # node --test, 58 tests, no install step (Node >= 24)
+npm test                       # node --test, 89 tests, no install step (Node >= 24)
 cp .env.example .env && node src/server.ts
 ```
 
@@ -69,7 +69,7 @@ The `bridges` service is in `docker-compose.kita.yaml` and the `/bridges/*` rout
 | Slack | Posted **as the agent** (their user token: `chat:write`, `files:write`), natively in the Slack Connect thread | Kita bot posts with `chat:write.customize`: the agent's **full name + avatar** (Chatwoot avatar via the bridge media proxy; otherwise `SLACK_BOT_ICON_URL`) |
 | Teams | Posted **as the agent** (their delegated Graph token: `ChannelMessage.Send`, `ChatMessage.Send`) | The shared **Kita** user posts `Carmel: …` |
 | Viber | n/a: one business identity | `Carmel: …` (`VIBER_PREFIX_AGENT_NAME=true`, the default) |
-| WhatsApp | n/a: runs in Chatwoot natively, not through the bridge | See [WhatsApp](#whatsapp-agent-names) |
+| WhatsApp | n/a: each teammate replies from **their own** WhatsApp Business number on their phone, so attribution is inherent | Mirror mode sends nothing from the desk; see [WhatsApp](#4-whatsapp-business-app-coexistence-mirror) |
 
 * **Fallback note.** Whenever the fallback is used, the bridge adds a **private note** (agents only) to the conversation. If the agent hasn't connected, the note includes their personal connect link. If their account isn't in the channel or chat (Slack `not_in_channel`, Graph 403/404), it asks them to get added.
 * **Automated messages.** Messages with no agent (automations) go out as plain Kita with no prefix.
@@ -97,8 +97,8 @@ The `bridges` service is in `docker-compose.kita.yaml` and the `/bridges/*` rout
   * Teams: nothing extra. Agents use the same Entra app and redirect URI; the admin consent already granted covers `ChannelMessage.Send` / `ChatMessage.Send` for everyone.
   * Each agent must be a **member** of the customer channels and chats they reply in. Otherwise their replies fall back to Kita and they get a note.
 
-### WhatsApp agent names
-WhatsApp runs through Chatwoot's native WhatsApp inbox, and the business number is one identity. To show who replied:
+### WhatsApp agent names (only if you also use Chatwoot's native WhatsApp inbox)
+The coexistence mirror below doesn't need this: each teammate replies from their own number. If you ever run a *shared* number through Chatwoot's native WhatsApp inbox, it's one identity. To show who replied:
 1. Each agent sets a signature under Chatwoot **Profile settings → Personal message signature**, e.g. `— Carmel, Kita`.
 2. In any WhatsApp conversation, turn on the **signature** toggle in the reply box. Chatwoot remembers it per channel type.
 
@@ -117,7 +117,7 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
 
 ## Setup per platform
 
-### 0. Chatwoot: one API inbox per platform (repeat for Slack, Teams, Viber)
+### 0. Chatwoot: one API inbox per platform (repeat for Slack, Teams, Viber; WhatsApp gets one per number, see section 4)
 1. Go to Settings → Inboxes → Add Inbox → **API**. Name it `Slack` / `Teams` / `Viber`, and set the Webhook URL to `https://support.internal.kita.ai/bridges/chatwoot/slack` (or `teams` / `viber`).
    Use the public URL: Chatwoot's `SafeFetch` refuses private addresses such as `http://bridges:8080`, and we don't want to turn on `SAFE_FETCH_ALLOW_PRIVATE_NETWORK`.
 2. Add the agents to the inbox.
@@ -181,6 +181,59 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
      -d '{"url":"https://support.internal.kita.ai/bridges/viber/webhook","event_types":["message","subscribed","unsubscribed","conversation_started"],"send_name":true,"send_photo":false}'
    ```
 4. Share the bot link (`viber://pa?chatURI=<uri>`) or QR code with customers. Replies only reach users who have messaged or subscribed to the bot.
+
+### 4. WhatsApp Business app coexistence (mirror)
+
+**What it is (checked against Meta's docs, 2026-09-24).** Meta's *coexistence* onboarding connects a number that's already in use in the **WhatsApp Business app** to Cloud API, and the phone app keeps working. Customer messages arrive as the `messages` webhook. Anything the teammate sends from the phone app (or a supported companion device) arrives as `smb_message_echoes`. The bridge turns these into:
+* `messages` → **incoming** message in that number's Chatwoot API inbox. The contact is `whatsapp:+<E.164>`, shared across numbers, and has no email or phone. The conversation gets `channel_key = whatsapp:+<E.164>` for the Grip sync.
+* `smb_message_echoes` → **outgoing** message in the same conversation (it creates the conversation if the teammate messaged first), attributed to that number's owner:
+  * natively, if the entry has `agentAccessToken` (that teammate's own Chatwoot token);
+  * otherwise as "**Carmel Limcaoco:** …" through the bridge's token.
+* **Echo types.** `revoke` and `edit` echoes aren't mirrored (the original stays).
+* **Media.** Images, video, audio, documents and stickers are fetched with `GET /<media-id>` → download URL (bearer token) and attached. If that fails, the message still arrives without the file.
+* **Ignored.** `statuses` are ignored. `history` (up to 180 days of past chats) and `smb_app_state_sync` (contacts) are **acknowledged but not imported**, so the desk starts from the day you connect. A backfill importer can be added later if needed.
+* **Mirror mode (`WHATSAPP_MODE=mirror`, default).** Nothing typed in the desk for these inboxes is sent. The agent gets a private note instead: *"Reply from WhatsApp on your phone — this inbox is a mirror."* `WHATSAPP_MODE=send` would send desk replies through Cloud API as text ("Carmel: …", only inside the 24h window). It's off by default because the team replies from their phones.
+* **Security.** Webhooks are verified with the `hub.challenge` handshake (`WHATSAPP_VERIFY_TOKEN`) and the `X-Hub-Signature-256` HMAC with the Meta **app secret**. Deliveries are de-duplicated on the `wamid`, so Meta's retries are harmless.
+* **Multiple numbers.** Use one entry in `WHATSAPP_NUMBERS` and one Chatwoot API inbox per teammate's number. The inbox webhook URL is `…/bridges/chatwoot/whatsapp/<phoneNumberId>`.
+
+**Constraints to know**
+* **Business app required.** Only the **WhatsApp Business app** (version 2.24.17 or newer) can do coexistence. Personal WhatsApp isn't supported. Teammates on personal WhatsApp switch the number to WhatsApp Business on the same phone; WhatsApp carries existing chats over on that switch.
+* **Throughput.** A coexistence number has a fixed throughput of **20 messages/second** per Meta's current coexistence docs, not the 80 mps of a Cloud-API-only number. That's irrelevant for 1:1 support.
+* **Not supported on coexistence numbers:** group chats, disappearing and view-once messages, live location, broadcast lists (become read-only), calls, catalog/orders/status, and channels.
+* **Companion devices.** Onboarding **unlinks companion devices**. WhatsApp for Windows and WearOS can't be relinked, and messages sent from them produce no echo webhook.
+* **Phone must stay active.** Meta disconnects the number if the phone app isn't opened for about **14 days**, so each teammate should open WhatsApp Business at least every two weeks.
+* **Pricing.** Messages sent from the phone app stay free. Only messages sent through Cloud API are billed, and mirror mode sends none.
+
+**Who does the onboarding: Kita directly vs a BSP (trade-off)**
+* **Direct (Kita becomes a Meta *Tech Provider*).** Coexistence is only offered through Embedded Signup by a Solution Partner or Tech Provider.
+  * Pros: no middleman or monthly per-number fee, standard Cloud API webhooks (what this bridge implements), full control.
+  * Cons: Meta Business verification, App Review for advanced `whatsapp_business_messaging` / `whatsapp_business_management` access, and hosting the Embedded Signup button. Expect days to weeks.
+* **Through a BSP (e.g. 360dialog), which offers coexistence onboarding as a hosted flow.**
+  * Pros: fastest path, and no App Review for Kita.
+  * Cons: a monthly fee per number, and webhooks come via the BSP. The bridge verifies Meta's `X-Hub-Signature-256`, so a BSP that re-signs or forwards differently needs a small adapter, and media download goes through the BSP's API.
+* **Recommendation:** go direct if Kita is willing to do Business verification plus App Review, since this code is ready for it. Use a BSP only if you need this live this month.
+
+**Carmel's steps (direct route)**
+1. **Meta Business verification.** In Business Manager → Security Center, verify Kita Technologies, Inc.
+2. **Create the Meta app.** In developers.facebook.com → Create app → type *Business*, then add the **WhatsApp** product.
+   * Under App settings → Basic, copy the **App secret** → `WHATSAPP_APP_SECRET`.
+   * Create a **system user** with the `whatsapp_business_messaging` and `whatsapp_business_management` permissions and generate a token → `WHATSAPP_ACCESS_TOKEN`.
+3. **Configure the webhook.** Under WhatsApp → Configuration:
+   * Callback URL: `https://support.internal.kita.ai/bridges/whatsapp/webhook`.
+   * Verify token: any random string, also set as `WHATSAPP_VERIFY_TOKEN`. The bridge must be deployed first so the handshake succeeds.
+   * Subscribe to the fields **`messages`**, **`smb_message_echoes`**, `history` and `smb_app_state_sync`.
+4. **Become a Tech Provider** (App Review for advanced access) and create an **Embedded Signup** configuration with WhatsApp Business app onboarding (coexistence) enabled.
+5. **Onboard each teammate once:**
+   * Open the Embedded Signup link and choose *connect your existing WhatsApp Business app*.
+   * On the phone, in WhatsApp Business, **scan the QR code** shown and approve sharing chats.
+   * Record the resulting **phone number id**.
+   * Within 24 hours, start the sync that Meta requires. The bridge ignores the payloads, but the calls keep the onboarding valid:
+     `POST https://graph.facebook.com/v21.0/<PHONE_NUMBER_ID>/smb_app_data` with `{"messaging_product":"whatsapp","sync_type":"smb_app_state_sync"}`, then again with `"sync_type":"history"`.
+6. **Chatwoot inboxes.** Create one API inbox per number (e.g. "WhatsApp · Carmel") with the webhook URL `https://support.internal.kita.ai/bridges/chatwoot/whatsapp/<PHONE_NUMBER_ID>`. Add an entry to `WHATSAPP_NUMBERS` with the inbox identifier, webhook secret, owner name, and optionally the owner's own Chatwoot access token (Profile settings → Access token).
+7. **Tell the team:** keep replying on the phone. The desk is a read-only mirror.
+
+### Viber: why there's no mirror
+Viber has no official API for reading a person's or a business account's own chats. The only official integration is the **bot** (Chatbot API) this bridge already uses. So a WhatsApp-style mirror of teammates' personal Viber chats isn't possible without unofficial clients, and the bridge doesn't build one. Customers who should reach Kita on Viber should message the Kita bot.
 
 ## Limitations and next steps
 * Teams non-image files go out as a link to the bridge media URL; native Teams files would need uploading to the channel's SharePoint (`Files.ReadWrite.All`).

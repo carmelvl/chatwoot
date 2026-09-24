@@ -1,0 +1,6 @@
+{"object":"whatsapp_business_account","entry":[{"id":"WABA_ID","changes":[
+ {"field":"messages","value":{"messaging_product":"whatsapp","metadata":{"display_phone_number":"639171234567","phone_number_id":"111111111111111"},
+  "statuses":[{"id":"wamid.ECHO1","status":"read","timestamp":"1790000300","recipient_id":"639998887777"}]}},
+ {"field":"history","value":{"messaging_product":"whatsapp","metadata":{"display_phone_number":"639171234567","phone_number_id":"111111111111111"},"history":[]}},
+ {"field":"smb_app_state_sync","value":{"messaging_product":"whatsapp","metadata":{"display_phone_number":"639171234567","phone_number_id":"111111111111111"},"state_sync":[]}},
+ {"field":"messages","value":{"messaging_product":"whatsapp","metadata":{"phone_number_id":"999"},"messages":[{"from":"1","id":"wamid.X","type":"text","text":{"body":"to someone else's number"}}]}}]}]}

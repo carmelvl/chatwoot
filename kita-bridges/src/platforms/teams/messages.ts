@@ -153,7 +153,7 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
         eventId: teamsEventId(loc.chatId, m.id),
         threadKey: `chat:${loc.chatId}`,
         replyRef: { kind: 'chat', chatId: loc.chatId },
-        conversationAttributes: { teams_chat: loc.chatId },
+        conversationAttributes: { channel_key: `teams:${loc.chatId}`, teams_chat: loc.chatId },
         newConversationIfResolved: true,
       },
     };
@@ -166,7 +166,7 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
       eventId: teamsEventId(loc.channelId, m.id),
       threadKey: `channel:${loc.teamId}:${loc.channelId}:${rootId}`,
       replyRef: { kind: 'channel', teamId: loc.teamId, channelId: loc.channelId, rootId },
-      conversationAttributes: { teams_team: loc.teamId, teams_channel: loc.channelId },
+      conversationAttributes: { channel_key: `teams:${loc.channelId}`, teams_team: loc.teamId, teams_channel: loc.channelId },
     },
   };
 }

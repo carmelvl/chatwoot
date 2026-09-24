@@ -23,7 +23,7 @@ export type InboundResult = 'duplicate' | 'created' | 'appended' | 'staff_synced
 /** Maps a platform user to a Chatwoot contact identifier. Namespaced so ids never collide across platforms. */
 export const contactIdentifier = (platform: Platform, userKey: string) => `${platform}:${userKey}`;
 
-const PLATFORM_NAME: Record<Platform, string> = { slack: 'Slack', teams: 'Microsoft Teams', viber: 'Viber' };
+const PLATFORM_NAME: Record<Platform, string> = { slack: 'Slack', teams: 'Microsoft Teams', viber: 'Viber', whatsapp: 'WhatsApp' };
 const FINGERPRINT_TTL_MS = 5 * 60 * 1000;
 
 /**
@@ -79,13 +79,14 @@ export class Bridge {
     }
   }
 
-  private async customerInbound(msg: InboundMessage): Promise<InboundResult> {
+  /** Contact (by identifier) + mapped conversation for this thread, created on first contact. */
+  private async ensureConversation(msg: InboundMessage) {
     const { store, chatwoot } = this.d;
-    const inbox = this.d.inboxes[msg.platform].inboxIdentifier;
+    const inbox = msg.inboxIdentifier ?? this.d.inboxes[msg.platform].inboxIdentifier;
     let sourceId = store.getContactSourceId(msg.platform, msg.userKey);
     if (!sourceId) {
       sourceId = await chatwoot.createContact(inbox, {
-        identifier: contactIdentifier(msg.platform, msg.userKey),
+        identifier: msg.contactIdentifier ?? contactIdentifier(msg.platform, msg.userKey),
         name: msg.userName || `${msg.platform} user ${msg.userKey}`,
         custom_attributes: { channel: msg.platform },
       });
@@ -104,6 +105,12 @@ export class Bridge {
       conv = { ...conv, replyRef: { ...conv.replyRef, ...msg.replyRef } };
     }
     store.putConversation(conv);
+    return { inbox, sourceId, conv, result };
+  }
+
+  private async customerInbound(msg: InboundMessage): Promise<InboundResult> {
+    const { chatwoot } = this.d;
+    const { inbox, sourceId, conv, result } = await this.ensureConversation(msg);
 
     // A Chatwoot conversation belongs to one contact. Others joining the same Slack/Teams thread are
     // posted under the owner contact, with their name prefixed so agents can tell who spoke.
@@ -132,6 +139,41 @@ export class Bridge {
     store.markSeen(`out:${msg.platform}:${created.id}`);
     log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId });
     return 'staff_synced';
+  }
+
+  /**
+   * A message the business sent from its own app (WhatsApp Business app echo): mirror it as an
+   * outgoing message, creating the conversation if the business started it. Attributed natively when
+   * `app` is the owner's own Chatwoot client, else "**Owner:** …" through the bridge's client.
+   */
+  async businessEcho(msg: InboundMessage, o: { ownerName: string; ownerApp?: ChatwootAppClient }): Promise<InboundResult> {
+    const { store } = this.d;
+    const app = o.ownerApp ?? this.d.app;
+    const seenKey = `in:${msg.platform}:${msg.eventId}`;
+    if (!app) return 'ignored';
+    if (!store.markSeen(seenKey)) return 'duplicate';
+    try {
+      const { conv } = await this.ensureConversation(msg);
+      const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
+      const content = composeInboundText(msg.text, o.ownerApp ? undefined : o.ownerName, failed.map((f) => f.url));
+      const created = await app.createMessage(conv.conversationId, { content, private: false, files });
+      store.markSeen(`out:${msg.platform}:${created.id}`);
+      log.info('business_echo', { platform: msg.platform, conversation: conv.conversationId });
+      return 'staff_synced';
+    } catch (e) {
+      store.forget(seenKey);
+      throw e;
+    }
+  }
+
+  /** Mirror-mode inboxes: an agent typed in the desk; nothing is sent, the agent gets a private note (once per message). */
+  async mirrorNotice(platform: Platform, payload: any, note: string): Promise<string> {
+    if (payload?.event === 'conversation_status_changed') return this.outbound(platform, payload);
+    const d = toOutbound(payload);
+    if (!d.send) return `skip:${d.reason}`;
+    if (!this.d.store.markSeen(`out:${platform}:${d.message.messageId}`)) return 'skip:duplicate';
+    await this.d.app?.createMessage(d.message.conversationId, { content: note, private: true });
+    return 'skip:mirror';
   }
 
   /**

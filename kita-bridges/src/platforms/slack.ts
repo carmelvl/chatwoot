@@ -76,7 +76,7 @@ export function parseSlackEvent(payload: any, opts: SlackParseOptions): SlackPar
       replyRef: { channel: ev.channel, threadTs: rootTs },
       text: slackToMarkdown(ev.text ?? ''),
       attachments,
-      conversationAttributes: { slack_channel: ev.channel, slack_team: String(userTeam ?? '') },
+      conversationAttributes: { channel_key: `slack:${ev.channel}`, slack_channel: ev.channel, slack_team: String(userTeam ?? '') },
     },
   };
 }
