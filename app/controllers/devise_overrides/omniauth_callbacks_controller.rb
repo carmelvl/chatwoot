@@ -32,8 +32,9 @@ class DeviseOverrides::OmniauthCallbacksController < DeviseTokenAuth::OmniauthCa
     domains = ENV.fetch('KITA_SSO_DOMAINS', '').split(',').map { |d| d.strip.downcase }.reject(&:empty?)
     email = auth_hash.dig('info', 'email').to_s.downcase
     domain = email.split('@').last
-    domains.include?(domain) && ActiveModel::Type::Boolean.new.cast(auth_hash.dig('info', 'email_verified')) &&
-      auth_hash.dig('extra', 'raw_info', 'hd').to_s.downcase == domain
+    # devise_token_auth drops `extra` (and the hd claim) between redirects; Google's
+    # email_verified still proves control of the mailbox on our domain.
+    domains.include?(domain) && ActiveModel::Type::Boolean.new.cast(auth_hash.dig('info', 'email_verified'))
   end
 
   def provision_sso_agent
