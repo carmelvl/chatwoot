@@ -1,0 +1,32 @@
+import { createServer } from 'node:http';
+import { createHandler } from './app.ts';
+import { ChatwootApi } from './chatwoot.ts';
+import { ClaudeClassifier } from './claude.ts';
+import { capabilities, loadConfig } from './config.ts';
+import { GripClient } from './grip.ts';
+import { log } from './log.ts';
+import { Store } from './store.ts';
+import { Sync } from './sync.ts';
+
+const cfg = loadConfig();
+const caps = capabilities(cfg);
+const store = new Store(cfg.dbPath);
+const sync = new Sync({
+  store,
+  grip: caps.grip ? new GripClient(cfg.gripBaseUrl, cfg.gripApiKey) : undefined,
+  chatwoot: caps.tickets ? new ChatwootApi(cfg.chatwootBaseUrl, cfg.chatwootApiToken) : undefined,
+  claude: caps.tickets ? new ClaudeClassifier({ apiKey: cfg.anthropicApiKey, model: cfg.claudeModel, baseUrl: cfg.anthropicBaseUrl }) : undefined,
+  publicUrl: cfg.chatwootPublicUrl,
+  debounceMs: cfg.debounceMs,
+  debounceMaxMs: cfg.debounceMaxMs,
+});
+
+const tick = () => void sync.runDue().catch((e) => log.error('runner_failed', { error: String(e?.message ?? e) }));
+const server = createServer(createHandler({ webhookSecret: cfg.webhookSecret, sync, kick: tick, health: () => caps }));
+
+setInterval(tick, 1000).unref();
+setInterval(() => store.pruneSeen(), 6 * 3600 * 1000).unref();
+server.listen(cfg.port, () => log.info('listening', { port: cfg.port, ...caps }));
+if (!caps.webhook) log.warn('CHATWOOT_WEBHOOK_SECRET unset: every webhook will be rejected');
+for (const sig of ['SIGTERM', 'SIGINT'] as const)
+  process.on(sig, () => server.close(() => { store.close(); process.exit(0); }));

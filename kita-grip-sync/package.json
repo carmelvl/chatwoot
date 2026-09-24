@@ -1,0 +1,12 @@
+{
+  "name": "kita-grip-sync",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Chatwoot -> Grip support sync: conversations, support status and automatic tickets",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-reporter=spec \"test/**/*.test.ts\""
+  }
+}
