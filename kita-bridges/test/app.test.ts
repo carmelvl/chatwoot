@@ -13,8 +13,7 @@ cfg.slack.signingSecret = 'slack-secret';
 cfg.slack.botToken = 'xoxb';
 cfg.slack.internalTeamIds = ['TKITA0001'];
 cfg.viber.authToken = 'viber-tok';
-cfg.inboxes.viber.webhookSecret = 'cw-viber';
-cfg.inboxes.slack.webhookSecret = 'cw-slack';
+cfg.customers = { inboxIdentifier: 'IN_CUSTOMERS', webhookSecret: 'cw-customers' };
 const { bridge, senders, store } = makeBridge();
 const upstream = (async (url: any, init: any = {}) => {
   assert.equal(String(url), 'https://support.internal.kita.ai/rails/active_storage/blobs/redirect/abc/steps.png');
@@ -75,22 +74,37 @@ test('http: connect flow requires the connect key and a valid state', async () =
   assert.equal((await fetch(`${base}/teams/connect/callback?code=abc&state=forged`)).status, 400);
 });
 
-test('http: viber is a mirror: the desk never sends, even through the bot (signed webhook required)', async () => {
-  const body = raw('chatwoot_outgoing.json');
-  assert.equal((await post('/chatwoot/viber', body)).status, 401);
+const signed = (body: string, secret = 'cw-customers') => {
   const ts = String(Math.floor(Date.now() / 1000));
-  const res = await post('/chatwoot/viber', body, { 'x-chatwoot-timestamp': ts, 'x-chatwoot-signature': `sha256=${hmacHex('cw-viber', `${ts}.${body}`)}` });
+  return { 'x-chatwoot-timestamp': ts, 'x-chatwoot-signature': `sha256=${hmacHex(secret, `${ts}.${body}`)}` };
+};
+
+test('http: /chatwoot/customers requires the Customers inbox signature; old per-platform routes are gone', async () => {
+  const body = raw('chatwoot_outgoing.json');
+  assert.equal((await post('/chatwoot/customers', body)).status, 401);
+  assert.equal((await post('/chatwoot/customers', body, signed(body, 'cw-slack'))).status, 401);
+  const res = await post('/chatwoot/customers', body, signed(body));
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).result, 'skip:unmapped_conversation');
+  for (const old of ['/chatwoot/slack', '/chatwoot/viber', '/chatwoot/whatsapp/111']) assert.equal((await post(old, body, signed(body))).status, 404);
+});
+
+test('http: viber is a mirror: the desk never sends, even through the bot', async () => {
+  store.putConversation({ platform: 'customers', threadKey: 'channel:viber:V1', conversationId: 4343, sourceId: 's', replyRef: {} });
+  store.putChannel({ channelKey: 'viber:V1', conversationId: 4343, platform: 'viber', replyRef: { receiver: 'V1' }, label: 'Maria', lastAt: 1 });
+  const body = JSON.stringify({ ...JSON.parse(raw('chatwoot_outgoing.json')), id: 777000, conversation: { id: 4343 } });
+  const res = await post('/chatwoot/customers', body, signed(body));
   assert.equal(res.status, 200);
   assert.equal((await res.json()).result, 'skip:mirror');
   assert.equal(senders.viber.sent.length, 0);
 });
 
 test('http: a refused agent reply (Slack not connected) answers 422 so the desk marks it failed; nothing is posted', async () => {
-  store.putConversation({ platform: 'slack', threadKey: 'C0REFUSE', conversationId: 4242, sourceId: 's', replyRef: { channel: 'C0REFUSE' } });
+  store.putConversation({ platform: 'customers', threadKey: 'channel:slack:C0REFUSE', conversationId: 4242, sourceId: 's', replyRef: {} });
+  store.putChannel({ channelKey: 'slack:C0REFUSE', conversationId: 4242, platform: 'slack', replyRef: { channel: 'C0REFUSE' }, label: '#refuse', lastAt: 1 });
   senders.slack.send = async () => ({ refused: 'not_connected' as const });
   const body = JSON.stringify({ ...JSON.parse(raw('chatwoot_outgoing.json')), id: 777001, conversation: { id: 4242 } });
-  const ts = String(Math.floor(Date.now() / 1000));
-  const res = await post('/chatwoot/slack', body, { 'x-chatwoot-timestamp': ts, 'x-chatwoot-signature': `sha256=${hmacHex('cw-slack', `${ts}.${body}`)}` });
+  const res = await post('/chatwoot/customers', body, signed(body));
   assert.equal(res.status, 422);
   assert.deepEqual(await res.json(), { ok: false, result: 'refused:not_connected' });
   assert.equal(senders.slack.sent.length, 0);

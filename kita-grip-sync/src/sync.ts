@@ -1,11 +1,11 @@
-import type { ChatwootApi } from './chatwoot.ts';
-import type { Classifier } from './claude.ts';
-import { chatwootUrl, conversationBody, deriveChannelKey, isThreadReply, NOT_A_TICKET, OUT_OF_SCOPE_LABEL, platformOf, preview, senderName, speakerOf, TICKET_LABEL, toIso } from './derive.ts';
-import type { GripClient } from './grip.ts';
+import type { ChatwootApi, KitaDesk } from './chatwoot.ts';
+import type { Classification, Classifier } from './claude.ts';
+import { chatwootUrl, conversationBody, deriveChannelKey, isThreadReply, NOT_A_TICKET, OUT_OF_SCOPE_LABEL, platformOf, preview, senderName, speakerOf, threadRootId, TICKET_LABEL, toIso } from './derive.ts';
+import type { GripClient, TicketStatusInput } from './grip.ts';
 import { backoffMs, isRetryable } from './http.ts';
 import { log } from './log.ts';
 import { gripOwner, type Owners } from './owner.ts';
-import type { ConversationState, Job, Priority, Store, TicketRow } from './store.ts';
+import type { ConversationState, Job, Priority, Store, ThreadState, TicketRow } from './store.ts';
 
 export const MAX_ATTEMPTS = 10;
 const RANK: Record<Priority, number> = { low: 0, medium: 1, high: 2, urgent: 3 };
@@ -16,6 +16,8 @@ export interface SyncDeps {
   grip?: GripClient;
   chatwoot?: ChatwootApi;
   claude?: Classifier;
+  /** Desk Kita endpoints (thread titles + ticket links). Needs BRIDGE_LINK_SECRET. */
+  desk?: KitaDesk;
   /** Owner in the desk (DRI attributes + assignment). Needs a Chatwoot token. */
   owners?: Owners;
   publicUrl: string;
@@ -32,8 +34,13 @@ export type IngestResult = 'duplicate' | 'ignored' | 'ok';
  *    enqueues durable jobs. Chatwoot account webhooks are fire-and-forget (5s timeout, no retry),
  *    so nothing slow or fallible happens before the 200.
  *  - runDue(): executes jobs (Grip upsert, classify, ticket status, notes) with exponential backoff.
- *    Jobs are keyed per conversation and read the latest snapshot when they run, so a burst of
- *    events costs one Grip call and a late retry can never write stale state.
+ *    Jobs are keyed per conversation (or per thread) and read the latest snapshot when they run, so a
+ *    burst of events costs one Grip call and a late retry can never write stale state.
+ *
+ * A conversation is one customer (many channels, many threads). Tickets are per thread: the thread
+ * root is content_attributes.in_reply_to for replies, else the message itself, and
+ * issue_key = String(root desk message id). Classification is debounced per thread
+ * (`classify:<conversation>:<root>`) and also names the thread (thread_title), posted to the desk.
  */
 export class Sync {
   private d: SyncDeps;
@@ -73,6 +80,7 @@ export class Sync {
 
     const speaker = isMessage ? speakerOf(p) : null;
     const msgId = Number(p.id);
+    let root = 0;
     // Message ids dedupe too: a replayed message_created without a delivery id must not double-count.
     const fresh = !!speaker && !!msgId && store.markSeen(`msg:${msgId}`, now);
     if (fresh && speaker) {
@@ -87,17 +95,24 @@ export class Sync {
         s.lastCustomerMessageAt = !s.lastCustomerMessageAt || at > s.lastCustomerMessageAt ? at : s.lastCustomerMessageAt;
         s.lastCustomerMessageId = Math.max(s.lastCustomerMessageId, msgId);
       }
+      root = threadRootId(p);
       store.addMessage(id, { id: msgId, role: speaker, content: String(p.content ?? '') || preview(p.content, p.attachments ?? []), createdAt: at,
-        sender: senderName(p), threadReply: isThreadReply(p) });
+        sender: senderName(p), threadReply: isThreadReply(p), rootId: root });
+      if (speaker === 'customer') {
+        const th = store.getThread(id, root) ?? newThread(id, root);
+        store.putThread({ ...th, lastCustomerMessageId: Math.max(th.lastCustomerMessageId, msgId) });
+      }
     }
 
-    const ticket = store.getTicket(id);
+    const tickets = store.tickets(id);
+    // not-a-ticket stays conversation-wide: every thread's ticket is dismissed and nothing in the conversation is auto-ticketed again.
     if (s.labels.includes(NOT_A_TICKET) && !s.dismissed) {
       s.dismissed = true;
-      store.cancelJob(`classify:${id}`);
-      store.logDismissal(id, ticket, store.thread(id));
-      log.info('ticket_dismissed', { conversation: id, ticket: ticket?.ticketId ?? null, title: ticket?.title ?? null, priority: ticket?.priority ?? null });
-      if (ticket && ticket.status !== 'dismissed') this.enqueueTicketStatus(id, 'dismissed', now);
+      store.cancelJobs(`classify:${id}:`);
+      if (tickets.length) for (const t of tickets) store.logDismissal(id, t, t.issueKey ? store.threadMessages(id, Number(t.issueKey)) : store.thread(id));
+      else store.logDismissal(id, undefined, store.thread(id));
+      log.info('ticket_dismissed', { conversation: id, tickets: tickets.map((t) => t.ticketId) });
+      if (tickets.some((t) => t.status !== 'dismissed')) this.enqueueStatusAll(id, 'dismissed', now);
     }
     store.putConversation(s);
 
@@ -106,20 +121,30 @@ export class Sync {
       else if (!prev) log.warn('no_channel_key', { conversation: id, channel: conv.channel ?? null });
     }
 
-    if (ticket && !s.dismissed && ticket.status !== 'dismissed') {
-      // Reopen does NOT flip a done ticket back to todo: with one conversation per channel, a reopen usually
-      // means a new issue. The next classification decides (see classify): issue -> overwrite + todo; else stays done.
-      const want = s.status === 'resolved' ? 'done' : null;
-      if (want && want !== ticket.status) this.enqueueTicketStatus(id, want, now);
-    }
+    // Resolving the conversation resolves every thread's ticket (one PATCH with all: true).
+    // Reopen does NOT flip done tickets back to todo: the next classification of a thread decides
+    // (see classify): issue -> that thread's ticket back to todo; else it stays done.
+    if (!s.dismissed && s.status === 'resolved' && tickets.some((t) => t.status !== 'done' && t.status !== 'dismissed'))
+      this.enqueueStatusAll(id, 'done', now);
 
     if (fresh && speaker === 'customer' && this.ticketsEnabled && this.eligible(s))
-      store.enqueue(`classify:${id}`, 'classify', id, { runAt: now + this.d.debounceMs, mode: 'debounce', maxWaitMs: this.d.debounceMaxMs, now });
+      store.enqueue(`classify:${id}:${root}`, 'classify', id, { runAt: now + this.d.debounceMs, payload: { root }, mode: 'debounce', maxWaitMs: this.d.debounceMaxMs, now });
     return 'ok';
   }
 
-  private enqueueTicketStatus(id: number, status: 'todo' | 'done' | 'dismissed', now: number) {
-    this.d.store.enqueue(`ticket_status:${id}`, 'ticket_status', id, { runAt: now, payload: { status }, mode: 'replace', now });
+  /** Conversation-wide status (resolve / not-a-ticket): PATCH {status, all: true}. */
+  private enqueueStatusAll(id: number, status: 'done' | 'dismissed', now: number) {
+    this.d.store.enqueue(`ticket_status:${id}`, 'ticket_status', id, { runAt: now, payload: { status, all: true }, mode: 'replace', now });
+  }
+
+  /** One thread's ticket: PATCH {status, issue_key}. */
+  private enqueueThreadStatus(id: number, issueKey: string, status: 'todo', now: number) {
+    this.d.store.enqueue(`ticket_status:${id}:${issueKey}`, 'ticket_status', id, { runAt: now, payload: { status, issue_key: issueKey }, mode: 'replace', now });
+  }
+
+  /** Post the thread's title / ticket link to the desk (skipped when nothing changed since the last post). */
+  private enqueueThreadPost(id: number, root: number, now: number) {
+    if (this.d.desk) this.d.store.enqueue(`thread:${id}:${root}`, 'thread', id, { runAt: now, payload: { root }, mode: 'coalesce', now });
   }
 
   private eligible(s: ConversationState) {
@@ -141,7 +166,7 @@ export class Sync {
       log.info('back_in_scope', { conversation: id, channel_key: s.channelKey });
       return;
     }
-    store.cancelJob(`classify:${id}`);
+    store.cancelJobs(`classify:${id}:`);
     log.info('out_of_scope', { conversation: id, channel_key: s.channelKey });
     if (this.d.chatwoot) store.enqueue(`out_of_scope:${id}`, 'out_of_scope', id, { runAt: this.now(), mode: 'coalesce', now: this.now() });
     else log.warn('out_of_scope_not_resolved', { conversation: id, reason: 'no CHATWOOT_API_TOKEN' });
@@ -200,11 +225,20 @@ export class Sync {
         return;
       }
       case 'ticket_status': {
-        const t = store.getTicket(id);
-        if (!t || !this.d.grip) return;
-        await this.d.grip.setTicketStatus(id, job.payload.status);
-        store.putTicket({ ...t, status: job.payload.status });
-        log.info('ticket_status', { conversation: id, status: job.payload.status });
+        if (!this.d.grip) return;
+        const p = job.payload as TicketStatusInput;
+        if (p.all) {
+          if (!store.tickets(id).length) return; // Grip answers 404 when nothing matches
+          await this.d.grip.setTicketStatus(id, { status: p.status, all: true });
+          // Dismissed stays dismissed (Grip does the same).
+          for (const t of store.tickets(id)) if (t.status !== 'dismissed') store.putTicket({ ...t, status: p.status });
+        } else {
+          const t = store.getTicket(id, p.issue_key ?? '');
+          if (!t) return;
+          await this.d.grip.setTicketStatus(id, t.issueKey ? { status: p.status, issue_key: t.issueKey } : { status: p.status });
+          store.putTicket({ ...t, status: p.status });
+        }
+        log.info('ticket_status', { conversation: id, status: p.status, all: !!p.all, issue_key: p.issue_key ?? null });
         return;
       }
       case 'out_of_scope': {
@@ -216,9 +250,11 @@ export class Sync {
         return;
       }
       case 'classify':
-        return this.classify(id);
+        return this.classify(id, Number(job.payload.root));
       case 'announce':
-        return this.announce(id);
+        return this.announce(id, String(job.payload.issue_key ?? ''));
+      case 'thread':
+        return this.postThread(id, Number(job.payload.root));
       case 'note': {
         const s = store.getConversation(id);
         if (s && this.d.chatwoot) await this.d.chatwoot.privateNote(s.accountId, id, job.payload.text);
@@ -229,63 +265,85 @@ export class Sync {
     }
   }
 
-  private async classify(id: number): Promise<void> {
+  private async classify(id: number, root: number): Promise<void> {
     const { store, grip, claude } = this.d;
     const before = store.getConversation(id);
-    if (!before || !grip || !claude || !this.eligible(before)) return;
-    const upto = before.lastCustomerMessageId;
-    if (upto <= before.classifiedUpto) return; // nothing new since the last classification
-    const thread = store.thread(id);
-    const existing = store.getTicket(id);
-    const result = await claude.classify(thread, existing);
+    const th0 = store.getThread(id, root);
+    if (!before || !th0 || !grip || !claude || !this.eligible(before)) return;
+    const upto = th0.lastCustomerMessageId;
+    if (upto <= th0.classifiedUpto) return; // nothing new in this thread since the last classification
+    const key = String(root);
+    const transcript = store.threadMessages(id, root);
+    const existing = store.getTicket(id, key);
+    const result = await claude.classify(transcript, existing);
 
-    // Re-read: an agent may have added not-a-ticket or resolved while Claude was thinking.
+    // Re-read: an agent may have added not-a-ticket or resolved while the model was thinking.
     const s = store.getConversation(id)!;
-    const t = store.getTicket(id);
-    // A done ticket (conversation was resolved, then reopened) is only a template: whatever is open now is a fresh issue.
-    const fresh = !t || t.status === 'done' || result.is_new_issue;
-    log.info('classified', { conversation: id, is_issue: result.is_issue, is_new_issue: result.is_new_issue, priority: result.priority, ticket: !!t });
-    if (result.is_issue && this.eligible(s) && t?.status !== 'dismissed') {
-      const url = chatwootUrl(this.d.publicUrl, s.accountId, id);
-      // Same issue: never auto-downgrade. New issue: its own priority (the old issue's urgency doesn't carry over).
-      const priority: Priority = !fresh && t && RANK[t.priority] > RANK[result.priority] ? t.priority : result.priority;
-      const title = result.title.trim() || t?.title || 'Support request';
-      const summary = result.summary.trim() || t?.summary || '';
-      const reopen = t?.status === 'done';
-      if (!t || reopen || t.title !== title || t.summary !== summary || t.priority !== priority) {
-        const r = await grip.upsertTicket({ chatwoot_conversation_id: id, title, body: ticketBody(summary, s.channelLabel, url), priority, chatwoot_url: url });
-        const row: TicketRow = t
-          ? { ...t, title, summary, priority, ticketId: r.ticket_id ?? t.ticketId, ticketUrl: r.ticket_url ?? t.ticketUrl }
-          : { conversationId: id, ticketId: r.ticket_id, ticketUrl: r.ticket_url, title, summary, priority, status: 'todo', notePosted: false, labelAdded: false };
-        store.putTicket(row);
-        log.info(!t ? 'ticket_created' : fresh ? 'ticket_new_issue' : 'ticket_updated', { conversation: id, ticket: row.ticketId, priority, reopened: reopen });
-        const now = this.now();
-        // not-a-ticket landed while the ticket request was in flight: dismiss what we just created.
-        if (store.getConversation(id)?.dismissed) {
-          this.enqueueTicketStatus(id, 'dismissed', now);
-          return;
-        }
-        if (!t) store.enqueue(`announce:${id}`, 'announce', id, { runAt: now, mode: 'coalesce', now });
-        else if (fresh) {
-          if (reopen) this.enqueueTicketStatus(id, 'todo', now);
-          store.enqueue(`note:${id}`, 'note', id, { runAt: now, mode: 'replace', now,
-            payload: { text: `${reopen ? 'Grip ticket reopened' : 'Grip ticket now tracks a new issue'} (${priority}): **${title}** (was: ${t.title})\n${row.ticketUrl}` } });
-        } else if (RANK[priority] > RANK[t.priority])
-          store.enqueue(`note:${id}`, 'note', id, { runAt: now, mode: 'replace', now, payload: { text: `Grip ticket escalated to **${priority}** (was ${t.priority}): ${row.ticketUrl}` } });
-      }
-    }
-    store.putConversation({ ...s, classifiedUpto: Math.max(s.classifiedUpto, upto) });
+    const now = this.now();
+    const title = result.thread_title || null;
+    const th = store.getThread(id, root)!;
+    store.putThread({ ...th, title: title ?? th.title });
+    if (title && title !== th.title) this.enqueueThreadPost(id, root, now);
+    await this.ticketFor(s, root, result, title ?? th.title);
+    // Watermark last: a failed ticket call retries the whole classification.
+    const latest = store.getThread(id, root)!;
+    store.putThread({ ...latest, classifiedUpto: Math.max(latest.classifiedUpto, upto) });
   }
 
-  /** Posts the private note + `ticket` label once per ticket; each step is flagged so retries never repeat it. */
-  private async announce(id: number): Promise<void> {
+  private async ticketFor(s: ConversationState, root: number, result: Classification, threadTitle: string | null): Promise<void> {
+    const { store, grip } = this.d;
+    const id = s.id;
+    const key = String(root);
+    const t = store.getTicket(id, key);
+    const now = this.now();
+    // A done ticket (conversation was resolved, then reopened) is only a template: whatever is open now is a fresh issue.
+    const fresh = !t || t.status === 'done' || result.is_new_issue;
+    log.info('classified', { conversation: id, thread: root, is_issue: result.is_issue, is_new_issue: result.is_new_issue, priority: result.priority, ticket: !!t });
+    if (!result.is_issue || !this.eligible(s) || t?.status === 'dismissed') return;
+
+    const url = chatwootUrl(this.d.publicUrl, s.accountId, id);
+    // Same issue: never auto-downgrade. New issue: its own priority (the old issue's urgency doesn't carry over).
+    const priority: Priority = !fresh && t && RANK[t.priority] > RANK[result.priority] ? t.priority : result.priority;
+    const ticketTitle = result.title.trim() || t?.title || 'Support request';
+    const summary = result.summary.trim() || t?.summary || '';
+    const reopen = t?.status === 'done';
+    if (t && !reopen && t.title === ticketTitle && t.summary === summary && t.priority === priority) return;
+    const r = await grip!.upsertTicket({ chatwoot_conversation_id: id, issue_key: key, title: ticketTitle,
+      body: ticketBody(summary, threadTitle, s.channelLabel, url), priority, chatwoot_url: url });
+    const row: TicketRow = t
+      ? { ...t, title: ticketTitle, summary, priority, ticketId: r.ticket_id ?? t.ticketId, ticketUrl: r.ticket_url ?? t.ticketUrl }
+      : { conversationId: id, issueKey: key, ticketId: r.ticket_id, ticketUrl: r.ticket_url, title: ticketTitle, summary, priority,
+          status: r.dismissed ? 'dismissed' : 'todo', notePosted: false, labelAdded: false };
+    store.putTicket(row);
+    log.info(!t ? 'ticket_created' : fresh ? 'ticket_new_issue' : 'ticket_updated', { conversation: id, thread: root, ticket: row.ticketId, priority, reopened: reopen });
+    if (!t || t.ticketUrl !== row.ticketUrl) this.enqueueThreadPost(id, root, now); // the desk shows the ticket link on the thread
+    // not-a-ticket landed while the ticket request was in flight: dismiss what we just created.
+    if (store.getConversation(id)?.dismissed) {
+      this.enqueueStatusAll(id, 'dismissed', now);
+      return;
+    }
+    if (row.status === 'dismissed') return; // Grip kept an earlier dismissal: no note
+    const where = threadTitle ? ` for thread "${threadTitle}"` : '';
+    if (!t) store.enqueue(`announce:${id}:${key}`, 'announce', id, { runAt: now, payload: { issue_key: key }, mode: 'coalesce', now });
+    else if (fresh) {
+      if (reopen) this.enqueueThreadStatus(id, key, 'todo', now);
+      store.enqueue(`note:${id}:${key}`, 'note', id, { runAt: now, mode: 'replace', now,
+        payload: { text: `${reopen ? 'Grip ticket reopened' : 'Grip ticket now tracks a new issue'}${where} (${priority}): **${ticketTitle}** (was: ${t.title})\n${row.ticketUrl}` } });
+    } else if (RANK[priority] > RANK[t.priority])
+      store.enqueue(`note:${id}:${key}`, 'note', id, { runAt: now, mode: 'replace', now,
+        payload: { text: `Grip ticket${where} escalated to **${priority}** (was ${t.priority}): ${row.ticketUrl}` } });
+  }
+
+  /** Posts the private note (naming the thread) + `ticket` label once per ticket; each step is flagged so retries never repeat it. */
+  private async announce(id: number, key: string): Promise<void> {
     const { store, chatwoot } = this.d;
     const s = store.getConversation(id);
-    let t = store.getTicket(id);
+    let t = store.getTicket(id, key);
     if (!s || !t || !chatwoot) return;
     if (!t.notePosted) {
+      const threadTitle = key ? store.getThread(id, Number(key))?.title : null;
       await chatwoot.privateNote(s.accountId, id,
-        `Grip ticket created automatically (${t.priority}): **${t.title}**\n${t.ticketUrl}\n\nNot a ticket? Add the label \`${NOT_A_TICKET}\` and it will be dismissed.`);
+        `Grip ticket created automatically${threadTitle ? ` for thread "${threadTitle}"` : ''} (${t.priority}): **${t.title}**\n${t.ticketUrl}\n\nNot a ticket? Add the label \`${NOT_A_TICKET}\` and every ticket of this conversation will be dismissed.`);
       t = { ...t, notePosted: true };
       store.putTicket(t);
     }
@@ -294,8 +352,30 @@ export class Sync {
       store.putTicket({ ...t, labelAdded: true });
     }
   }
+
+  /** POST /api/v1/kita/threads with the thread's latest title and (once it exists) its ticket link. No-op when unchanged. */
+  private async postThread(id: number, root: number): Promise<void> {
+    const { store, desk } = this.d;
+    const th = store.getThread(id, root);
+    if (!th || !desk) return;
+    const t = store.getTicket(id, String(root));
+    const ticketUrl = t?.ticketUrl ?? null;
+    if (!th.title && !t) return;
+    if (th.title === th.postedTitle && ticketUrl === th.postedTicketUrl) return;
+    await desk.postThread({ conversation_id: id, root_message_id: root, ...(th.title ? { title: th.title } : {}),
+      ...(t ? { ticket_id: t.ticketId, ticket_url: t.ticketUrl } : {}) });
+    const latest = store.getThread(id, root)!;
+    store.putThread({ ...latest, postedTitle: th.title, postedTicketUrl: ticketUrl });
+    log.info('thread_posted', { conversation: id, thread: root, title: th.title, ticket: t?.ticketId ?? null });
+    // Title or ticket changed while we were posting: post again.
+    if (latest.title !== th.title || (store.getTicket(id, String(root))?.ticketUrl ?? null) !== ticketUrl) this.enqueueThreadPost(id, root, this.now());
+  }
 }
 
-function ticketBody(summary: string, channelLabel: string | null, url: string): string {
-  return `${summary}\n\nChannel: ${channelLabel ?? 'unknown'}\nConversation: ${url}\n\n(Created automatically from the support desk.)`;
+function newThread(conversationId: number, rootId: number): ThreadState {
+  return { conversationId, rootId, lastCustomerMessageId: 0, classifiedUpto: 0, title: null, postedTitle: null, postedTicketUrl: null };
+}
+
+function ticketBody(summary: string, threadTitle: string | null, channelLabel: string | null, url: string): string {
+  return `${summary}\n\n${threadTitle ? `Thread: ${threadTitle}\n` : ''}Channel: ${channelLabel ?? 'unknown'}\nConversation: ${url}\n\n(Created automatically from the support desk.)`;
 }

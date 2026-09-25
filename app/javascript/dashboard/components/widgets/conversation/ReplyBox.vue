@@ -19,6 +19,13 @@ import ReplyBoxBanner from './ReplyBoxBanner.vue';
 import KitaReplyGate from 'dashboard/components-next/kita/KitaReplyGate.vue';
 import { useKitaConnections } from 'dashboard/composables/useKitaConnections';
 import { kitaReplyBlock } from 'dashboard/helper/kitaConnect';
+import {
+  defaultKitaChannelKey,
+  isBridgeConversation,
+  kitaComposerBlock,
+  parseKitaChannels,
+  sendableKitaChannels,
+} from 'dashboard/helper/kitaThreads';
 import QuotedEmailPreview from './QuotedEmailPreview.vue';
 import { REPLY_EDITOR_MODES } from 'dashboard/components/widgets/WootWriter/constants';
 import WootMessageEditor from 'dashboard/components/widgets/WootWriter/Editor.vue';
@@ -170,6 +177,7 @@ export default {
     return {
       message: '',
       inReplyTo: {},
+      kitaChannelKey: null,
       isFocused: false,
       showEmojiPicker: false,
       attachedFiles: [],
@@ -256,12 +264,39 @@ export default {
         !this.isInstagramReplyRestricted
       );
     },
-    // Kita: Slack/Teams public replies need the agent's own connected account
-    kitaReplyBlockReason() {
-      return kitaReplyBlock(
-        this.kitaConnections,
-        this.currentChat?.custom_attributes?.channel
+    // Kita: bridge conversations reply in the channel picked in the composer
+    isKitaBridge() {
+      return isBridgeConversation(this.currentChat);
+    },
+    kitaChannels() {
+      return parseKitaChannels(this.currentChat);
+    },
+    kitaSendableChannels() {
+      return sendableKitaChannels(this.kitaChannels);
+    },
+    selectedKitaChannelKey() {
+      const selected = this.kitaSendableChannels.find(
+        channel => channel.key === this.kitaChannelKey
       );
+      return selected?.key ?? defaultKitaChannelKey(this.kitaChannels);
+    },
+    // Slack/Teams public replies need the agent's own connected account
+    kitaComposerBlock() {
+      if (this.isKitaBridge) {
+        return kitaComposerBlock(
+          this.kitaConnections,
+          this.kitaChannels,
+          this.selectedKitaChannelKey
+        );
+      }
+      const platform = this.currentChat?.custom_attributes?.channel;
+      return {
+        platform,
+        reason: kitaReplyBlock(this.kitaConnections, platform),
+      };
+    },
+    kitaReplyBlockReason() {
+      return this.kitaComposerBlock.reason;
     },
     kitaReplyGated() {
       return !!this.kitaReplyBlockReason && !this.isOnPrivateNote;
@@ -559,6 +594,7 @@ export default {
         // This prevents overwriting user input (e.g., CC/BCC fields) when performing actions
         // like self-assign or other updates that do not actually change the conversation context
         this.setCCAndToEmailsFromLastChat();
+        this.kitaChannelKey = null;
         // Reset Copilot editor state (includes cancelling ongoing generation)
         this.copilot.reset();
       }
@@ -1165,6 +1201,16 @@ export default {
       this.attachedFiles = attachments;
     },
     setReplyToInPayload(payload) {
+      // Kita: public replies in bridge conversations go to the picked channel
+      if (this.isKitaBridge && !payload.private) {
+        payload = {
+          ...payload,
+          contentAttributes: {
+            ...payload.contentAttributes,
+            kita_channel_key: this.selectedKitaChannelKey,
+          },
+        };
+      }
       if (this.inReplyTo?.id) {
         return {
           ...payload,
@@ -1377,9 +1423,29 @@ export default {
       @insert="handleInsert"
       @close="onSearchPopoverClose"
     />
+    <div
+      v-if="isKitaBridge && !isOnPrivateNote && kitaSendableChannels.length"
+      class="flex items-center gap-1 px-4 pt-2 text-xs text-n-slate-11"
+      data-test-id="kita-channel-picker"
+    >
+      <span>{{ $t('KITA_THREADS.REPLYING_IN') }}</span>
+      <select
+        :value="selectedKitaChannelKey"
+        class="!mb-0 !w-auto !h-auto !py-0.5 !ps-1 !pe-6 text-xs font-medium rounded-md border-0 bg-n-alpha-1 text-n-slate-12"
+        @change="kitaChannelKey = $event.target.value"
+      >
+        <option
+          v-for="channel in kitaSendableChannels"
+          :key="channel.key"
+          :value="channel.key"
+        >
+          {{ channel.label }}
+        </option>
+      </select>
+    </div>
     <KitaReplyGate
       v-if="kitaReplyGated"
-      :platform="currentChat.custom_attributes.channel"
+      :platform="kitaComposerBlock.platform"
       :reason="kitaReplyBlockReason"
     />
     <Transition

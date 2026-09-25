@@ -9,7 +9,10 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
   let!(:agent) { create(:user, account: account, email: 'sam.lee@kita.ai') }
   let(:secret) { 'link-secret' }
   let(:params) do
-    { conversation_id: conversation.display_id, email: 'Sam.Lee@Kita.ai', content: 'On it', content_attributes: { external_source: 'slack' } }
+    {
+      conversation_id: conversation.display_id, email: 'Sam.Lee@Kita.ai', content: 'On it',
+      content_attributes: { external_source: 'slack', external_channel: '#kita-tala', external_channel_key: 'slack:T1:C1' }
+    }
   end
 
   around do |example|
@@ -34,7 +37,8 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
     message = conversation.messages.outgoing.last
     expect(response.parsed_body).to eq('id' => message.id, 'sender_type' => 'User', 'sender_id' => agent.id)
     expect(message).to have_attributes(sender: agent, private: false, content: 'On it')
-    expect(message.content_attributes).to include('kita_bridge_origin' => true, 'external_source' => 'slack')
+    expect(message.content_attributes).to include('kita_bridge_origin' => true, 'external_source' => 'slack',
+                                                  'external_channel' => '#kita-tala', 'external_channel_key' => 'slack:T1:C1')
     expect(response.body).not_to include('access_token')
   end
 

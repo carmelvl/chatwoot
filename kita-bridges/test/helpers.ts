@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { Bridge } from '../src/bridge.ts';
-import { ChatwootClient } from '../src/chatwoot.ts';
+import { ChatwootAppClient, ChatwootClient, KitaDeskClient } from '../src/chatwoot.ts';
+import type { ScopeChannel, ScopeCheck } from '../src/scope.ts';
 import { Store } from '../src/store.ts';
-import type { OutboundMessage, Platform, Sender } from '../src/types.ts';
+import type { OutboundMessage, Sender } from '../src/types.ts';
 
 export const PUBLIC_URL = 'https://support.internal.kita.ai/bridges';
 export const raw = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
@@ -47,11 +48,28 @@ export class RecordingSender implements Sender {
   }
 }
 
-export function makeBridge() {
+/** Grip scope stub: every channel allowed; `links` maps channel_key -> account row. Mutable. */
+export function staticScope(links: Record<string, Partial<ScopeChannel>> = {}) {
+  const map = new Map<string, ScopeChannel>(Object.entries(links).map(([k, v]) => [k, { channel_key: k, ...v }]));
+  return { map, allows: () => true, channel: (k?: string) => (k ? map.get(k) : undefined), link: (k: string, v: Partial<ScopeChannel>) => map.set(k, { channel_key: k, ...v }) };
+}
+
+export function makeBridge(o: { scope?: ScopeCheck } = {}) {
   const cw = fakeChatwoot();
   const store = new Store(':memory:');
   const senders = { slack: new RecordingSender(), teams: new RecordingSender(), viber: new RecordingSender() };
-  const inboxes = { slack: { inboxIdentifier: 'IN_SLACK' }, teams: { inboxIdentifier: 'IN_TEAMS' }, viber: { inboxIdentifier: 'IN_VIBER' } } as Record<Platform, { inboxIdentifier: string }>;
-  const bridge = new Bridge({ store, chatwoot: cw.client, inboxes, senders, publicUrl: PUBLIC_URL, fetchImpl: cw.fetchImpl });
-  return { bridge, store, cw, senders };
+  let next = 5000;
+  const appCalls: { path: string; body: any }[] = [];
+  const app = new ChatwootAppClient('http://rails:3000', 'BRIDGE_TOKEN', '1', (async (u: any, init: any) => {
+    appCalls.push({ path: new URL(String(u)).pathname, body: JSON.parse(init.body) });
+    return Response.json({ id: next++ });
+  }) as typeof fetch);
+  const deskCalls: { path: string; body: any }[] = [];
+  const desk = new KitaDeskClient('http://rails:3000', 'link-secret', (async (u: any, init: any) => {
+    const path = new URL(String(u)).pathname;
+    deskCalls.push({ path, body: JSON.parse(init.body) });
+    return Response.json(path.endsWith('/conversation_merges') ? { moved: 2 } : { id: next++ });
+  }) as typeof fetch);
+  const bridge = new Bridge({ store, chatwoot: cw.client, inbox: 'IN_CUSTOMERS', senders, publicUrl: PUBLIC_URL, fetchImpl: cw.fetchImpl, app, desk, scope: o.scope });
+  return { bridge, store, cw, senders, appCalls, deskCalls };
 }

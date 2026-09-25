@@ -3,8 +3,12 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Platform } from './types.ts';
 
+/** Conversation rows of the single Customers inbox use this platform value. */
+export const CUSTOMERS = 'customers';
+
 export interface ConversationRow {
-  platform: Platform;
+  /** 'customers' for the Customers inbox (thread_key account:<id> | channel:<key>); legacy rows carry a Platform. */
+  platform: string;
   threadKey: string;
   conversationId: number;
   /** Chatwoot contact_inbox source_id of the contact that owns the conversation. */
@@ -18,6 +22,19 @@ export interface MessageRow {
   extId: string;
   deskId: number;
   root: string;
+  /** Channel the message was in (absent on legacy rows). */
+  channelKey?: string;
+  platform?: Platform;
+}
+
+/** A platform channel attached to a desk conversation: where replies go, and what kita_channels lists. */
+export interface ChannelRow {
+  channelKey: string;
+  conversationId: number;
+  platform: Platform;
+  replyRef: Record<string, unknown>;
+  label: string;
+  lastAt: number;
 }
 
 export interface SubscriptionRow {
@@ -48,6 +65,10 @@ export class Store {
         platform TEXT NOT NULL, ext_id TEXT NOT NULL, desk_id INTEGER NOT NULL, root TEXT NOT NULL, at INTEGER NOT NULL,
         PRIMARY KEY (platform, ext_id));
       CREATE INDEX IF NOT EXISTS messages_by_desk ON messages (platform, desk_id);
+      CREATE TABLE IF NOT EXISTS channels (
+        channel_key TEXT PRIMARY KEY, conversation_id INTEGER NOT NULL, platform TEXT NOT NULL,
+        reply_ref TEXT NOT NULL, label TEXT NOT NULL, last_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS channels_by_cw ON channels (conversation_id);
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS media (token TEXT PRIMARY KEY, source_url TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -55,16 +76,18 @@ export class Store {
         id TEXT PRIMARY KEY, resource TEXT NOT NULL UNIQUE, client_state TEXT NOT NULL, expires_at INTEGER NOT NULL);
     `);
     const cols = (this.db.prepare('PRAGMA table_info(conversations)').all() as any[]).map((c) => c.name);
+    const mcols = (this.db.prepare('PRAGMA table_info(messages)').all() as any[]).map((c) => c.name);
+    if (!mcols.includes('channel_key')) this.db.exec('ALTER TABLE messages ADD COLUMN channel_key TEXT');
     if (!cols.includes('status')) this.db.exec("ALTER TABLE conversations ADD COLUMN status TEXT NOT NULL DEFAULT 'open'");
   }
 
-  getContactSourceId(platform: Platform, userKey: string): string | undefined {
+  getContactSourceId(platform: string, userKey: string): string | undefined {
     const r = this.db.prepare('SELECT source_id FROM contacts WHERE platform = ? AND user_key = ?').get(platform, userKey) as
       | { source_id: string } | undefined;
     return r?.source_id;
   }
 
-  putContact(platform: Platform, userKey: string, sourceId: string): void {
+  putContact(platform: string, userKey: string, sourceId: string): void {
     this.db.prepare('INSERT OR REPLACE INTO contacts (platform, user_key, source_id) VALUES (?, ?, ?)').run(platform, userKey, sourceId);
   }
 
@@ -73,11 +96,11 @@ export class Store {
     return { platform: r.platform, threadKey: r.thread_key, conversationId: Number(r.conversation_id), sourceId: r.source_id, replyRef: JSON.parse(r.reply_ref), status: r.status };
   }
 
-  getByThread(platform: Platform, threadKey: string): ConversationRow | undefined {
+  getByThread(platform: string, threadKey: string): ConversationRow | undefined {
     return this.row(this.db.prepare('SELECT * FROM conversations WHERE platform = ? AND thread_key = ?').get(platform, threadKey));
   }
 
-  getByConversation(platform: Platform, conversationId: number): ConversationRow | undefined {
+  getByConversation(platform: string, conversationId: number): ConversationRow | undefined {
     return this.row(
       this.db.prepare('SELECT * FROM conversations WHERE platform = ? AND conversation_id = ? ORDER BY updated_at DESC LIMIT 1').get(platform, conversationId),
     );
@@ -89,23 +112,67 @@ export class Store {
       .run(r.platform, r.threadKey, r.conversationId, r.sourceId, JSON.stringify(r.replyRef), Date.now(), r.status ?? 'open');
   }
 
-  setConversationStatus(platform: Platform, conversationId: number, status: string): void {
+  setConversationStatus(platform: string, conversationId: number, status: string): void {
     this.db.prepare('UPDATE conversations SET status = ? WHERE platform = ? AND conversation_id = ?').run(status, platform, conversationId);
   }
 
-  /** Platform message (eventId format) <-> desk message id, with its thread root (eventId format). */
-  putMessage(platform: Platform, extId: string, deskId: number, root: string): void {
-    this.db.prepare('INSERT OR REPLACE INTO messages (platform, ext_id, desk_id, root, at) VALUES (?, ?, ?, ?, ?)').run(platform, extId, deskId, root, Date.now());
+  deleteConversation(platform: string, threadKey: string): void {
+    this.db.prepare('DELETE FROM conversations WHERE platform = ? AND thread_key = ?').run(platform, threadKey);
+  }
+
+  /** Conversations of a platform whose thread_key starts with `prefix`. */
+  listConversations(platform: string, prefix = ''): ConversationRow[] {
+    return (this.db.prepare('SELECT * FROM conversations WHERE platform = ? AND thread_key LIKE ?').all(platform, `${prefix}%`) as any[]).map((r) => this.row(r)!);
+  }
+
+  /** Platform message (eventId format) <-> desk message id, with its thread root (eventId format) and channel. */
+  putMessage(platform: Platform, extId: string, deskId: number, root: string, channelKey?: string): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO messages (platform, ext_id, desk_id, root, at, channel_key) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(platform, extId, deskId, root, Date.now(), channelKey ?? null);
+  }
+
+  private msg(r: any): MessageRow | undefined {
+    if (!r) return undefined;
+    return { extId: r.ext_id, deskId: Number(r.desk_id), root: r.root, ...(r.channel_key ? { channelKey: r.channel_key } : {}), platform: r.platform };
   }
 
   getMessageByExt(platform: Platform, extId: string): MessageRow | undefined {
-    const r = this.db.prepare('SELECT * FROM messages WHERE platform = ? AND ext_id = ?').get(platform, extId) as any;
-    return r ? { extId: r.ext_id, deskId: Number(r.desk_id), root: r.root } : undefined;
+    return this.msg(this.db.prepare('SELECT * FROM messages WHERE platform = ? AND ext_id = ?').get(platform, extId));
   }
 
-  getMessageByDesk(platform: Platform, deskId: number): MessageRow | undefined {
-    const r = this.db.prepare('SELECT * FROM messages WHERE platform = ? AND desk_id = ? ORDER BY at LIMIT 1').get(platform, deskId) as any;
-    return r ? { extId: r.ext_id, deskId: Number(r.desk_id), root: r.root } : undefined;
+  /** Desk ids are unique across the account, so the platform is optional. */
+  getMessageByDesk(deskId: number, platform?: Platform): MessageRow | undefined {
+    return this.msg(
+      platform
+        ? this.db.prepare('SELECT * FROM messages WHERE platform = ? AND desk_id = ? ORDER BY at LIMIT 1').get(platform, deskId)
+        : this.db.prepare('SELECT * FROM messages WHERE desk_id = ? ORDER BY at LIMIT 1').get(deskId),
+    );
+  }
+
+  private chan(r: any): ChannelRow | undefined {
+    if (!r) return undefined;
+    return { channelKey: r.channel_key, conversationId: Number(r.conversation_id), platform: r.platform, replyRef: JSON.parse(r.reply_ref), label: r.label, lastAt: Number(r.last_at) };
+  }
+
+  getChannel(channelKey: string): ChannelRow | undefined {
+    return this.chan(this.db.prepare('SELECT * FROM channels WHERE channel_key = ?').get(channelKey));
+  }
+
+  putChannel(c: ChannelRow): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO channels (channel_key, conversation_id, platform, reply_ref, label, last_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(c.channelKey, c.conversationId, c.platform, JSON.stringify(c.replyRef), c.label, c.lastAt);
+  }
+
+  /** Channels of a conversation, most recently active first. */
+  channelsFor(conversationId: number): ChannelRow[] {
+    return (this.db.prepare('SELECT * FROM channels WHERE conversation_id = ? ORDER BY last_at DESC, rowid DESC').all(conversationId) as any[]).map((r) => this.chan(r)!);
+  }
+
+  /** After a desk merge: every channel of `from` now belongs to `to`. */
+  repointChannels(fromConversationId: number, toConversationId: number): void {
+    this.db.prepare('UPDATE channels SET conversation_id = ? WHERE conversation_id = ?').run(toConversationId, fromConversationId);
   }
 
   getKv(key: string): string | undefined {

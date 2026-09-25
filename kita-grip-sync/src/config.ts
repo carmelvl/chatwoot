@@ -28,6 +28,8 @@ export function loadConfig() {
     chatwootAdminToken: env('CHATWOOT_ADMIN_TOKEN'),
     /** Owner in the desk: DRI attributes + assignment. */
     ownerSync: env('OWNER_SYNC', 'true') !== 'false',
+    /** Shared secret for the desk's Kita endpoints (POST /api/v1/kita/threads: thread titles + ticket links). Same value as the bridges'. */
+    bridgeLinkSecret: env('BRIDGE_LINK_SECRET'),
     agentsRefreshMs: Number(env('AGENTS_REFRESH_SECONDS', '600')) * 1000,
   };
 }
@@ -40,5 +42,7 @@ export function capabilities(cfg: Config) {
   const grip = !!cfg.gripApiKey;
   const tickets = webhook && grip && cfg.ticketsEnabled && !!(cfg.anthropicApiKey || cfg.openaiApiKey) && !!cfg.chatwootApiToken;
   const owners = webhook && grip && cfg.ownerSync && !!cfg.chatwootApiToken;
-  return { webhook, grip, tickets, owners };
+  /** Thread titles/ticket links on the desk: needs classification (tickets) and the bridge secret. */
+  const threads = tickets && !!cfg.bridgeLinkSecret;
+  return { webhook, grip, tickets, owners, threads };
 }

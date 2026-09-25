@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { createHandler } from '../src/app.ts';
 import { Bridge } from '../src/bridge.ts';
 import { ChatwootAppClient, KitaDeskClient } from '../src/chatwoot.ts';
-import { loadConfig } from '../src/config.ts';
+import { enabledPlatforms, loadConfig } from '../src/config.ts';
 import { hmacHex } from '../src/crypto.ts';
 import { ScopeCache, type ScopeCheck } from '../src/scope.ts';
 import { parseSlackEvent } from '../src/platforms/slack.ts';
@@ -119,16 +119,15 @@ test('config: GRIP_BASE_URL, GRIP_API_KEY, SCOPE_REFRESH_SECONDS', () => {
 
 // ---------- every inbound path, at the bridge ----------
 
-const numbers: WhatsAppNumber[] = [{ phoneNumberId: '111111111111111', inboxIdentifier: 'IN_WA_CARMEL', webhookSecret: 'cw-wa-carmel', ownerName: 'Carmel Limcaoco' }];
+const numbers: WhatsAppNumber[] = [{ phoneNumberId: '111111111111111', inboxIdentifier: 'IN_CUSTOMERS', webhookSecret: 'cw-wa-carmel', ownerName: 'Carmel Limcaoco' }];
 
 function world(scope?: ScopeCheck) {
   const cw = fakeChatwoot();
   const appPosts: any[] = [];
   const appFetch = (async (_u: any, init: any) => (appPosts.push(init.body), Response.json({ id: 7000 + appPosts.length }))) as typeof fetch;
   const app = new ChatwootAppClient('http://rails:3000', 'BRIDGE_TOKEN', '1', appFetch);
-  const inboxes = { slack: { inboxIdentifier: 'IN_SLACK' }, teams: { inboxIdentifier: 'IN_TEAMS' }, viber: { inboxIdentifier: 'IN_VIBER' }, whatsapp: { inboxIdentifier: '' } } as Record<Platform, { inboxIdentifier: string }>;
   const desk = new KitaDeskClient('https://support.internal.kita.ai', 's', appFetch);
-  const bridge = new Bridge({ store: new Store(':memory:'), chatwoot: cw.client, inboxes, senders: {}, publicUrl: PUBLIC_URL, app, desk, fetchImpl: cw.fetchImpl, scope });
+  const bridge = new Bridge({ store: new Store(':memory:'), chatwoot: cw.client, inbox: 'IN_CUSTOMERS', senders: {}, publicUrl: PUBLIC_URL, app, desk, fetchImpl: cw.fetchImpl, scope });
   const chatwootCalls = () => cw.calls.filter((c) => c.path.startsWith('/public')).length + appPosts.length;
   return { bridge, cw, appPosts, chatwootCalls };
 }
@@ -227,4 +226,39 @@ test('http: dropped Slack, Viber and WhatsApp (message + echo) events are still 
   await settle();
   assert.equal(hw.chatwootCalls(), 0);
   assert.deepEqual(platformCalls, [], 'no Slack user lookup and no WhatsApp media download for dropped messages');
+});
+
+test('scope cache: data.channels[] is exposed per channel_key (account, DRI, phase/health when sent)', async () => {
+  const g = fakeGrip({ success: true, data: { in_scope: [], out_of_scope: [], channels: [
+    { channel_key: 'slack:CTALA', account_id: 42, account_name: 'Tala', in_scope: true, dri_email: 'carmel@kita.ai', dri_name: 'Carmel Limcaoco', sales_owner_email: 'rhea@kita.ai', phase: 'pilot' },
+    { channel_key: 'whatsapp:+639998887777', account_id: null, in_scope: false },
+  ] } });
+  const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
+  await s.refresh();
+  assert.deepEqual(s.channel('slack:CTALA'), {
+    channel_key: 'slack:CTALA', account_id: '42', account_name: 'Tala', in_scope: true, dri_email: 'carmel@kita.ai', dri_name: 'Carmel Limcaoco',
+    sales_owner_email: 'rhea@kita.ai', phase: 'pilot', health: undefined,
+  });
+  assert.equal(s.channel('whatsapp:+639998887777')?.account_id, undefined);
+  assert.equal(s.channel('slack:CNONE'), undefined);
+  assert.deepEqual(s.inScope, ['slack:CTALA']);
+});
+
+test('config: CHATWOOT_CUSTOMERS_* is the one inbox; nothing is enabled without it; legacy WHATSAPP_NUMBERS fields tolerated', () => {
+  const keys = ['CHATWOOT_CUSTOMERS_INBOX_IDENTIFIER', 'CHATWOOT_CUSTOMERS_WEBHOOK_SECRET', 'VIBER_AUTH_TOKEN', 'WHATSAPP_NUMBERS'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  try {
+    process.env.VIBER_AUTH_TOKEN = 'v';
+    process.env.WHATSAPP_NUMBERS = JSON.stringify([{ phoneNumberId: '1', ownerName: 'A' }, { phoneNumberId: '2', inboxIdentifier: 'old', webhookSecret: 'old', ownerName: 'B' }]);
+    delete process.env.CHATWOOT_CUSTOMERS_INBOX_IDENTIFIER;
+    assert.deepEqual(enabledPlatforms(loadConfig()), []);
+    process.env.CHATWOOT_CUSTOMERS_INBOX_IDENTIFIER = 'IN_CUSTOMERS';
+    process.env.CHATWOOT_CUSTOMERS_WEBHOOK_SECRET = 'sec';
+    const c = loadConfig();
+    assert.deepEqual(c.customers, { inboxIdentifier: 'IN_CUSTOMERS', webhookSecret: 'sec' });
+    assert.deepEqual(enabledPlatforms(c), ['viber']);
+    assert.equal(c.whatsapp.numbers.length, 2);
+  } finally {
+    for (const k of keys) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+  }
 });

@@ -49,7 +49,7 @@ import WhatsappFlowResponseBubble from './bubbles/WhatsappFlowResponse.vue';
 import WhatsappReferral from './bubbles/Text/WhatsappReferral.vue';
 
 import MessageError from './MessageError.vue';
-import MessageThreadChip from './MessageThreadChip.vue';
+import KitaThreadFooter from 'next/kita/KitaThreadFooter.vue';
 import ContextMenu from 'dashboard/modules/conversations/components/MessageContextMenu.vue';
 import { useBranding } from 'shared/composables/useBranding';
 
@@ -102,7 +102,7 @@ import { useBranding } from 'shared/composables/useBranding';
  * @property {string} content - The message content
  * @property {boolean} [groupWithNext=false] - Whether the message should be grouped with the next message
  * @property {boolean} [groupWithPrevious=false] - Whether the message is grouped with the previous message
- * @property {Object|null} [threadReplies=null] - Loaded replies to this thread root ({ count, firstReplyId })
+ * @property {Object|null} [kitaThread=null] - Kita thread this message is the root of (threads API entry)
  * @property {string|null} [conversationChannel=null] - Kita bridge channel of the conversation (slack/teams/whatsapp/viber)
  * @property {Object|null} [inReplyTo=null] - The message to which this message is a reply
  * @property {boolean} [isEmailInbox=false] - Whether the message is from an email inbox
@@ -138,7 +138,7 @@ const props = defineProps({
   groupWithNext: { type: Boolean, default: false },
   groupWithPrevious: { type: Boolean, default: false },
   conversationChannel: { type: String, default: null },
-  threadReplies: { type: Object, default: null },
+  kitaThread: { type: Object, default: null },
   inboxId: { type: Number, default: null }, // eslint-disable-line vue/no-unused-properties
   inboxSupportsReplyTo: { type: Object, default: () => ({}) },
   inReplyTo: { type: Object, default: null }, // eslint-disable-line vue/no-unused-properties
@@ -594,9 +594,9 @@ provideMessageContext({
             'justify-end': orientation === ORIENTATION.RIGHT,
             'w-full': variant === MESSAGE_VARIANTS.EMAIL,
             'flex-col items-start gap-2': shouldShowWhatsappReferral,
-            'flex-col gap-1': threadReplies,
-            'items-end': threadReplies && orientation === ORIENTATION.RIGHT,
-            'items-start': threadReplies && orientation === ORIENTATION.LEFT,
+            'flex-col gap-1': kitaThread,
+            'items-end': kitaThread && orientation === ORIENTATION.RIGHT,
+            'items-start': kitaThread && orientation === ORIENTATION.LEFT,
           }"
           @contextmenu="openContextMenu($event)"
         >
@@ -605,7 +605,11 @@ provideMessageContext({
             :referral="contentAttributes.referral"
           />
           <Component :is="componentToRender" />
-          <MessageThreadChip v-if="threadReplies" v-bind="threadReplies" />
+          <KitaThreadFooter
+            v-if="kitaThread"
+            :thread="kitaThread"
+            :conversation-id="conversationId"
+          />
         </div>
         <MessageError
           v-if="contentAttributes.externalError"

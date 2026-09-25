@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { ChatwootApi } from '../src/chatwoot.ts';
+import { ChatwootApi, KitaDesk } from '../src/chatwoot.ts';
 import { ClaudeClassifier, type Classification } from '../src/claude.ts';
 import { GripClient } from '../src/grip.ts';
 import { Owners } from '../src/owner.ts';
@@ -13,15 +13,18 @@ export interface Call { host: string; method: string; path: string; headers: Rec
 
 /**
  * One injected fetch that stubs all three upstreams by host:
- *  - grip.test       Grip support API (tickets upserted by conversation id, like the real contract)
- *  - rails.test      Chatwoot application API (notes, labels)
+ *  - grip.test       Grip support API (tickets upserted by (conversation id, issue_key), like the real contract)
+ *  - rails.test      Chatwoot application API (notes, labels) + the desk's POST /api/v1/kita/threads
  *  - anthropic.test  Claude Messages API (answers from a queue of classifications)
  */
 export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owners?: boolean } = {}) {
   const calls: Call[] = [];
   const classifications: Classification[] = [];
   const fail: Record<string, number[]> = { grip: [], rails: [], anthropic: [] }; // queued HTTP statuses to fail with
-  const tickets = new Map<number, any>();
+  /** Grip tickets keyed `<conversation>:<issue_key>` ('' = no issue_key). */
+  const tickets = new Map<string, any>();
+  /** Desk kita_threads rows keyed `<conversation>:<root>` (latest POST body). */
+  const threads = new Map<string, any>();
   const labels = new Map<number, string[]>();
   let clock = Date.parse('2026-09-24T02:00:00Z');
   let noteId = 9000;
@@ -53,17 +56,25 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owner
         return Response.json(grip.envelope ? { success: true, data: r } : r);
       }
       if (p === '/api/v1/support/tickets') {
-        const t = tickets.get(body.chatwoot_conversation_id) ?? { id: `t-${tickets.size + 1}`, status: 'todo' };
-        tickets.set(body.chatwoot_conversation_id, { ...t, ...body });
-        return Response.json({ success: true, data: { ticket_id: t.id, ticket_url: `https://internal.kita.ai/tasks/${t.id}` } });
+        const k = `${body.chatwoot_conversation_id}:${body.issue_key ?? ''}`;
+        const t = tickets.get(k) ?? { id: `t-${tickets.size + 1}`, status: 'todo' };
+        tickets.set(k, { ...t, ...body });
+        return Response.json({ success: true, data: { ticket_id: t.id, ticket_url: `https://internal.kita.ai/tasks/${t.id}`, created: !tickets.has(k), dismissed: false, ...(body.issue_key ? { issue_key: body.issue_key } : {}) } });
       }
       const m = p.match(/^\/api\/v1\/support\/tickets\/(\d+)$/);
       if (m && init.method === 'PATCH') {
-        tickets.get(Number(m[1])).status = body.status;
-        return Response.json({ ok: true });
+        const hit = [...tickets.entries()].filter(([k]) => body.all ? k.startsWith(`${m[1]}:`) : k === `${m[1]}:${body.issue_key ?? ''}`);
+        if (!hit.length) return new Response('{"success":false}', { status: 404 });
+        for (const [, t] of hit) if (t.status !== 'dismissed') t.status = body.status;
+        return Response.json({ success: true, data: { updated: hit.length } });
       }
     }
     if (host === 'rails') {
+      if (p === '/api/v1/kita/threads') {
+        if (init.headers?.['x-kita-bridge-secret'] !== 'bridge-secret') return new Response('{"error":"forbidden"}', { status: 401 });
+        threads.set(`${body.conversation_id}:${body.root_message_id}`, body);
+        return Response.json({ id: threads.size });
+      }
       const ts = p.match(/^\/api\/v1\/accounts\/1\/conversations\/(\d+)\/toggle_status$/);
       if (ts) {
         statuses.set(Number(ts[1]), body.status);
@@ -113,6 +124,7 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owner
     owners: opts.owners ? new Owners({ store, chatwoot, directory: new ChatwootApi('http://rails.test', 'cw-admin-token', fetchImpl), now: () => clock }) : undefined,
     grip: new GripClient('https://grip.test', 'grip_testkey', fetchImpl),
     chatwoot,
+    desk: new KitaDesk('http://rails.test', 'bridge-secret', fetchImpl),
     claude: new ClaudeClassifier({ apiKey: 'sk-ant-test', model: 'claude-sonnet-5', baseUrl: 'https://anthropic.test' }, fetchImpl),
     publicUrl: 'https://support.internal.kita.ai',
     debounceMs: opts.debounceMs ?? 60_000,
@@ -120,7 +132,7 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owner
     now: () => clock,
   });
   return {
-    sync, store, calls, classifications, fail, tickets, labels, statuses, grip, owner, cw, fetchImpl,
+    sync, store, calls, classifications, fail, tickets, threads, labels, statuses, grip, owner, cw, fetchImpl,
     advance: (ms: number) => { clock += ms; },
     now: () => clock,
     of: (host: string, method?: string, path?: string | RegExp) =>
@@ -135,5 +147,5 @@ export function msg(name: string, patch: Record<string, unknown>) {
   return { ...fixture(name), ...patch };
 }
 
-export const ISSUE: Classification = { is_issue: true, is_new_issue: false, title: 'Risk score API returning 500s', priority: 'high', summary: 'All risk score calls fail with 500 since this morning; loan officers are blocked.' };
-export const NOT_ISSUE: Classification = { is_issue: false, is_new_issue: false, title: '', priority: 'low', summary: '' };
+export const ISSUE: Classification = { is_issue: true, is_new_issue: false, title: 'Risk score API returning 500s', priority: 'high', summary: 'All risk score calls fail with 500 since this morning; loan officers are blocked.', thread_title: 'Risk score API down' };
+export const NOT_ISSUE: Classification = { is_issue: false, is_new_issue: false, title: '', priority: 'low', summary: '', thread_title: '' };

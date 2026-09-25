@@ -68,6 +68,15 @@ export function isThreadReply(msg: any): boolean {
   return ca.in_reply_to != null || ca.external_thread?.root != null;
 }
 
+/**
+ * Desk id of the message's thread root: content_attributes.in_reply_to for a thread reply, else the message's own id.
+ * String(root) is the Grip ticket issue_key: one ticket per thread.
+ */
+export function threadRootId(msg: any): number {
+  const r = Number(msg?.content_attributes?.in_reply_to);
+  return Number.isInteger(r) && r > 0 ? r : Number(msg?.id);
+}
+
 export function preview(content: unknown, attachments: unknown[] = [], max = 200): string {
   const text = typeof content === 'string' ? content.replace(/\s+/g, ' ').trim() : '';
   const out = text || (attachments.length ? `[${attachments.length} attachment${attachments.length > 1 ? 's' : ''}]` : '');

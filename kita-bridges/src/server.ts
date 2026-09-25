@@ -40,14 +40,19 @@ const teamSync = new TeamSync({
   teams: teams ? new TeamsMembership({ graph: teams.graph, store }) : undefined,
 });
 // Grip scope (fails open; disabled when GRIP_* is unset). First refresh runs in the background.
+// After each refresh: team sync, then merge newly linked channel conversations into their account's.
+let bridge: Bridge | undefined;
 const scope = new ScopeCache({
   baseUrl: cfg.grip.baseUrl, apiKey: cfg.grip.apiKey, refreshMs: cfg.grip.scopeRefreshMs,
-  onRefresh: (inScope) => void teamSync.run(inScope).catch((e) => log.error('teamsync_failed', { error: String(e?.message ?? e) })),
+  onRefresh: async (inScope) => {
+    void teamSync.run(inScope).catch((e) => log.error('teamsync_failed', { error: String(e?.message ?? e) }));
+    await bridge?.linkChannels();
+  },
 });
-void scope.start();
-// Staff typing in Slack/Teams are posted by the desk as the matching agent (shared BRIDGE_LINK_SECRET).
+// Staff typing in Slack/Teams are posted by the desk as the matching agent; merges (shared BRIDGE_LINK_SECRET).
 const desk = cfg.linkSecret ? new KitaDeskClient(cfg.chatwootBaseUrl, cfg.linkSecret) : undefined;
-const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope });
+bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope });
+void scope.start();
 const connect = cfg.linkSecret
   ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth, whatsappNumbers: cfg.whatsapp.numbers, deskUrl: cfg.chatwootBaseUrl })
   : undefined;

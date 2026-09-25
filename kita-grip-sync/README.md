@@ -1,6 +1,6 @@
 # kita-grip-sync
 
-Keeps Grip (internal.kita.ai) in step with the support desk (support.internal.kita.ai). Every Chatwoot conversation becomes a `support_conversations` row in Grip, which rolls up into each account's support status. Customer issues become Grip tickets automatically. The contract is [`docs/kita-grip-support-sync.md`](../docs/kita-grip-support-sync.md).
+Keeps Grip (internal.kita.ai) in step with the support desk (support.internal.kita.ai). Every Chatwoot conversation becomes a `support_conversations` row in Grip, which rolls up into each account's support status. Customer issues become Grip tickets automatically, **one per thread**, and every thread gets a short AI title on the desk. The contract is [`docs/kita-grip-support-sync.md`](../docs/kita-grip-support-sync.md).
 
 **Nothing this service does is visible to customers.** It writes only to Grip and, in Chatwoot, only **private notes** and **labels**. The bridges never forward private messages.
 
@@ -13,10 +13,12 @@ Chatwoot account webhook ──> Caddy /grip-sync/* ──> grip-sync:8080  POST
   conversation_status_changed,                       ▼
   conversation_updated)                   durable job queue (SQLite /data), runner ticks every 1s
                                             sync:<id>          POST  internal.kita.ai/api/v1/support/conversations
-                                            classify:<id>      Claude (claude-sonnet-5, JSON schema) → POST /api/v1/support/tickets
-                                            announce:<id>      Chatwoot private note (ticket link) + label `ticket`
-                                            note:<id>          Chatwoot private note (priority escalated)
-                                            ticket_status:<id> PATCH /api/v1/support/tickets/:id {done|todo|dismissed}
+                                            classify:<id>:<root>      Claude or OpenAI (JSON schema) → POST /api/v1/support/tickets {issue_key}
+                                            thread:<id>:<root>        desk POST /api/v1/kita/threads {title, ticket link}
+                                            announce:<id>:<key>       Chatwoot private note (thread title + ticket link) + label `ticket`
+                                            note:<id>:<key>           Chatwoot private note (priority escalated / new issue)
+                                            ticket_status:<id>        PATCH /api/v1/support/tickets/:id {done|dismissed, all: true}
+                                            ticket_status:<id>:<key>  PATCH /api/v1/support/tickets/:id {todo, issue_key}
 ```
 
 Like `kita-bridges`, it is **Node 24 + TypeScript with no dependencies**: Node strips the types, and `fetch`, `node:sqlite` and `node:test` are built in. There is no install step and no build step.
@@ -36,7 +38,7 @@ Like `kita-bridges`, it is **Node 24 + TypeScript with no dependencies**: Node s
 * **Idempotency.**
   * Webhook deliveries are deduped by `X-Chatwoot-Delivery`.
   * Messages are deduped by message id, so a replay never double-counts `message_count`.
-  * Grip upserts tickets by `chatwoot_conversation_id`, so a retried create can't make a second ticket. Locally, only the single-flight classify job creates tickets.
+  * Grip upserts tickets by `(chatwoot_conversation_id, issue_key)`, so a retried create can't make a second ticket. Locally, only the single-flight classify job of a thread creates its ticket.
   * The note and the label are flagged separately. A retry after a partial failure never posts the note twice.
 * **Conversation state is tracked from webhooks.** This covers `message_count`, last message, last customer message, the preview, and who spoke last. Only public messages count: incoming = customer; outgoing or template = Kita. Private notes and activities are ignored. `message_count` counts messages seen since the service started watching the conversation.
 * **waiting_on:**
@@ -50,25 +52,21 @@ Like `kita-bridges`, it is **Node 24 + TypeScript with no dependencies**: Node s
   * Phones without a leading `+` are never guessed into a country code.
   * Conversations with no key (web widget, email…) are not synced; the service logs `no_channel_key`.
   * `channel_label` is the `channel_label` custom attribute if the bridge sets one, otherwise the contact name.
-* **Automatic tickets** (contract section "Tickets: fully automatic"):
-  1. A public customer message in a non-resolved conversation (re)arms a trailing debounce: 60s after the last message, capped at 300s after the first unclassified one.
-  2. The classify job skips the call if no customer message arrived since the last classification. Otherwise it sends the last 40 public messages plus any existing ticket to Claude:
-     * `POST /v1/messages`, model `claude-sonnet-5`, `effort: low`;
-     * `output_config.format` = JSON schema `{is_issue, is_new_issue, title, priority, summary}`.
-     The transcript is wrapped in `<thread>` and treated as data. Each line carries the sender's name (`payload.sender.name`), because kita-bridges now keeps **one conversation per Slack channel / Teams channel / Teams group chat** and many people speak in it; replies inside a Slack/Teams thread (`content_attributes.in_reply_to` or `external_thread`) are marked `(thread reply)`.
-  3. If it's an issue and there's no ticket yet: `POST /support/tickets`, then a private note with the Grip link, then label `ticket`.
-  4. **One ticket per conversation = the latest open issue.** Grip keys tickets by `chatwoot_conversation_id`, and a per-channel conversation carries many issues over time, so the single ticket always describes the most recent open issue:
-     * same issue (`is_new_issue: false`): the upsert updates title, summary and priority. Priority only ever goes **up** automatically; an escalation adds a short private note.
-     * different issue (`is_new_issue: true`): title and summary are overwritten with the new issue, and priority is **reset** to the new issue's own priority (it may go down: an urgent outage last week must not make a feature request urgent). A private note says the ticket now tracks a new issue and names the previous title, so the change is visible in the desk.
-     * The classifier never closes tickets.
-  5. When the conversation resolves, the ticket goes to `done`. **Reopening does not flip it back to `todo`** (a reopen of a per-channel conversation usually means a new issue): the next classification decides. If the new customer messages are an issue, the done ticket is overwritten with it (new title, summary and its own priority), set to `todo`, and a private "ticket reopened" note is posted. If not (thanks, chit-chat), the ticket stays `done`. A reopen by an agent with no new customer message leaves it `done`. Snoozed changes nothing.
-     Until Grip supports several tickets per conversation (contract section "Next: one ticket per issue"), a previous issue's history lives only in the Grip ticket's activity and the desk notes.
-  6. When label `not-a-ticket` is added:
-     * the pending classification is cancelled;
-     * the ticket (if any) is PATCHed to `dismissed`;
+* **Automatic tickets, one per thread** (contract section "Tickets: fully automatic, one per thread"). A desk conversation is one customer: every bridged channel and many threads. A message's **thread root** is `content_attributes.in_reply_to` for replies, else the message itself; `issue_key = String(root desk message id)`.
+  1. A public customer message in a non-resolved conversation (re)arms a trailing debounce **for its thread** (`classify:<conversation>:<root>`): 60s after the last message, capped at 300s after the first unclassified one.
+  2. The classify job skips the call if no customer message arrived in that thread since its last classification. Otherwise it sends the thread (root + latest 40 replies) plus the thread's existing ticket to the classifier (Anthropic when `ANTHROPIC_API_KEY` is set, else OpenAI; both with a strict JSON schema `{is_issue, is_new_issue, title, priority, summary, thread_title}`).
+     The transcript is wrapped in `<thread>` and treated as data. Each line carries the sender's name; replies are marked `(thread reply)`.
+  3. **Thread title.** `thread_title` (3–6 words, e.g. "Batch 14 scores missing") comes back on every classification, issue or not. When it changed, or the thread's ticket link changed, a `thread` job posts `POST {CHATWOOT_BASE_URL}/api/v1/kita/threads` (header `X-Kita-Bridge-Secret: $BRIDGE_LINK_SECRET`) with `{conversation_id, root_message_id, title, ticket_id?, ticket_url?}`. What was last posted is kept per thread, so an unchanged thread costs no desk call.
+  4. If it's an issue and the thread has no ticket yet: `POST /support/tickets` with `issue_key`, then a private note naming the thread (`Grip ticket created automatically for thread "…" (high): **title**` + link), then label `ticket` (once per conversation in practice: the label is read-merge-write).
+  5. **Within a thread the ticket is the latest open issue:** same issue (`is_new_issue: false`): title, summary and priority update; priority only goes **up** automatically, and an escalation adds a private note. Different issue in the same thread: overwritten, priority **reset**, private note naming the previous title. The classifier never closes tickets.
+  6. When the conversation resolves, **every** ticket of it goes to `done` in one `PATCH {status: 'done', all: true}`. Reopening does not flip tickets back: a thread's next classification decides. If its new customer messages are an issue, that thread's done ticket is overwritten, set to `todo` (`PATCH {status: 'todo', issue_key}`), and a "ticket reopened" note is posted. Snoozed changes nothing.
+  7. When label `not-a-ticket` is added (still **conversation-wide**; per-thread dismissal is future work):
+     * every pending thread classification is cancelled;
+     * every ticket of the conversation is PATCHed `{status: 'dismissed', all: true}`;
      * the conversation is marked dismissed **forever**, even if the label is later removed;
-     * the dismissal is written to the `dismissals` table (ticket title, priority, summary and the thread) for prompt tuning, plus a `ticket_dismissed` log line.
-  7. The dismissal state is checked again after the Claude call and after the ticket POST, so a `not-a-ticket` that lands mid-flight still wins.
+     * each dismissed ticket is written to the `dismissals` table (issue key, title, priority, summary and its thread) for prompt tuning, plus a `ticket_dismissed` log line.
+  8. **Local state:** `tickets` is keyed by `(conversation_id, issue_key)` and `threads` by `(conversation_id, root_id)`. Older databases migrate in place on start: the one ticket per conversation keeps issue key `''` (Grip's default ticket, sent without `issue_key`; closed by the next resolve, never reused), and old messages become their own thread roots.
+  9. The dismissal state is checked again after the Claude call and after the ticket POST, so a `not-a-ticket` that lands mid-flight still wins.
 * **Out-of-scope accounts.** Grip's `POST /support/conversations` answers `in_scope: boolean`, flat or inside Grip's `{ success, data }` envelope (false when the linked account isn't on Grip's Customers page: paused, closed, or no pilot). kita-bridges already drops messages from channels Grip lists as out of scope; this catches what slips through, e.g. a brand-new channel that auto-linked to a paused account.
   * On the first `in_scope: false` for a conversation: the pending classification is cancelled, the conversation is resolved (`POST …/conversations/:id/toggle_status {status: resolved}`) and gets label `out-of-scope` (read-merge-write, existing labels kept). No note, no ticket, and it is never classified while out of scope.
   * Once per conversation: a flag in SQLite means later messages don't resolve or relabel it again (if the customer writes again, Chatwoot reopens it and it stays open). Both calls are idempotent, so a retried job is safe.
@@ -82,7 +80,7 @@ Like `kita-bridges`, it is **Node 24 + TypeScript with no dependencies**: Node s
   * token scope: the agent bot token may call `conversations#show/custom_attributes` and `assignments#create`, but **not** `agents#index` or `custom_attribute_definitions`. Set `CHATWOOT_ADMIN_TOKEN` (an administrator's access token) for those. Without it, attributes are still written, assignment is skipped and `agents_unavailable` is logged once.
   * the attribute definitions are created on first use if the admin token allows it; otherwise `attribute_definitions_missing` is logged and you create them once (Setup checklist, step 2b).
 * **Loop safety.** The service's own notes come back as `message_created` with `private: true` and are ignored for counting and classification. The `ticket` label comes back as `conversation_updated` and changes nothing.
-* **Logs contain ids and event kinds only**, never message bodies or tokens. Message text lives only in the local SQLite volume (last 40 public messages per conversation) so the classifier has context.
+* **Logs contain ids and event kinds only**, never message bodies or tokens. Message text lives only in the local SQLite volume (last 500 public messages per conversation) so the classifier has context.
 
 Endpoints (Caddy strips `/grip-sync`): `POST /chatwoot/webhook` and `GET /healthz`, which reports which parts are enabled.
 
@@ -110,6 +108,8 @@ The service rejects missing or incorrect signatures, and any timestamp more than
 | `GRIP_API_KEY` | none (required) | `grip_…` service key (Bearer) |
 | `ANTHROPIC_API_KEY` | none (needed for tickets) | Claude API key |
 | `CLAUDE_MODEL` | `claude-sonnet-5` | Classifier model |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | none / `gpt-5-mini` | Classifier when no Anthropic key is set |
+| `BRIDGE_LINK_SECRET` | none (needed for thread titles) | Shared secret (same as kita-bridges) for the desk's `POST /api/v1/kita/threads` |
 | `CLASSIFY_DEBOUNCE_SECONDS` / `CLASSIFY_MAX_WAIT_SECONDS` | `60` / `300` | Debounce window and its cap |
 | `AUTO_TICKETS` | `true` | `false` = sync conversations only |
 | `CHATWOOT_ADMIN_TOKEN` | none | Administrator access token for `agents#index` + `custom_attribute_definitions` (bot tokens can't call them). Needed for owner assignment |
@@ -117,7 +117,7 @@ The service rejects missing or incorrect signatures, and any timestamp more than
 | `AGENTS_REFRESH_SECONDS` | `600` | Agent list cache lifetime |
 | `GRIP_SYNC_DB_PATH`, `PORT`, `LOG_LEVEL` | `/data/grip-sync.sqlite`, `8080`, `info` | |
 
-Owner in the desk runs when the webhook, Grip and `CHATWOOT_API_TOKEN` are set and `OWNER_SYNC` isn't `false`. If `GRIP_API_KEY` is missing, nothing is synced. If the Anthropic key or the Chatwoot token is missing (or `AUTO_TICKETS=false`), conversations still sync but no tickets are made. `/healthz` shows `{webhook, grip, tickets, owners}`.
+Owner in the desk runs when the webhook, Grip and `CHATWOOT_API_TOKEN` are set and `OWNER_SYNC` isn't `false`. If `GRIP_API_KEY` is missing, nothing is synced. If the Anthropic key or the Chatwoot token is missing (or `AUTO_TICKETS=false`), conversations still sync but no tickets are made. If `BRIDGE_LINK_SECRET` is missing, tickets still work but no thread titles or ticket links reach the desk. `/healthz` shows `{webhook, grip, tickets, owners, threads}`.
 
 ## Run and test locally
 
@@ -132,6 +132,8 @@ The tests use recorded Chatwoot webhook payloads (`test/fixtures/`) and one inje
 * waiting_on;
 * debounce and its cap;
 * ticket create-once, update and escalation;
+* one ticket per thread: distinct `issue_key`s in one conversation, per-thread transcripts, notes naming the thread, titles + ticket links posted to the desk with the secret, title re-posted only when it changed, resolve as one `all: true` PATCH;
+* migration of an old one-ticket-per-conversation database;
 * a new distinct issue overwriting the ticket (priority reset), sender names and thread-reply markers in the transcript;
 * resolve, bare reopen (ticket stays done), and reopen by a new issue (overwrite + todo);
 * dismissal before and after a ticket exists;

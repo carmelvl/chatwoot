@@ -57,10 +57,15 @@ jobs:
           app/javascript/dashboard/routes/dashboard/customers/pages/CustomersIndex.vue
           app/javascript/dashboard/routes/dashboard/dashboard.routes.js
           app/javascript/dashboard/components-next/sidebar/Sidebar.vue
+          app/javascript/dashboard/api/kitaThreads.js
+          app/javascript/dashboard/composables/useKitaThreads.js
+          app/javascript/dashboard/helper/kitaThreads.js
+          app/javascript/dashboard/helper/specs/kitaThreads.spec.js
+          app/javascript/dashboard/components/widgets/conversation/ConversationBox.vue
+          app/javascript/dashboard/routes/dashboard/conversation/ConversationView.vue
           app/javascript/dashboard/components-next/message/Message.vue
           app/javascript/dashboard/components-next/message/MessageList.vue
           app/javascript/dashboard/components-next/message/MessageSenderAvatar.vue
-          app/javascript/dashboard/components-next/message/MessageThreadChip.vue
           app/javascript/dashboard/components-next/sidebar/SidebarProfileMenu.vue
           app/javascript/dashboard/routes/dashboard/Dashboard.vue
           app/javascript/shared/constants/busEvents.js
@@ -85,4 +90,5 @@ jobs:
         run: >-
           bundle exec rubocop app/controllers/devise_overrides/omniauth_callbacks_controller.rb spec/controllers/kita
           lib/kita app/controllers/kita app/controllers/api/v1/kita app/controllers/concerns/kita app/controllers/api/v1/accounts/kita
+          app/models/kita db/migrate/20260924000000_create_kita_threads.rb
           app/controllers/public/api/v1/inboxes/messages_controller.rb

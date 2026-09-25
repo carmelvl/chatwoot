@@ -28,11 +28,7 @@ export interface AppDeps {
   whatsappOwnerApps?: Map<string, ChatwootAppClient>;
 }
 
-/** Viber and WhatsApp are mirrors: nothing typed in the desk is ever sent; the agent gets this private note. */
-export const MIRROR_NOTE: Record<'whatsapp' | 'viber', string> = {
-  whatsapp: 'Reply in WhatsApp yourself — this inbox is a mirror. Nothing typed here is sent to the customer.',
-  viber: 'Reply in Viber yourself — this inbox is a mirror. Nothing typed here is sent to the customer.',
-};
+export { MIRROR_NOTE } from './bridge.ts';
 
 /** Cloud API webhook batch -> customer messages (incoming) and phone-app echoes (outgoing, owner). */
 async function processWhatsApp(d: AppDeps, body: unknown) {
@@ -212,29 +208,12 @@ export function createHandler(d: AppDeps) {
         return;
       }
 
-      const wa = path.match(/^\/chatwoot\/whatsapp\/([0-9]+)$/);
-      if (wa && d.enabled.includes('whatsapp')) {
-        const number = cfg.whatsapp.numbers.find((n) => n.phoneNumberId === wa[1]);
-        if (!number || !verifyChatwootSignature(number.webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))
-          return send(res, 401);
-        const payload = JSON.parse(raw);
-        const result = await bridge.mirrorNotice('whatsapp', payload, MIRROR_NOTE.whatsapp);
-        return send(res, 200, { ok: true, result });
-      }
-
-      if (path === '/chatwoot/viber' && d.enabled.includes('viber')) {
-        if (!verifyChatwootSignature(cfg.inboxes.viber.webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))
-          return send(res, 401);
-        return send(res, 200, { ok: true, result: await bridge.mirrorNotice('viber', JSON.parse(raw), MIRROR_NOTE.viber) });
-      }
-
-      const cw = path.match(/^\/chatwoot\/(slack|teams)$/);
-      if (cw && d.enabled.includes(cw[1] as Platform)) {
-        const platform = cw[1] as Platform;
-        if (!verifyChatwootSignature(cfg.inboxes[platform].webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))
+      // The one Customers inbox: every platform's agent replies (targeted per message; mirrors get a note).
+      if (path === '/chatwoot/customers' && cfg.customers.webhookSecret) {
+        if (!verifyChatwootSignature(cfg.customers.webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))
           return send(res, 401);
         // Synchronous on purpose: a non-2xx makes Chatwoot mark the agent's message as failed in the UI.
-        const result = await bridge.outbound(platform, JSON.parse(raw));
+        const result = await bridge.outbound(JSON.parse(raw));
         // Refused (agent not connected / not a member): nothing was posted; 422 marks the message failed.
         return send(res, result.startsWith('refused:') ? 422 : 200, { ok: !result.startsWith('refused:'), result });
       }

@@ -7,6 +7,16 @@ export interface TicketInput {
   body: string;
   priority: Priority;
   chatwoot_url: string;
+  /** String(thread root desk message id): one ticket per (conversation, issue_key). Omitted for a legacy conversation-level ticket. */
+  issue_key?: string;
+}
+
+export interface TicketStatusInput {
+  status: 'todo' | 'done' | 'dismissed';
+  /** That thread's ticket. */
+  issue_key?: string;
+  /** Every ticket of the conversation (resolve, not-a-ticket). */
+  all?: boolean;
 }
 
 /** Grip support API (contract: docs/kita-grip-support-sync.md), authenticated with a `grip_` service key. */
@@ -34,12 +44,12 @@ export class GripClient {
     return this.call('POST', 'conversations', body);
   }
 
-  /** Upserts by chatwoot_conversation_id: Grip holds at most one support ticket per conversation. */
-  upsertTicket(body: TicketInput): Promise<{ ticket_id: string; ticket_url: string }> {
+  /** Upserts by (chatwoot_conversation_id, issue_key): one Grip ticket per thread. */
+  upsertTicket(body: TicketInput): Promise<{ ticket_id: string; ticket_url: string; created?: boolean; dismissed?: boolean; issue_key?: string }> {
     return this.call('POST', 'tickets', body);
   }
 
-  setTicketStatus(conversationId: number, status: 'todo' | 'done' | 'dismissed'): Promise<unknown> {
-    return this.call('PATCH', `tickets/${conversationId}`, { status });
+  setTicketStatus(conversationId: number, body: TicketStatusInput): Promise<unknown> {
+    return this.call('PATCH', `tickets/${conversationId}`, body);
   }
 }

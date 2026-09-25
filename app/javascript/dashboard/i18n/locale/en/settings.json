@@ -1174,5 +1174,25 @@
     "EMPTY": "No customers yet",
     "NO_CONVERSATIONS": "No conversations for this customer",
     "FETCH_ERROR": "Could not load customers"
+  },
+  "KITA_THREADS": {
+    "REPLY_COUNT": "{count} reply | {count} replies",
+    "LAST_REPLY": "last reply {time}",
+    "TICKET": "Ticket",
+    "TAB_MESSAGES": "Messages",
+    "TAB_THREADS": "Threads",
+    "EMPTY": "No threads yet",
+    "OPEN": "Open",
+    "RESOLVED": "Resolved",
+    "RESOLVE": "Resolve thread",
+    "REOPEN": "Reopen thread",
+    "CLOSE": "Close thread",
+    "PANE_TITLE": "Thread",
+    "REPLY_PLACEHOLDER": "Reply in thread…",
+    "SEND": "Send",
+    "SEND_ERROR": "Could not send the reply",
+    "STATUS_ERROR": "Could not update the thread",
+    "REPLYING_IN": "Replying in",
+    "NOT_LOADED": "Older messages of this thread aren't loaded yet. Scroll up in the conversation to load them."
   }
 }
