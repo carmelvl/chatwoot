@@ -320,6 +320,8 @@
     "INBOX_VIEW": "Inbox View",
     "CONVERSATIONS": "Conversations",
     "INBOX": "My Inbox",
+    "KITA_INBOX": "Inbox",
+    "TICKETS": "Tickets",
     "ALL_CONVERSATIONS": "All Conversations",
     "MENTIONED_CONVERSATIONS": "Mentions",
     "PARTICIPATING_CONVERSATIONS": "Participating",
@@ -1156,45 +1158,37 @@
       "MIRROR": "Reply in {platform} yourself — this inbox is a mirror",
       "MIRROR_DESCRIPTION": "Nothing typed here is sent to the customer. Private notes still work.",
       "MIRROR_ON_PHONE": "Reply to {name} from {app} on your phone",
-      "MIRROR_EXPLAINER": "This chat is a mirror. What you send from your phone shows up here as you.",
+      "MIRROR_EXPLAINER": "Reply from your phone. It will appear here.",
       "WHATSAPP_APP": "WhatsApp Business",
       "VIBER_APP": "Viber",
-      "ADD_PRIVATE_NOTE": "Add private note"
+      "ADD_PRIVATE_NOTE": "Add private note",
+      "REPLIED_FROM_PHONE": "Replied from phone",
+      "REPLIED_FROM_PHONE_DONE": "Marked as replied"
     }
   },
   "KITA_CUSTOMERS": {
     "TITLE": "Customers",
-    "FILTER": {
-      "ALL": "All customers",
-      "MINE": "My customers"
-    },
     "COLUMNS": {
       "CUSTOMER": "Customer",
-      "DRI": "DRI",
+      "STAGE": "Stage",
+      "DRI": "Owner",
       "CHANNELS": "Channels",
-      "OPEN": "Open conversations",
-      "LAST_ACTIVITY": "Last activity"
+      "OPEN_TICKETS": "Open tickets",
+      "LAST_ACTIVITY": "Last contact",
+      "FIRST_RESPONSE": "First response"
     },
     "UNLINKED": "Unlinked",
-    "WAITING_ON_US": "Waiting on us",
-    "LOADING": "Loading...",
-    "EMPTY": "No customers yet",
-    "NO_CONVERSATIONS": "No conversations for this customer",
+    "EMPTY": "No customers yet. They appear here once a channel is linked to a Grip account.",
     "FETCH_ERROR": "Could not load customers",
-    "MINE_TAB": "Mine",
-    "ALL_TAB": "All",
     "SECTIONS": {
-      "NEEDS_REPLY": "Needs reply",
-      "ACTIVE": "Active",
+      "CUSTOMERS": "Customers",
       "UNLINKED": "Unlinked channels"
     },
-    "URGENT_TICKET": "Urgent ticket",
     "OWNED_BY": "Owned by {name}",
     "CHANNEL_COUNT": "{count} channel | {count} channels",
     "OPEN_IN_GRIP": "Open in Grip",
     "TICKETS_TAB": "Tickets",
     "TICKETS_OPEN": "{count} open",
-    "SELECT": "Pick a customer to see their conversations",
     "YOU": "You",
     "UNREAD": "{count} unread",
     "LINK_TO_CUSTOMER": "Link to customer",
@@ -1208,15 +1202,28 @@
       "DONE": "Linked to {customer}",
       "ERROR": "Could not link the channel. Try again or link it in Grip.",
       "SEARCH_ERROR": "Could not load customers from Grip"
-    }
+    },
+    "DESCRIPTION": "Every account we support, with its owner, channels and tickets.",
+    "SEARCH": "Search customers",
+    "LINK_BANNER": "{count} channel is not linked to a customer yet. | {count} channels are not linked to a customer yet.",
+    "LINK_CHANNELS": "Link {count} channel | Link {count} channels",
+    "BACK": "← Customers",
+    "OPEN_IN_INBOX": "Open in Inbox",
+    "OPEN": "Open",
+    "PROFILE_TABS": {
+      "overview": "Overview",
+      "tickets": "Tickets",
+      "activity": "Activity"
+    },
+    "CHANNELS": "Channels",
+    "CONTACTS": "People",
+    "NO_CONTACTS": "No people on this account yet.",
+    "LAST_MESSAGE": "Last message {time}: “{content}”"
   },
   "KITA_THREADS": {
     "REPLY_COUNT": "{count} reply | {count} replies",
     "LAST_REPLY": "Last reply {time}",
     "TICKET": "Ticket",
-    "TAB_MESSAGES": "Messages",
-    "TAB_THREADS": "Threads",
-    "EMPTY": "No threads yet",
     "OPEN": "Open",
     "RESOLVED": "Resolved",
     "RESOLVE": "Resolve thread",
@@ -1253,11 +1260,156 @@
     "REOPEN_WITH_TICKET": "Reopen thread and ticket",
     "OPEN_IN_GRIP": "Open in Grip",
     "TICKET_SYNC_ERROR": "The thread was updated, but its Grip ticket could not be. Try again or update it in Grip.",
-    "NO_TICKETS": "No tickets on this conversation yet",
     "TICKET_WITH_ID": "Ticket {id}"
   },
   "KITA_COMPOSER": {
     "PLACEHOLDER": "Message {channel}…",
     "SENDS_TO": "Sends to {platform} · as you"
+  },
+  "KITA_INBOX": {
+    "TITLE": "Inbox",
+    "SCOPES": {
+      "mine": "Mine",
+      "unassigned": "Unassigned",
+      "all": "All"
+    },
+    "STATUS": {
+      "open": "Open",
+      "pending": "Pending",
+      "snoozed": "Snoozed",
+      "resolved": "Resolved",
+      "all": "Any status",
+      "other": "Not customers"
+    },
+    "CHIPS": {
+      "PLATFORM": "Platform",
+      "DRI": "Owner",
+      "LABEL": "Label",
+      "TEAM": "Team",
+      "TICKET_PRIORITY": "Ticket priority",
+      "TICKET_STATUS": "Ticket status",
+      "STAGE": "Stage"
+    },
+    "SORT": {
+      "default": "Waiting longest",
+      "latest": "Newest activity",
+      "oldest": "Oldest activity",
+      "created_desc": "Newest first",
+      "created_asc": "Oldest first",
+      "priority": "Priority"
+    },
+    "TYPES": {
+      "mention": "Mentions",
+      "participating": "Participating",
+      "unattended": "Unattended"
+    },
+    "SECTIONS": {
+      "needs_reply": "Needs reply",
+      "active": "Active",
+      "unlinked": "Unlinked",
+      "snoozed": "Snoozed",
+      "resolved": "Resolved"
+    },
+    "ANY": "Any",
+    "MORE_FILTERS": "More filters",
+    "SAVE_VIEW": "Save view",
+    "CLEAR_FILTERS": "Clear",
+    "ADVANCED_APPLIED": "{count} filter | {count} filters",
+    "EMPTY": "Nothing matches these filters.",
+    "EMPTY_MINE": "Nobody is waiting on you.",
+    "UNNAMED": "Unnamed",
+    "NOT_LINKED": "Not linked",
+    "NOT_A_CUSTOMER": "Not a customer",
+    "BACK_TO_INBOX": "Move back to Inbox",
+    "DRI": "Owner: {name}",
+    "WAITING": "waiting {duration}",
+    "MORE_TICKETS": "+{count} more",
+    "LOAD_MORE": "Load more",
+    "FETCH_ERROR": "Could not load the Inbox",
+    "ACTION_DONE": "Updated {count} conversation | Updated {count} conversations",
+    "ACTION_ERROR": "Could not update. Try again.",
+    "RESOLVE_ALL": "Resolve all",
+    "REOPEN_ALL": "Reopen",
+    "SNOOZE_ALL": "Snooze",
+    "RESOLVE_ALL_CONFIRM": {
+      "TITLE": "Resolve every channel?",
+      "DESCRIPTION": "This also closes {count} open ticket in Grip. | This also closes {count} open tickets in Grip.",
+      "CONFIRM": "Resolve all"
+    },
+    "SNOOZE": {
+      "an_hour_from_now": "For an hour",
+      "until_tomorrow": "Until tomorrow",
+      "until_next_week": "Until next week",
+      "until_next_reply": "Until they reply"
+    },
+    "BULK": {
+      "SELECT": "Select",
+      "SELECTED": "{count} selected",
+      "RESOLVE": "Resolve",
+      "SNOOZE": "Snooze",
+      "ASSIGN": "Assign",
+      "LABEL": "Label",
+      "CLEAR": "Clear"
+    },
+    "CLEAR": {
+      "TITLE": "You're clear",
+      "DESCRIPTION": "Nobody is waiting on you right now.",
+      "SEE_ALL": "See everyone's Inbox"
+    },
+    "PICK": {
+      "TITLE": "Pick a customer",
+      "DESCRIPTION": "Choose a row on the left to read and reply."
+    }
+  },
+  "KITA_BELL": {
+    "TITLE": "Notifications",
+    "ALL": "All",
+    "MENTIONS": "Mentions",
+    "READ_ALL": "Mark all read",
+    "EMPTY": "No notifications",
+    "MENTIONS_IN_INBOX": "Mentioned conversations",
+    "SEE_ALL": "See all",
+    "TYPES": {
+      "mention": "Mentioned you",
+      "assignment": "Assigned to you",
+      "message": "New message",
+      "new_conversation": "New conversation",
+      "other": "Update"
+    }
+  },
+  "KITA_TICKETS": {
+    "TITLE": "Tickets",
+    "DESCRIPTION": "Grip tickets across every customer. Open one to see its thread.",
+    "SCOPES": {
+      "mine": "Mine",
+      "unowned": "Unowned",
+      "all": "All"
+    },
+    "STATUS": {
+      "open": "Open",
+      "in_progress": "In progress",
+      "waiting_on_customer": "Waiting on customer",
+      "resolved": "Resolved",
+      "dismissed": "Dismissed",
+      "all": "Any status"
+    },
+    "CHIPS": {
+      "CUSTOMER": "Customer"
+    },
+    "COLUMNS": {
+      "ID": "Ticket",
+      "TITLE": "Title",
+      "CUSTOMER": "Customer",
+      "PRIORITY": "Priority",
+      "STATUS": "Status",
+      "OWNER": "Owner",
+      "AGE": "Age"
+    },
+    "UNOWNED": "Unowned",
+    "RESOLVE": "Resolve",
+    "REOPEN": "Reopen",
+    "EMPTY": "No tickets match these filters.",
+    "EMPTY_CUSTOMER": "No tickets for this customer yet.",
+    "FETCH_ERROR": "Could not load tickets"
   }
 }

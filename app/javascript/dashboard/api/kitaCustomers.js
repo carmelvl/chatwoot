@@ -10,6 +10,16 @@ class KitaCustomersAPI extends ApiClient {
     return axios.get(this.url, { params: mine ? { mine: true } : {} });
   }
 
+  show(id) {
+    return axios.get(`${this.url}/${encodeURIComponent(id)}`);
+  }
+
+  lookup(conversationId) {
+    return axios.get(`${this.url}/lookup`, {
+      params: { conversation_id: conversationId },
+    });
+  }
+
   myView() {
     return axios.post(`${this.url}/my_view`);
   }

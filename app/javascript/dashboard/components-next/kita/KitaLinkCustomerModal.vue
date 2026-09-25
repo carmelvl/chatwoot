@@ -54,12 +54,11 @@ const link = async account => {
     await KitaChannelLinksAPI.link(props.conversationId, account.id);
     useAlert(t('KITA_CUSTOMERS.LINK.DONE', { customer: account.name }));
     dialogRef.value?.close();
-    // The channel's conversation moved under the customer: show the customers list afresh
-    await store.dispatch('kitaCustomers/get', { mine: true });
-    await store.dispatch('kitaCustomers/get');
+    // The channel's conversation moved under the customer: open it there
+    store.dispatch('kitaInbox/fetch').catch(() => {});
     router.push({
-      name: 'kita_customers',
-      params: { accountId: accountId.value },
+      name: 'kita_inbox_customer',
+      params: { accountId: accountId.value, customerId: String(account.id) },
     });
   } catch {
     useAlert(t('KITA_CUSTOMERS.LINK.ERROR'));

@@ -5,8 +5,6 @@ import KitaThreadsAPI from 'dashboard/api/kitaThreads';
 const threadsByConversation = reactive({});
 // { conversationId, rootId } of the thread shown in the right-side pane
 const openThread = ref(null);
-// Whether the conversation shows the Threads tab instead of the messages
-const showThreadsTab = ref(false);
 
 const fetchThreads = async conversationId => {
   const { data } = await KitaThreadsAPI.get(conversationId);
@@ -56,7 +54,6 @@ const setThreadStatus = async (conversationId, rootId, status) => {
 export const useKitaThreads = () => ({
   threadsByConversation,
   openThread,
-  showThreadsTab,
   fetchThreads,
   findThread,
   openThreadPane,

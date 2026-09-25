@@ -73,14 +73,32 @@ jobs:
           app/javascript/dashboard/store/index.js
           app/javascript/dashboard/components-next/message/bubbles/Text/Index.vue
           app/javascript/dashboard/api/kitaChannelLinks.js
-          app/javascript/dashboard/helper/kitaLanding.js
-          app/javascript/dashboard/helper/specs/kitaLanding.spec.js
+          app/javascript/dashboard/helper/kitaInbox.js
+          app/javascript/dashboard/helper/specs/kitaInbox.spec.js
+          app/javascript/dashboard/helper/kitaRedirects.js
+          app/javascript/dashboard/helper/specs/kitaRedirects.spec.js
+          app/javascript/dashboard/helper/kitaTickets.js
+          app/javascript/dashboard/helper/specs/kitaTickets.spec.js
+          app/javascript/dashboard/helper/kitaNotifications.js
+          app/javascript/dashboard/helper/specs/kitaNotifications.spec.js
+          app/javascript/dashboard/api/kitaInbox.js
+          app/javascript/dashboard/store/modules/kitaInbox.js
+          app/javascript/dashboard/store/modules/specs/kitaInbox/kitaInbox.spec.js
+          app/javascript/dashboard/composables/useKitaAccountActions.js
+          app/javascript/dashboard/composables/useKitaTickets.js
+          app/javascript/dashboard/routes/dashboard/customers/*.vue
+          app/javascript/dashboard/routes/dashboard/tickets/*.vue
+          app/javascript/dashboard/routes/dashboard/tickets/routes.js
           app/javascript/dashboard/routes/dashboard/conversation/conversation.routes.js
           app/javascript/dashboard/components/widgets/conversation/ConversationCard.vue
           app/javascript/dashboard/components/widgets/conversation/ConversationHeader.vue
           && pnpm exec vitest run app/javascript/dashboard/helper/specs/kitaConnect.spec.js
           app/javascript/dashboard/helper/specs/kitaThreads.spec.js
-          app/javascript/dashboard/helper/specs/kitaLanding.spec.js
+          app/javascript/dashboard/helper/specs/kitaInbox.spec.js
+          app/javascript/dashboard/helper/specs/kitaRedirects.spec.js
+          app/javascript/dashboard/helper/specs/kitaTickets.spec.js
+          app/javascript/dashboard/helper/specs/kitaNotifications.spec.js
+          app/javascript/dashboard/store/modules/specs/kitaInbox
           app/javascript/dashboard/components-next/message app/javascript/dashboard/components-next/kita
           app/javascript/dashboard/components/widgets/conversation
       - name: Bridge tests

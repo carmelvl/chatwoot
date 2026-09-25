@@ -7,73 +7,61 @@ import {
   useContactConversationNavigation,
 } from 'dashboard/composables/useContactConversationNavigation';
 import { useAccount } from 'dashboard/composables/useAccount';
-import ChatList from '../../../components/ChatList.vue';
 import ConversationBox from '../../../components/widgets/conversation/ConversationBox.vue';
-import wootConstants from 'dashboard/constants/globals';
 import { BUS_EVENTS } from 'shared/constants/busEvents';
 import CmdBarConversationSnooze from 'dashboard/routes/dashboard/commands/CmdBarConversationSnooze.vue';
 import { emitter } from 'shared/helpers/mitt';
 import SidepanelSwitch from 'dashboard/components-next/Conversation/SidepanelSwitch.vue';
 import ConversationSidebar from 'dashboard/components/widgets/conversation/ConversationSidebar.vue';
 import KitaThreadPane from 'dashboard/components-next/kita/KitaThreadPane.vue';
-import KitaCustomersList from 'dashboard/components-next/kita/KitaCustomersList.vue';
+import KitaInboxList from 'dashboard/components-next/kita/KitaInboxList.vue';
 import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
+import {
+  TICKETS_TAB,
+  defaultTab,
+  tabConversation,
+} from 'dashboard/helper/kitaInbox';
 
+// Kita: the one conversation view. The Inbox list on the left; a customer row
+// opens with the customer header, a tab per platform (plus Tickets), the
+// Slack-style list or WhatsApp/Viber mirror, and the thread pane or the
+// conversation sidebar on the right. Classic conversations use the same shell.
 export default {
   components: {
-    ChatList,
     ConversationBox,
     CmdBarConversationSnooze,
     SidepanelSwitch,
     ConversationSidebar,
     KitaThreadPane,
-    KitaCustomersList,
+    KitaInboxList,
   },
   beforeRouteLeave(to, from, next) {
-    // Clear selected state if navigating away from a conversation to a route without a conversationId to prevent stale data issues
-    // and resolves timing issues during navigation with conversation view and other screens
     if (this.conversationId) {
       this.$store.dispatch('clearSelectedState');
     }
-    next(); // Continue with navigation
+    next();
   },
   props: {
-    inboxId: {
-      type: [String, Number],
-      default: 0,
-    },
-    conversationId: {
-      type: [String, Number],
-      default: 0,
-    },
-    label: {
-      type: String,
-      default: '',
-    },
-    teamId: {
-      type: String,
-      default: '',
-    },
-    conversationType: {
-      type: String,
-      default: '',
-    },
-    // Kita: set on the Customers routes ('' = no customer picked yet), where the
-    // customers list replaces the conversation list. null everywhere else.
+    // An Inbox row id ('' = no row open)
     customerId: {
       type: String,
-      default: null,
+      default: '',
     },
-    foldersId: {
-      type: [String, Number],
+    // A platform, 'conversation' (a non-bridge conversation) or 'tickets'
+    tab: {
+      type: String,
+      default: '',
+    },
+    // Root message of the thread to open in the right pane
+    threadId: {
+      type: Number,
       default: 0,
     },
   },
   setup() {
-    const { uiSettings, updateUISettings, isOnExpandedLayout } =
-      useUISettings();
+    const { uiSettings } = useUISettings();
     const { accountId } = useAccount();
-    const { openThread, showThreadsTab, closeThreadPane } = useKitaThreads();
+    const { openThread, openThreadPane, closeThreadPane } = useKitaThreads();
     provide(
       CONTACT_CONVERSATION_NAVIGATION,
       useContactConversationNavigation()
@@ -81,17 +69,10 @@ export default {
 
     return {
       uiSettings,
-      updateUISettings,
-      isOnExpandedLayout,
       accountId,
       openThread,
-      showThreadsTab,
+      openThreadPane,
       closeThreadPane,
-    };
-  },
-  data() {
-    return {
-      showSearchModal: false,
     };
   },
   computed: {
@@ -99,18 +80,22 @@ export default {
       chatList: 'getAllConversations',
       currentChat: 'getSelectedChat',
     }),
-    showConversationList() {
-      return this.isOnExpandedLayout ? !this.conversationId : true;
-    },
-    kitaCustomer() {
+    customer() {
       return this.customerId
         ? this.$store.getters['kitaCustomers/getCustomer'](this.customerId)
         : null;
     },
-    showMessageView() {
-      return this.conversationId ? true : !this.isOnExpandedLayout;
+    isTicketsTab() {
+      return this.tab === TICKETS_TAB;
     },
-    // Kita: an open thread takes the contact sidebar's place
+    // The conversation on screen: the tab's (or the pinned ?c=) conversation;
+    // the Tickets tab keeps the customer's default conversation for context
+    conversationId() {
+      if (!this.customer) return 0;
+      const tab = this.isTicketsTab ? defaultTab(this.customer) : this.tab;
+      return tabConversation(this.customer, tab, this.$route.query.c)?.id ?? 0;
+    },
+    // An open thread takes the contact sidebar's place
     kitaOpenThread() {
       const thread = this.openThread;
       return thread && thread.conversationId === this.currentChat.id
@@ -118,128 +103,102 @@ export default {
         : null;
     },
     shouldShowSidebar() {
-      if (!this.currentChat.id) {
-        return false;
-      }
-
-      const { is_contact_sidebar_open: isContactSidebarOpen } = this.uiSettings;
-      return isContactSidebarOpen;
+      return !!this.currentChat.id && this.uiSettings.is_contact_sidebar_open;
     },
   },
   watch: {
-    conversationId() {
-      this.fetchConversationIfUnavailable();
-      this.showThreadsTab = false;
-    },
-    // Kita: a customer opens on its most recent conversation
-    kitaCustomer: {
-      handler(customer) {
-        const [latest] = customer?.conversations || [];
-        if (this.conversationId || !latest) return;
-        this.$router.replace({
-          name: 'kita_customer_conversation',
-          params: {
-            accountId: this.accountId,
-            customerId: this.customerId,
-            conversation_id: latest.id,
-          },
-        });
+    customerId: {
+      handler(id) {
+        if (id) this.fetchCustomer();
       },
       immediate: true,
     },
-    // Kita: the contact/copilot toggles bring the sidebar back over a thread
+    customer: 'openDefaultTab',
+    tab: 'openDefaultTab',
+    conversationId: {
+      handler() {
+        this.fetchConversationIfUnavailable();
+        this.setActiveChat();
+      },
+    },
+    threadId: 'openRouteThread',
+    'currentChat.id': 'openRouteThread',
+    // The contact/copilot toggles bring the sidebar back over a thread
     'uiSettings.is_contact_sidebar_open': 'closeThreadPane',
     'uiSettings.is_copilot_panel_open': 'closeThreadPane',
   },
 
   created() {
-    // Clear selected state early if no conversation is selected
-    // This prevents child components from accessing stale data
-    // and resolves timing issues during navigation
-    // with conversation view and other screens
-    if (!this.conversationId) {
+    if (!this.customerId) {
       this.$store.dispatch('clearSelectedState');
     }
   },
 
   mounted() {
     this.$store.dispatch('agents/get');
-    this.$store.dispatch('portals/index');
-    this.initialize();
-    this.$watch('$store.state.route', () => this.initialize());
-    this.$watch('chatList.length', () => {
-      this.setActiveChat();
-    });
+    this.$store.dispatch('setActiveInbox', 0);
+    this.$watch('chatList.length', () => this.setActiveChat());
+    this.fetchConversationIfUnavailable();
+    this.setActiveChat();
   },
 
   methods: {
-    onConversationLoad() {
-      this.fetchConversationIfUnavailable();
+    // The full row (every conversation of the customer, not just the ones the
+    // list's filters matched)
+    async fetchCustomer() {
+      try {
+        await this.$store.dispatch('kitaCustomers/show', this.customerId);
+      } catch {
+        this.$router.replace({
+          name: 'kita_inbox',
+          params: { accountId: this.accountId },
+          query: this.$route.query,
+        });
+      }
     },
-    initialize() {
-      this.$store.dispatch('setActiveInbox', this.inboxId);
-      // The customers list doesn't load conversations like the chat list does
-      if (this.customerId) this.fetchConversationIfUnavailable();
-      this.setActiveChat();
-    },
-    toggleConversationLayout() {
-      const { LAYOUT_TYPES } = wootConstants;
-      const {
-        conversation_display_type:
-          conversationDisplayType = LAYOUT_TYPES.CONDENSED,
-      } = this.uiSettings;
-      const newViewType =
-        conversationDisplayType === LAYOUT_TYPES.CONDENSED
-          ? LAYOUT_TYPES.EXPANDED
-          : LAYOUT_TYPES.CONDENSED;
-      this.updateUISettings({
-        conversation_display_type: newViewType,
-        previously_used_conversation_display_type: newViewType,
+    // A row opened without a tab lands where the customer is waiting
+    openDefaultTab() {
+      if (!this.customer || this.tab) return;
+      const pinned = (this.customer.conversations || []).find(
+        conversation => String(conversation.id) === String(this.$route.query.c)
+      );
+      const tab = pinned
+        ? pinned.platform || 'conversation'
+        : defaultTab(this.customer);
+      if (!tab) return;
+      this.$router.replace({
+        name: 'kita_inbox_customer',
+        params: { ...this.$route.params, tab },
+        query: this.$route.query,
       });
     },
+    openRouteThread() {
+      if (this.threadId && this.currentChat.id === this.conversationId) {
+        this.openThreadPane(this.conversationId, this.threadId);
+      } else if (!this.threadId) {
+        this.closeThreadPane();
+      }
+    },
     fetchConversationIfUnavailable() {
-      if (!this.conversationId) {
-        return;
-      }
-      const chat = this.findConversation();
-      if (!chat) {
-        this.$store.dispatch('getConversation', this.conversationId);
-      }
+      if (!this.conversationId || this.findConversation()) return;
+      this.$store.dispatch('getConversation', this.conversationId);
     },
     findConversation() {
-      const conversationId = parseInt(this.conversationId, 10);
-      const [chat] = this.chatList.filter(c => c.id === conversationId);
-      return chat;
+      return this.chatList.find(chat => chat.id === this.conversationId);
     },
     setActiveChat() {
-      if (this.conversationId) {
-        const selectedConversation = this.findConversation();
-        // If conversation doesn't exist or selected conversation is same as the active
-        // conversation, don't set active conversation.
-        if (
-          !selectedConversation ||
-          selectedConversation.id === this.currentChat.id
-        ) {
-          return;
-        }
-        const { messageId } = this.$route.query;
-        this.$store
-          .dispatch('setActiveChat', {
-            data: selectedConversation,
-            after: messageId,
-          })
-          .then(() => {
-            emitter.emit(BUS_EVENTS.SCROLL_TO_MESSAGE, { messageId });
-          });
-      } else {
-        this.$store.dispatch('clearSelectedState');
+      if (!this.conversationId) {
+        if (!this.customerId) this.$store.dispatch('clearSelectedState');
+        return;
       }
-    },
-    onSearch() {
-      this.showSearchModal = true;
-    },
-    closeSearch() {
-      this.showSearchModal = false;
+      const selected = this.findConversation();
+      if (!selected || selected.id === this.currentChat.id) return;
+      const { messageId } = this.$route.query;
+      this.$store
+        .dispatch('setActiveChat', { data: selected, after: messageId })
+        .then(() => {
+          emitter.emit(BUS_EVENTS.SCROLL_TO_MESSAGE, { messageId });
+        });
     },
   },
 };
@@ -247,25 +206,14 @@ export default {
 
 <template>
   <section class="flex w-full h-full min-w-0">
-    <KitaCustomersList v-if="customerId !== null" :customer-id="customerId" />
-    <ChatList
-      v-else
-      :show-conversation-list="showConversationList"
-      :conversation-inbox="inboxId"
-      :label="label"
-      :team-id="teamId"
-      :conversation-type="conversationType"
-      :folders-id="foldersId"
-      :is-on-expanded-layout="isOnExpandedLayout"
-      @conversation-load="onConversationLoad"
-    />
+    <KitaInboxList :customer-id="customerId" />
     <ConversationBox
-      v-if="showMessageView"
-      :inbox-id="inboxId"
+      :customer="customer"
       :customer-id="customerId"
-      :is-on-expanded-layout="isOnExpandedLayout"
+      :tab="tab"
+      :is-on-expanded-layout="false"
     >
-      <SidepanelSwitch v-if="currentChat.id" />
+      <SidepanelSwitch v-if="currentChat.id && !isTicketsTab" />
     </ConversationBox>
     <KitaThreadPane
       v-if="kitaOpenThread"
@@ -274,7 +222,7 @@ export default {
       :root-id="kitaOpenThread.rootId"
     />
     <ConversationSidebar
-      v-else-if="shouldShowSidebar"
+      v-else-if="shouldShowSidebar && !isTicketsTab"
       :current-chat="currentChat"
     />
     <CmdBarConversationSnooze />

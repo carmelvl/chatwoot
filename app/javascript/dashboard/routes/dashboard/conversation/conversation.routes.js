@@ -1,8 +1,11 @@
 /* eslint arrow-body-style: 0 */
 import { frontendURL } from '../../../helper/URLHelper';
-import store from '../../../store';
 import ConversationView from './ConversationView.vue';
-import { landOnCustomers } from 'dashboard/helper/kitaLanding';
+import KitaCustomersAPI from 'dashboard/api/kitaCustomers';
+import {
+  redirectConversationToInbox,
+  redirectListToInbox,
+} from 'dashboard/helper/kitaRedirects';
 
 const CONVERSATION_PERMISSIONS = [
   'administrator',
@@ -12,36 +15,12 @@ const CONVERSATION_PERMISSIONS = [
   'conversation_participating_manage',
 ];
 
-const isFolderAvailable = async folderId => {
-  let folders = store.getters['customViews/getConversationCustomViews'];
-  if (!folders.length) {
-    await store.dispatch('customViews/get', 'conversation');
-    folders = store.getters['customViews/getConversationCustomViews'];
-  }
-  return folders.some(folder => folder.id === Number(folderId));
-};
-
-const redirectFolderListIfUnavailable = async (to, _from, next) => {
-  if (await isFolderAvailable(to.params.id)) {
-    next();
-    return;
-  }
-  next({ name: 'home', params: { accountId: to.params.accountId } });
-};
-
-const redirectFolderConversationIfUnavailable = async (to, _from, next) => {
-  if (await isFolderAvailable(to.params.id)) {
-    next();
-    return;
-  }
-  next({
-    name: 'inbox_conversation',
-    params: {
-      accountId: to.params.accountId,
-      conversation_id: to.params.conversation_id,
-    },
-  });
-};
+// Kita: every classic conversation URL stays registered (emails, notifications
+// and bookmarks keep working) and redirects into the unified Inbox.
+const openInInbox = redirectConversationToInbox(async conversationId => {
+  const { data } = await KitaCustomersAPI.lookup(conversationId);
+  return data;
+});
 
 export default {
   routes: [
@@ -51,7 +30,7 @@ export default {
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
-      beforeEnter: landOnCustomers,
+      beforeEnter: redirectListToInbox,
       component: ConversationView,
       props: () => {
         return { inboxId: 0 };
@@ -60,6 +39,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/conversations/:conversation_id'),
       name: 'inbox_conversation',
+      beforeEnter: openInInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -71,6 +51,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/inbox/:inbox_id'),
       name: 'inbox_dashboard',
+      beforeEnter: redirectListToInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -84,6 +65,7 @@ export default {
         'accounts/:accountId/inbox/:inbox_id/conversations/:conversation_id'
       ),
       name: 'conversation_through_inbox',
+      beforeEnter: openInInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -98,6 +80,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/label/:label'),
       name: 'label_conversations',
+      beforeEnter: redirectListToInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -109,6 +92,7 @@ export default {
         'accounts/:accountId/label/:label/conversations/:conversation_id'
       ),
       name: 'conversations_through_label',
+      beforeEnter: openInInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -121,6 +105,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/team/:teamId'),
       name: 'team_conversations',
+      beforeEnter: redirectListToInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -132,6 +117,7 @@ export default {
         'accounts/:accountId/team/:teamId/conversations/:conversationId'
       ),
       name: 'conversations_through_team',
+      beforeEnter: openInInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -147,7 +133,7 @@ export default {
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
-      beforeEnter: redirectFolderListIfUnavailable,
+      beforeEnter: redirectListToInbox,
       component: ConversationView,
       props: route => ({ foldersId: route.params.id }),
     },
@@ -160,7 +146,7 @@ export default {
         permissions: CONVERSATION_PERMISSIONS,
       },
       component: ConversationView,
-      beforeEnter: redirectFolderConversationIfUnavailable,
+      beforeEnter: openInInbox,
       props: route => ({
         conversationId: route.params.conversation_id,
         foldersId: route.params.id,
@@ -169,6 +155,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/mentions/conversations'),
       name: 'conversation_mentions',
+      beforeEnter: redirectListToInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -180,6 +167,7 @@ export default {
         'accounts/:accountId/mentions/conversations/:conversationId'
       ),
       name: 'conversation_through_mentions',
+      beforeEnter: openInInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -192,6 +180,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/unattended/conversations'),
       name: 'conversation_unattended',
+      beforeEnter: redirectListToInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -203,6 +192,7 @@ export default {
         'accounts/:accountId/unattended/conversations/:conversationId'
       ),
       name: 'conversation_through_unattended',
+      beforeEnter: openInInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -215,6 +205,7 @@ export default {
     {
       path: frontendURL('accounts/:accountId/participating/conversations'),
       name: 'conversation_participating',
+      beforeEnter: redirectListToInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
@@ -226,6 +217,7 @@ export default {
         'accounts/:accountId/participating/conversations/:conversationId'
       ),
       name: 'conversation_through_participating',
+      beforeEnter: openInInbox,
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },

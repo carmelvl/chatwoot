@@ -56,8 +56,22 @@ describe('KitaReplyGate', () => {
     expect(wrapper.text()).toContain(
       'Reply to Jun from WhatsApp Business on your phone'
     );
-    expect(wrapper.text()).toContain('This chat is a mirror.');
+    expect(wrapper.text()).toContain(
+      'Reply from your phone. It will appear here.'
+    );
     expect(wrapper.find(connect).exists()).toBe(false);
+  });
+
+  it('marks a mirror as replied from the phone', async () => {
+    const wrapper = mountGate({ platform: 'whatsapp', reason: 'mirror' });
+    await wrapper
+      .find('[data-test-id="kita-replied-from-phone"]')
+      .trigger('click');
+    expect(wrapper.emitted('repliedFromPhone')).toHaveLength(1);
+    const gated = mountGate({ platform: 'slack', reason: 'not_connected' });
+    expect(
+      gated.find('[data-test-id="kita-replied-from-phone"]').exists()
+    ).toBe(false);
   });
 
   it('opens a private note from every gate', async () => {

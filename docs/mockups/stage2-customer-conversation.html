@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kita Support — Stage 2 mockup: one conversation per customer</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&display=swap" rel="stylesheet">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@700&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#0F1A12;--forest:#14402A;--signal:#286644;--accent:#418D62;--panel:#F8F8F8;--hair:#E6E2D6;--muted:#6B756E;--soft:#4A554D;--teamBubble:#E7F2EB;--custBubble:#EEF0EE}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Geist,system-ui,sans-serif;color:var(--ink);background:#fff;font-size:14px}
+  .app{display:flex;height:100vh}
+  .side{width:224px;background:var(--forest);color:#fff;padding:20px 14px;display:flex;flex-direction:column;gap:22px;flex-shrink:0}
+  .brand{font-family:Satoshi;font-weight:700;font-size:22px;letter-spacing:-.02em;padding-left:6px}
+  .nav a{display:flex;justify-content:space-between;align-items:center;height:34px;padding:0 10px;border-radius:8px;color:rgba(255,255,255,.75);text-decoration:none}
+  .nav a.on{background:rgba(255,255,255,.12);color:#fff}
+  .pill{font-size:11px;font-weight:700;background:#fff;color:var(--forest);border-radius:999px;padding:1px 7px}
+  .eyebrow{font-size:11px;font-weight:700;letter-spacing:.12em;color:rgba(255,255,255,.5);padding:0 10px 6px}
+  .list{width:320px;border-right:1px solid var(--hair);display:flex;flex-direction:column;flex-shrink:0}
+  .list h1{font-family:Satoshi;font-weight:700;font-size:22px;letter-spacing:-.02em;margin:0}
+  .listhead{padding:22px 20px 14px;border-bottom:1px solid var(--hair);display:flex;flex-direction:column;gap:12px}
+  .seg{display:flex;gap:4px;background:var(--panel);border-radius:8px;padding:3px;width:max-content}
+  .seg span{padding:5px 10px;border-radius:6px;font-size:13px;color:var(--soft)}
+  .seg span.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .grp{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--accent);padding:14px 20px 6px}
+  .cust{display:flex;gap:12px;padding:12px 20px;border-left:3px solid transparent}
+  .cust.on{background:var(--panel);border-left-color:var(--signal)}
+  .logo{width:36px;height:36px;border-radius:8px;background:#DDE9E1;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--forest);flex-shrink:0}
+  .cmeta{flex:1;min-width:0}
+  .crow{display:flex;justify-content:space-between;align-items:center}
+  .cname{font-weight:700}
+  .t{font-size:12px;color:var(--muted)}
+  .prev{font-size:13px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+  .chips{display:flex;gap:6px;margin-top:6px;align-items:center}
+  .plat{width:16px;height:16px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff}
+  .slack{background:#4A154B}.teams{background:#5059C9}.wa{background:#25D366}.viber{background:#7360F2}
+  .dri{font-size:12px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:99px;display:inline-block}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .head{height:72px;border-bottom:1px solid var(--hair);display:flex;align-items:center;justify-content:space-between;padding:0 28px}
+  .head h2{font-family:Satoshi;font-weight:700;font-size:20px;margin:0;letter-spacing:-.02em}
+  .sub{font-size:13px;color:var(--muted);display:flex;gap:10px;align-items:center;margin-top:3px}
+  .tag{font-size:12px;padding:2px 8px;border-radius:999px;background:#E7F2EB;color:var(--signal);font-weight:600}
+  .tabs{display:flex;gap:22px;padding:0 28px;border-bottom:1px solid var(--hair)}
+  .tabs span{padding:12px 0;color:var(--muted);font-size:14px}
+  .tabs span.on{color:var(--ink);border-bottom:2px solid var(--signal)}
+  .btn{height:34px;border-radius:8px;padding:0 14px;display:inline-flex;align-items:center;font-weight:600;border:1px solid var(--hair);background:#fff}
+  .btn.primary{background:var(--signal);color:#fff;border-color:var(--signal)}
+  .stream{flex:1;overflow:auto;padding:22px 28px;display:flex;flex-direction:column;gap:18px;background:#fff}
+  .day{align-self:center;font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--accent)}
+  .msg{display:flex;gap:12px;max-width:78%}
+  .msg.me{align-self:flex-end;flex-direction:row-reverse}
+  .av{width:32px;height:32px;border-radius:99px;flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .av .b{position:absolute;right:-3px;bottom:-3px;border:2px solid #fff;border-radius:5px;width:16px;height:16px;font-size:8px}
+  .mh{font-size:13px;display:flex;gap:8px;align-items:center;margin-bottom:4px}
+  .mh b{font-weight:700}
+  .mh .kita{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--signal);background:#E7F2EB;border-radius:4px;padding:1px 5px}
+  .mh .where{color:var(--muted)}
+  .bub{padding:10px 14px;border-radius:14px;line-height:21px}
+  .cust-b{background:var(--custBubble);border-top-left-radius:4px}
+  .team-b{background:var(--teamBubble);border-top-left-radius:4px}
+  .me-b{background:var(--signal);color:#fff;border-top-right-radius:4px}
+  .me .mh{justify-content:flex-end}
+  .thread{margin-top:8px;display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--hair);border-radius:10px;width:max-content;background:#fff;cursor:pointer}
+  .thread.open{border-color:var(--signal);box-shadow:0 0 0 3px #E7F2EB}
+  .faces{display:flex}
+  .faces i{width:20px;height:20px;border-radius:99px;border:2px solid #fff;margin-left:-6px;display:inline-block}
+  .faces i:first-child{margin-left:0}
+  .ttitle{font-weight:600}
+  .tcount{color:var(--signal);font-weight:600}
+  .unread{width:7px;height:7px;background:#D94A3D;border-radius:99px}
+  .ticket{font-size:11px;font-weight:700;color:#8A2A20;background:#FCE8E6;border-radius:4px;padding:2px 6px}
+  .composer{border-top:1px solid var(--hair);padding:14px 28px;display:flex;flex-direction:column;gap:10px}
+  .picker{font-size:13px;color:var(--soft);display:flex;align-items:center;gap:8px}
+  .picker .sel{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--hair);border-radius:8px;padding:4px 10px;color:var(--ink);font-weight:600}
+  .box{border:1px solid var(--hair);border-radius:10px;padding:12px 14px;color:#8A938C;display:flex;justify-content:space-between;align-items:center}
+  .pane{width:380px;border-left:1px solid var(--hair);display:flex;flex-direction:column;flex-shrink:0;background:#fff}
+  .ph{padding:16px 20px;border-bottom:1px solid var(--hair);display:flex;flex-direction:column;gap:6px}
+  .ph .row{display:flex;justify-content:space-between;align-items:center}
+  .ph h3{font-family:Satoshi;font-weight:700;font-size:17px;margin:0;letter-spacing:-.01em}
+  .pbody{flex:1;padding:18px 20px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+  .root{background:var(--panel);border-radius:10px;padding:12px}
+  .note{font-size:12px;color:var(--muted);text-align:center}
+  .annot{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:12px;border-radius:999px;padding:8px 14px;opacity:.9}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">kita</div>
+    <nav class="nav">
+      <a href="#">Conversations</a>
+      <a href="#" class="on">Customers <span class="pill">8</span></a>
+      <a href="#">Mentions</a>
+      <a href="#">Reports</a>
+    </nav>
+    <div class="nav">
+      <div class="eyebrow">MY CUSTOMERS</div>
+      <a href="#">Tala <span class="dot" style="background:#E0A93B"></span></a>
+      <a href="#">Cashalo</a>
+      <a href="#">Kueski</a>
+    </div>
+  </aside>
+
+  <section class="list">
+    <div class="listhead">
+      <h1>Customers</h1>
+      <div class="seg"><span>All customers</span><span class="on">My customers</span></div>
+    </div>
+    <div class="grp">ACTIVE</div>
+    <div class="cust on">
+      <div class="logo">T</div>
+      <div class="cmeta">
+        <div class="crow"><span class="cname">Tala</span><span class="t">2m</span></div>
+        <div class="prev">Maria: batch 14 scores came back empty for 3 applicants</div>
+        <div class="chips"><span class="plat slack">S</span><span class="plat wa">W</span><span class="dri">DRI · Carmel</span><span class="dot" style="background:#E0A93B;margin-left:auto"></span></div>
+      </div>
+    </div>
+    <div class="cust">
+      <div class="logo">N</div>
+      <div class="cmeta">
+        <div class="crow"><span class="cname">N90</span><span class="t">1h</span></div>
+        <div class="prev">Rhea: pushed the fix, can you re-run?</div>
+        <div class="chips"><span class="plat slack">S</span><span class="dri">DRI · Rhea</span><span class="dot" style="background:#2E8B57;margin-left:auto"></span></div>
+      </div>
+    </div>
+    <div class="cust">
+      <div class="logo">R</div>
+      <div class="cmeta">
+        <div class="crow"><span class="cname">Rayne</span><span class="t">3h</span></div>
+        <div class="prev">James: sharing the SSO metadata file</div>
+        <div class="chips"><span class="plat teams">T</span><span class="dri">DRI · Suraaj</span><span class="dot" style="background:#D94A3D;margin-left:auto"></span></div>
+      </div>
+    </div>
+    <div class="grp">PENDING</div>
+    <div class="cust">
+      <div class="logo">K</div>
+      <div class="cmeta">
+        <div class="crow"><span class="cname">Kueski</span><span class="t">1d</span></div>
+        <div class="prev">Carmel: sending the order form today</div>
+        <div class="chips"><span class="plat slack">S</span><span class="dri">DRI · Carmel</span></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="main">
+    <div class="head">
+      <div>
+        <h2>Tala</h2>
+        <div class="sub"><span class="tag">Production</span><span>DRI · Carmel Limcaoco</span><span>·</span><span class="plat slack">S</span> #kita-tala <span class="plat wa">W</span> +63 917 555 0142</div>
+      </div>
+      <div style="display:flex;gap:8px"><span class="btn">Open in Grip</span><span class="btn primary">Resolve</span></div>
+    </div>
+    <div class="tabs"><span class="on">Messages</span><span>Threads · 3</span><span>Tickets · 1</span></div>
+
+    <div class="stream">
+      <div class="day">TODAY</div>
+
+      <div class="msg">
+        <div class="av" style="background:#F3DDC9">MR<span class="b plat slack">S</span></div>
+        <div>
+          <div class="mh"><b>Maria Reyes</b><span class="where">#kita-tala · 9:12 AM</span></div>
+          <div class="bub cust-b">The risk score for batch 14 came back empty for three applicants. Can you take a look?</div>
+          <div class="thread open">
+            <span class="unread"></span>
+            <span class="faces"><i style="background:#F3DDC9"></i><i style="background:#286644"></i><i style="background:#C9D8F3"></i></span>
+            <span class="ttitle">Batch 14 scores missing</span>
+            <span class="tcount">4 replies</span><span class="t">· last 12m ago</span>
+            <span class="ticket">URGENT TICKET</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="av" style="background:#C9D8F3">SS<span class="b plat slack">S</span></div>
+        <div>
+          <div class="mh"><b>Suraaj Samanta</b><span class="kita">KITA</span><span class="where">#kita-tala · 10:03 AM</span></div>
+          <div class="bub team-b">Heads up — the new bank statement parser goes live tomorrow at 9am PHT.</div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="av" style="background:#DCEFD9">JL<span class="b plat wa">W</span></div>
+        <div>
+          <div class="mh"><b>Jun Lim</b><span class="where">WhatsApp · 11:40 AM</span></div>
+          <div class="bub cust-b">Can we get the updated pricing sheet before Friday's call?</div>
+          <div class="thread">
+            <span class="faces"><i style="background:#DCEFD9"></i><i style="background:#286644"></i></span>
+            <span class="ttitle">Pricing sheet before Friday</span>
+            <span class="tcount">2 replies</span><span class="t">· last 1h ago</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg me">
+        <div>
+          <div class="mh"><span class="where">#kita-tala · 12:05 PM</span></div>
+          <div class="bub me-b">Morning all — agenda for Friday is in the channel canvas.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="picker">Replying in <span class="sel"><span class="plat slack">S</span>#kita-tala ▾</span><span class="t">· as you (Carmel)</span></div>
+      <div class="box"><span>Write a message…</span><span class="btn primary">Send</span></div>
+    </div>
+  </main>
+
+  <aside class="pane">
+    <div class="ph">
+      <div class="row"><h3>Batch 14 scores missing</h3><span class="t" style="font-size:18px">×</span></div>
+      <div class="sub"><span class="plat slack">S</span> #kita-tala · <span class="ticket">URGENT TICKET</span> · <span class="tag">Open</span></div>
+    </div>
+    <div class="pbody">
+      <div class="root">
+        <div class="mh"><b>Maria Reyes</b><span class="where">9:12 AM</span></div>
+        The risk score for batch 14 came back empty for three applicants. Can you take a look?
+      </div>
+      <div class="note">4 replies</div>
+      <div class="msg"><div class="av" style="background:#286644;color:#fff">CL</div><div><div class="mh"><b>Carmel</b><span class="kita">KITA</span><span class="where">9:20 AM</span></div><div class="bub team-b">On it — those three are missing a bank statement page.</div></div></div>
+      <div class="msg"><div class="av" style="background:#F3DDC9">MR</div><div><div class="mh"><b>Maria Reyes</b><span class="where">9:31 AM</span></div><div class="bub cust-b">Uploaded them now.</div></div></div>
+      <div class="msg"><div class="av" style="background:#C9D8F3">RM</div><div><div class="mh"><b>Rhea Malhotra</b><span class="kita">KITA</span><span class="where">10:58 AM</span></div><div class="bub team-b">Re-ran batch 14 — all scores are in.</div></div></div>
+    </div>
+    <div class="composer" style="padding:14px 20px">
+      <div class="picker">Replying in thread · <span class="plat slack">S</span> #kita-tala</div>
+      <div class="box"><span>Reply in thread…</span><span class="btn primary">Send</span></div>
+      <div style="display:flex;gap:8px"><span class="btn">Resolve thread</span><span class="btn">Open ticket in Grip</span></div>
+    </div>
+  </aside>
+</div>
+<div class="annot">Mockup — Stage 2: one conversation per customer · thread footers · thread side panel · reply picker</div>
+</body>
+</html>

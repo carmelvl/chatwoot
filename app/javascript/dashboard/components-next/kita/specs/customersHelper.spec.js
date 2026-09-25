@@ -1,13 +1,16 @@
-import { customerLabel, driLabel } from '../customersHelper';
+import { directorySections, driLabel } from '../customersHelper';
 
 describe('customersHelper', () => {
-  it('labels unlinked rows and keeps named customers', () => {
-    expect(customerLabel({ id: 'unlinked', name: null }, 'Unlinked')).toBe(
-      'Unlinked'
-    );
-    expect(customerLabel({ id: 'Acme', name: 'Acme' }, 'Unlinked')).toBe(
-      'Acme'
-    );
+  it('splits the directory into customers then unlinked channels, dropping empty sections', () => {
+    const tala = { id: '1' };
+    const teams = { id: 'unlinked-7', unlinked: true };
+    expect(directorySections([teams, tala])).toEqual([
+      { key: 'CUSTOMERS', customers: [tala] },
+      { key: 'UNLINKED', customers: [teams] },
+    ]);
+    expect(directorySections([tala]).map(section => section.key)).toEqual([
+      'CUSTOMERS',
+    ]);
   });
 
   it('prefers DRI name, then email, then a dash', () => {

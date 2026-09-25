@@ -40,7 +40,7 @@ RSpec.describe 'Kita customers', type: :request do
 
     rows = response.parsed_body['payload']
     unlinked = Conversation.find_by("custom_attributes->>'channel' = 'viber'")
-    expect(rows.pluck('id')).to contain_exactly('Tala', 'Amartha', "unlinked-#{unlinked.display_id}")
+    expect(rows.pluck('id')).to contain_exactly('Tala', 'Amartha', "unlinked-viber:#{unlinked.display_id}")
     expect(rows.last).to include('unlinked' => true, 'name' => unlinked.contact.name)
     tala = rows.find { |row| row['id'] == 'Tala' }
     expect(tala).to include('name' => 'Tala', 'dri_name' => 'Suraaj Samanta', 'dri_email' => 'suraaj@usekita.com',
@@ -87,9 +87,35 @@ RSpec.describe 'Kita customers', type: :request do
     expect(response.parsed_body['payload'].find { |row| row['id'] == 'Tala' }['urgent_ticket']).to be(false)
   end
 
-  it 'filters to my customers, matching the DRI email across Kita domain aliases, and keeps unlinked channels' do
+  it 'filters to my customers, matching the DRI email across Kita domain aliases; unlinked channels are nobody\'s' do
     get path, params: { mine: true }, headers: agent.create_new_auth_token, as: :json
-    expect(response.parsed_body['payload'].pluck('id')).to match([eq('Tala'), start_with('unlinked-')])
+    expect(response.parsed_body['payload'].pluck('id')).to eq(['Tala'])
+  end
+
+  it 'lists a channel once however many desk conversations older data models left for it' do
+    old = Array.new(3) do |index|
+      conversation_for({ 'channel' => 'slack', 'channel_key' => "slack:C1:#{index}", 'channel_label' => '#kita-testcustomer' })
+        .tap { |conversation| conversation.update!(last_activity_at: (index + 1).hours.ago) }
+    end
+    latest = conversation_for({ 'channel' => 'slack', 'channel_key' => 'slack:C1', 'channel_label' => '#kita-testcustomer' })
+
+    get path, headers: agent.create_new_auth_token, as: :json
+
+    rows = response.parsed_body['payload'].select { |row| row['name'] == '#kita-testcustomer' }
+    expect(rows.size).to eq(1)
+    expect(rows.first).to include('id' => 'unlinked-slack:#kita-testcustomer', 'kind' => 'unlinked', 'channel_key' => 'slack:C1')
+    expect(rows.first['conversations'].pluck('id')).to eq([latest, *old].map(&:display_id))
+  end
+
+  it 'lists a customer once when some conversations only carry its Grip name' do
+    conversation_for({ 'grip_account' => 'Kredit', 'grip_account_id' => '42', 'channel' => 'slack' })
+    conversation_for({ 'grip_account' => 'Kredit', 'channel' => 'whatsapp' })
+
+    get path, headers: agent.create_new_auth_token, as: :json
+
+    kredit = response.parsed_body['payload'].select { |row| row['name'] == 'Kredit' }
+    expect(kredit.size).to eq(1)
+    expect(kredit.first).to include('id' => '42', 'platforms' => %w[slack whatsapp])
   end
 
   it 'names an unlinked channel by its label, never a raw platform key' do
@@ -97,13 +123,35 @@ RSpec.describe 'Kita customers', type: :request do
     teams.contact.update!(name: 'teams:19:104cd490')
     get path, headers: agent.create_new_auth_token, as: :json
 
-    row = response.parsed_body['payload'].find { |r| r['id'] == "unlinked-#{teams.display_id}" }
-    expect(row).to include('name' => 'Microsoft Teams chat', 'channel_key' => 'teams:19:104cd490')
+    row = response.parsed_body['payload'].find { |r| r['channel_key'] == 'teams:19:104cd490' }
+    expect(row).to include('name' => 'Microsoft Teams chat', 'kind' => 'unlinked')
     expect(row['conversations'].first['label']).to eq('Microsoft Teams chat')
 
     teams.update!(custom_attributes: teams.custom_attributes.merge('channel_label' => 'Acme › Support'))
     get path, headers: agent.create_new_auth_token, as: :json
-    expect(response.parsed_body['payload'].find { |r| r['id'] == "unlinked-#{teams.display_id}" }['name']).to eq('Acme › Support')
+    expect(response.parsed_body['payload'].find { |r| r['channel_key'] == 'teams:19:104cd490' }['name']).to eq('Acme › Support')
+  end
+
+  it 'leaves conversations from other inboxes out of the directory and serves any row on its own' do
+    website = conversation_for({})
+    get path, headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body['payload'].pluck('kind').uniq).to contain_exactly('customer', 'unlinked')
+
+    get "#{path}/Tala", headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body).to include('id' => 'Tala', 'kind' => 'customer', 'open_count' => 2, 'open_tickets' => 0)
+    expect(response.parsed_body['conversations'].size).to eq(2)
+
+    get "#{path}/conversation-#{website.display_id}", headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body).to include('kind' => 'conversation', 'name' => website.contact.name)
+
+    get "#{path}/Hidden%20Co", headers: agent.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:not_found)
+
+    get "#{path}/lookup", params: { conversation_id: website.display_id }, headers: agent.create_new_auth_token
+    expect(response.parsed_body['id']).to eq("conversation-#{website.display_id}")
+    tala = Conversation.find_by("custom_attributes->>'channel' = 'whatsapp'")
+    get "#{path}/lookup", params: { conversation_id: tala.display_id }, headers: agent.create_new_auth_token
+    expect(response.parsed_body).to include('id' => 'Tala', 'name' => 'Tala')
   end
 
   it 'creates one "My customers" saved view per agent that filters conversations by account_owner_email' do

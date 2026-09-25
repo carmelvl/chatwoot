@@ -299,9 +299,14 @@ Rails.application.routes.draw do
           resources :custom_filters, only: [:index, :show, :create, :update, :destroy]
           # Kita: customers (Grip accounts) derived from conversations, the "My customers" saved view, and conversation threads
           namespace :kita do
-            resources :customers, only: [:index] do
+            resources :customers, only: [:index, :show], constraints: { id: %r{[^/]+} } do
               post :my_view, on: :collection
+              get :lookup, on: :collection
             end
+            resources :inbox, only: [:index]
+            resources :account_actions, only: [:create]
+            resources :tickets, only: [:index]
+            resources :contacts, only: [:index]
             resources :channel_links, only: [:create] do
               get :accounts, on: :collection
             end

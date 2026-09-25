@@ -1,11 +1,3 @@
-export const UNLINKED_CUSTOMER_ID = 'unlinked';
-
-export const isUnlinkedCustomer = customer =>
-  customer.id === UNLINKED_CUSTOMER_ID;
-
-export const customerLabel = (customer, unlinkedLabel) =>
-  isUnlinkedCustomer(customer) ? unlinkedLabel : customer.name;
-
 export const driLabel = customer =>
   customer.dri_name || customer.dri_email || '—';
 
@@ -20,54 +12,43 @@ export const gripAccountUrl = customer =>
 export const firstName = name => (name || '').trim().split(/\s+/)[0] || '';
 
 /**
- * Customers list sections: NEEDS REPLY (the latest public message is the
- * customer's, on an open conversation), ACTIVE (the rest), then UNLINKED
- * (channels not linked to a Grip account yet). Empty sections are dropped;
- * rows keep the API's most-recent-first order.
+ * Customers directory sections: CUSTOMERS (Grip accounts, most recent first)
+ * then UNLINKED channels. Empty sections are dropped.
  */
-export const sectionCustomers = customers => {
-  const linked = customers.filter(customer => !customer.unlinked);
-  return [
+export const directorySections = customers =>
+  [
     {
-      key: 'NEEDS_REPLY',
-      customers: linked.filter(customer => customer.waiting_on_us),
-    },
-    {
-      key: 'ACTIVE',
-      customers: linked.filter(customer => !customer.waiting_on_us),
+      key: 'CUSTOMERS',
+      customers: customers.filter(customer => !customer.unlinked),
     },
     {
       key: 'UNLINKED',
       customers: customers.filter(customer => customer.unlinked),
     },
   ].filter(section => section.customers.length);
-};
 
 /**
- * The preview line of a customer row: "Slack · Maria: batch 14 …". Own
- * messages read "You".
- * @param {Object} customer - Row of the customers API
- * @param {{ platformName: Function, you: string, currentUserName: string }} options
+ * The preview line of a row: "Maria: batch 14 …" (the platform shows as a
+ * logo beside it). Own messages read "You".
+ * @param {Object} customer - Row of the inbox/customers API
+ * @param {{ you: string, currentUserName: string }} options
  */
-export const customerPreview = (
-  customer,
-  { platformName, you, currentUserName }
-) => {
+export const customerPreview = (customer, { you, currentUserName }) => {
   const message = customer.last_message;
   if (!message) return '';
   const sender =
     message.sender_name && message.sender_name === currentUserName
       ? you
       : firstName(message.sender_name);
-  const text = sender ? `${sender}: ${message.content}` : message.content;
-  const platform = platformName(message.platform);
-  return platform ? `${platform} · ${text}` : text;
+  return sender ? `${sender}: ${message.content}` : message.content;
 };
 
-/** Tab of one per-platform conversation: "Slack" + "#kita-tala". */
+/** Tab of one conversation of a customer: "Slack" + "#kita-tala". */
 export const conversationTab = (conversation, platformName) => ({
   id: conversation.id,
   platform: conversation.platform,
+  inboxId: conversation.inbox_id,
+  channelType: conversation.channel_type,
   title: platformName(conversation.platform) || conversation.label || '',
   detail: platformName(conversation.platform) ? conversation.label : null,
   unreadCount: conversation.unread_count || 0,
