@@ -73,13 +73,24 @@ module Kita::Bridge
   # Bridge-supplied message metadata: the platform it came through, the desk message it replies to
   # (thread root, rendered with Chatwoot's native reply UI), the platform thread it belongs to and the
   # platform channel it was posted in (human label + channel key).
+  # History the bridge imports on join also carries kita_backfill (true) and external_created_at (unix seconds the
+  # message was really sent), which Kita::MessageBackfill turns into created_at; both are dropped otherwise.
   def message_attributes(raw)
     return {} unless raw.respond_to?(:permit)
 
-    attrs = raw.permit(:external_source, :external_channel, :external_channel_key, :in_reply_to, external_thread: [:root]).to_h
+    attrs = raw.permit(:external_source, :external_channel, :external_channel_key, :in_reply_to, :kita_backfill, :external_created_at,
+                       external_thread: [:root]).to_h
     attrs.delete(:external_source) unless EXTERNAL_SOURCES.include?(attrs[:external_source])
     attrs[:in_reply_to] = attrs[:in_reply_to].to_i if attrs[:in_reply_to].present?
-    attrs.compact_blank
+    backfill_attributes(attrs).compact_blank
+  end
+
+  def backfill_attributes(attrs)
+    backfill = ActiveModel::Type::Boolean.new.cast(attrs.delete(:kita_backfill))
+    sent_at = Float(attrs.delete(:external_created_at).to_s, exception: false)
+    return attrs unless backfill
+
+    attrs.merge(kita_backfill: true, external_created_at: sent_at)
   end
 
   # Kita's old email domain maps to the current one (EMAIL_DOMAIN_ALIASES="usekita.com=kita.ai,..."),

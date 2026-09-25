@@ -200,6 +200,9 @@ export class DashboardAudioNotificationHelper {
     // handoff event alerts agents, regardless of when its explanatory note arrives.
     if (message.private && message.sender?.type === 'captain_assistant') return;
 
+    // Kita: history imported when the bot joins a channel is never an alert.
+    if (message.content_attributes?.kita_backfill) return;
+
     // If the conversation status is pending, then dismiss the alert
     // This case is common for all audio event types
     if (this.store.isMessageFromPendingConversation(message)) {
