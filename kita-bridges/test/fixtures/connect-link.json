@@ -1,0 +1,11 @@
+{
+  "secret": "cross-language-secret",
+  "publicUrl": "https://support.internal.kita.ai/bridges",
+  "agent": {
+    "id": 42,
+    "email": "Sam.Lee@Kita.ai"
+  },
+  "nowS": 1790000000,
+  "ttlDays": 7,
+  "url": "https://support.internal.kita.ai/bridges/connect?a=42&e=sam.lee%40kita.ai&x=1790604800&s=80e9a2e11f0a8634bf11b6475e60f0cd74e2fe30b901e47306d2f5776c251975"
+}
