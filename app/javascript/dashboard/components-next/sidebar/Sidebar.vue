@@ -65,6 +65,7 @@ const isMobile = computed(() => windowWidth.value < 768);
 
 const accountId = useMapGetter('getCurrentAccountId');
 const currentUserId = useMapGetter('getCurrentUserID');
+const userAccounts = useMapGetter('getUserAccounts');
 const isFeatureEnabledonAccount = useMapGetter(
   'accounts/isFeatureEnabledonAccount'
 );
@@ -1039,15 +1040,17 @@ const moreMenuItems = computed(() =>
       <RouterLink
         v-if="!isEffectivelyCollapsed"
         :to="accountScopedRoute('kita_customers')"
-        class="px-3 pt-4 pb-2"
+        class="px-2 pt-4 pb-2 w-fit"
       >
         <img
           :src="KITA_LOGO_DARK"
           :alt="t('SIDEBAR.CUSTOMERS')"
-          class="w-auto h-12"
+          class="w-auto h-8"
         />
       </RouterLink>
+      <!-- One account: the logo already says Kita, so the account name would repeat it. -->
       <div
+        v-if="isEffectivelyCollapsed || userAccounts.length > 1"
         class="flex gap-2 items-center min-w-0"
         :class="{
           'justify-center px-1': isEffectivelyCollapsed,
