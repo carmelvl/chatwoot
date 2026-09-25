@@ -7,7 +7,6 @@ import { useAlert } from 'dashboard/composables';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
 import { shortTimestamp, dynamicTime } from 'shared/helpers/timeHelper';
-import { slaStatus } from 'dashboard/helper/kitaThreads';
 import {
   customerLabel,
   customerPreview,
@@ -70,17 +69,6 @@ const detail = customer =>
   ]
     .filter(Boolean)
     .join(' · ');
-
-// "Urgent ticket · SLA 1h 48m" (the SLA only when Grip sends one)
-const urgentLine = customer => {
-  const sla = slaStatus(customer.urgent_sla_due_at);
-  const slaText = sla?.breached
-    ? t('KITA_CUSTOMERS.URGENT_SLA_BREACHED')
-    : sla && t('KITA_CUSTOMERS.URGENT_SLA', { time: sla.duration });
-  return [t('KITA_CUSTOMERS.URGENT_TICKET'), slaText]
-    .filter(Boolean)
-    .join(' · ');
-};
 
 const relativeTime = customer =>
   customer.last_activity_at
@@ -184,7 +172,7 @@ const openCustomer = customer => {
             v-if="customer.urgent_ticket"
             class="text-xs font-medium text-n-ruby-11"
           >
-            {{ urgentLine(customer) }}
+            {{ t('KITA_CUSTOMERS.URGENT_TICKET') }}
           </span>
           <span v-else-if="detail(customer)" class="text-xs text-n-slate-11">
             {{ detail(customer) }}

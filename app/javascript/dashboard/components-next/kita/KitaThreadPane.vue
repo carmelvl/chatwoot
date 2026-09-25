@@ -13,7 +13,6 @@ import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 import { kitaReplyBlock, KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
 import {
   isPressingTicket,
-  slaStatus,
   threadMessages,
   threadTitle,
 } from 'dashboard/helper/kitaThreads';
@@ -84,7 +83,6 @@ const replies = computed(() =>
 );
 
 const ticket = computed(() => thread.value?.ticket || null);
-const sla = computed(() => slaStatus(ticket.value?.sla_due_at));
 const ticketFields = computed(() =>
   [
     ticket.value?.status && {
@@ -92,13 +90,6 @@ const ticketFields = computed(() =>
       value: t(`KITA_THREADS.TICKET_STATUS.${ticket.value.status}`),
     },
     ticket.value?.owner && { key: 'OWNER', value: ticket.value.owner },
-    sla.value && {
-      key: 'SLA',
-      value: sla.value.breached
-        ? t('KITA_THREADS.SLA.BREACHED')
-        : t('KITA_THREADS.SLA.LEFT', { time: sla.value.duration }),
-      pressing: sla.value.pressing,
-    },
   ].filter(Boolean)
 );
 
@@ -205,12 +196,7 @@ const sendReply = async () => {
             <dt class="text-xs text-n-slate-11">
               {{ t(`KITA_THREADS.TICKET_CARD.${field.key}`) }}
             </dt>
-            <dd
-              class="m-0 mt-1"
-              :class="field.pressing ? 'text-n-ruby-11' : 'text-n-slate-12'"
-            >
-              {{ field.value }}
-            </dd>
+            <dd class="m-0 mt-1 text-n-slate-12">{{ field.value }}</dd>
           </div>
         </dl>
       </div>

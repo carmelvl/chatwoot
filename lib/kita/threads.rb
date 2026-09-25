@@ -1,7 +1,7 @@
 # Kita: the threads of one desk conversation for one agent. A thread is a root message with replies
 # (messages whose content_attributes.in_reply_to is the root's id) or a kita_threads metadata row.
 # Row shape: {root_message_id, title, status, reply_count, last_reply_at (unix s), participants[], unread,
-# ticket: {id, url, display_id, priority, status, owner, sla_due_at (unix s)}|nil, external_source, external_channel}, most recent activity first.
+# ticket: {id, url, display_id, priority, status, owner}|nil, external_source, external_channel}, most recent activity first.
 # messages.content_attributes is a json column holding a JSON-encoded string (Message stores it with
 # coder: JSON), so it is unwrapped with #>> '{}' before the jsonb lookup; this also reads plain objects.
 class Kita::Threads
@@ -77,7 +77,7 @@ class Kita::Threads
 
     if thread.ticket_id.present?
       ticket = { id: thread.ticket_id, url: thread.ticket_url, display_id: thread.ticket_display_id, priority: thread.ticket_priority,
-                 status: thread.ticket_status, owner: thread.ticket_owner, sla_due_at: thread.ticket_sla_due_at&.to_i }
+                 status: thread.ticket_status, owner: thread.ticket_owner }
     end
     { title: thread.title, status: thread.status, ticket: ticket }
   end

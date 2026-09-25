@@ -524,8 +524,8 @@ test('per-thread tickets: two threads in one conversation get their own classifi
   const desk = w.of('rails', 'POST', '/api/v1/kita/threads');
   assert.ok(desk.length >= 2);
   assert.ok(desk.every((c) => c.headers['x-kita-bridge-secret'] === 'bridge-secret'));
-  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1', ticket_priority: 'high', ticket_status: 'open', ticket_owner: null, ticket_display_id: null, ticket_sla_due_at: null });
-  assert.deepEqual(w.threads.get('42:5500'), { conversation_id: 42, root_message_id: 5500, title: 'Batch 14 scores missing', ticket_id: 't-2', ticket_url: 'https://internal.kita.ai/tasks/t-2', ticket_priority: 'medium', ticket_status: 'open', ticket_owner: null, ticket_display_id: null, ticket_sla_due_at: null });
+  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1', ticket_priority: 'high', ticket_status: 'open', ticket_owner: null, ticket_display_id: null });
+  assert.deepEqual(w.threads.get('42:5500'), { conversation_id: 42, root_message_id: 5500, title: 'Batch 14 scores missing', ticket_id: 't-2', ticket_url: 'https://internal.kita.ai/tasks/t-2', ticket_priority: 'medium', ticket_status: 'open', ticket_owner: null, ticket_display_id: null });
 
   // One private note per ticket, naming its thread; the `ticket` label once.
   const notes = w.of('rails', 'POST', /\/messages$/);
@@ -544,7 +544,7 @@ test('per-thread tickets: two threads in one conversation get their own classifi
   assert.deepEqual([w.threads.get('42:5001').ticket_status, w.threads.get('42:5500').ticket_status], ['resolved', 'resolved']);
 });
 
-test("desk ticket fields: Grip's display id, assignee, status and SLA are forwarded when Grip sends them", async () => {
+test("desk ticket fields: Grip's display id, assignee and status are forwarded when Grip sends them (never its SLA)", async () => {
   const w = world();
   w.grip.ticketFields = { display_id: 'KT-142', priority: 'urgent', status: 'in_progress', assignee_name: 'Rhea Malhotra', sla_due_at: '2026-09-24T04:00:00Z' };
   w.classifications.push(ISSUE);
@@ -554,15 +554,14 @@ test("desk ticket fields: Grip's display id, assignee, status and SLA are forwar
   assert.deepEqual(w.threads.get('42:5001'), {
     conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1',
     ticket_priority: 'urgent', ticket_status: 'in_progress', ticket_owner: 'Rhea Malhotra', ticket_display_id: 'KT-142',
-    ticket_sla_due_at: '2026-09-24T04:00:00Z',
   });
 
   // Resolved from the desk: Grip answers the PATCH with its new status.
-  w.grip.ticketFields = { ...w.grip.ticketFields, status: 'resolved', sla_due_at: null };
+  w.grip.ticketFields = { ...w.grip.ticketFields, status: 'resolved', assignee_name: null };
   w.sync.setThreadTicketStatus(42, 5001, 'done');
   await w.drain();
   assert.equal(w.threads.get('42:5001').ticket_status, 'resolved');
-  assert.equal(w.threads.get('42:5001').ticket_sla_due_at, null, 'a cleared SLA clears in the desk');
+  assert.equal(w.threads.get('42:5001').ticket_owner, null, 'a cleared assignee clears in the desk (no DRI known here)');
 });
 
 test('desk ticket status: a thread resolved in the desk moves only its Grip ticket; the DRI is the ticket owner', async () => {
@@ -609,7 +608,7 @@ test('thread titles: a non-issue thread still gets a title (no ticket fields); r
   w.advance(60 * SEC);
   await w.drain();
   assert.equal(w.of('rails', 'POST', '/api/v1/kita/threads').length, 2, 'title + ticket posted together');
-  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1', ticket_priority: 'high', ticket_status: 'open', ticket_owner: null, ticket_display_id: null, ticket_sla_due_at: null });
+  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1', ticket_priority: 'high', ticket_status: 'open', ticket_owner: null, ticket_display_id: null });
 });
 
 test('store: an old one-ticket-per-conversation database migrates in place (ticket kept as the legacy "" issue key)', async () => {

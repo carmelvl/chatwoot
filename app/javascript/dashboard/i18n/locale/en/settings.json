@@ -1195,9 +1195,7 @@
     "TICKETS_OPEN": "{count} open",
     "SELECT": "Pick a customer to see their conversations",
     "YOU": "You",
-    "UNREAD": "{count} unread",
-    "URGENT_SLA": "SLA {time}",
-    "URGENT_SLA_BREACHED": "SLA breached"
+    "UNREAD": "{count} unread"
   },
   "KITA_THREADS": {
     "REPLY_COUNT": "{count} reply | {count} replies",
@@ -1223,8 +1221,7 @@
     "TICKET_CARD": {
       "TITLE": "Ticket",
       "STATUS": "Status",
-      "OWNER": "Owner",
-      "SLA": "SLA"
+      "OWNER": "Owner"
     },
     "TICKET_STATUS": {
       "open": "Open",
@@ -1244,11 +1241,7 @@
     "OPEN_IN_GRIP": "Open in Grip",
     "TICKET_SYNC_ERROR": "The thread was updated, but its Grip ticket could not be. Try again or update it in Grip.",
     "NO_TICKETS": "No tickets on this conversation yet",
-    "TICKET_WITH_ID": "Ticket {id}",
-    "SLA": {
-      "LEFT": "{time} left",
-      "BREACHED": "Breached"
-    }
+    "TICKET_WITH_ID": "Ticket {id}"
   },
   "KITA_COMPOSER": {
     "PLACEHOLDER": "Message {channel}…",

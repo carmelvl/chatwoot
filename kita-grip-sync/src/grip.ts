@@ -45,7 +45,7 @@ export class GripClient {
   }
 
   /** Upserts by (chatwoot_conversation_id, issue_key): one Grip ticket per thread. */
-  /** Newer Grips also return the ticket's display id, priority, status, assignee and SLA due time (GripTicketFields). */
+  /** Newer Grips also return the ticket's display id, priority, status and assignee (GripTicketFields). */
   upsertTicket(body: TicketInput): Promise<{ ticket_id: string; ticket_url: string; created?: boolean; dismissed?: boolean; issue_key?: string } & GripTicketFields> {
     return this.call('POST', 'tickets', body);
   }

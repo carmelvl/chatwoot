@@ -71,7 +71,7 @@ describe('KitaThreadPane', () => {
     expect(wrapper.text()).toContain('Resolve thread');
   });
 
-  it('shows the ticket card with the fields Grip sent, SLA in red when close', () => {
+  it('shows the ticket card with the fields Grip sent, and no SLA', () => {
     const wrapper = mountPane({
       id: 't-1',
       url: 'https://internal.kita.ai/tasks/t-1',
@@ -79,14 +79,12 @@ describe('KitaThreadPane', () => {
       priority: 'urgent',
       status: 'open',
       owner: 'Carmel',
-      sla_due_at: Math.floor(Date.now() / 1000) + 108 * 60 + 30,
     });
     const card = wrapper.find('[data-test="kita-ticket-card"]');
     expect(card.text()).toContain('Ticket KT-142');
     expect(card.text()).toContain('Urgent');
     expect(card.text()).toContain('Carmel');
-    expect(card.text()).toContain('1h 48m left');
-    expect(card.find('.text-n-ruby-11').exists()).toBe(true);
+    expect(card.text()).not.toContain('SLA');
     expect(wrapper.text()).toContain('Resolve thread and ticket');
     expect(wrapper.text()).toContain('Open in Grip');
   });

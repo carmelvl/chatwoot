@@ -381,7 +381,7 @@ export class Sync {
   }
 
   /**
-   * The thread's ticket as the desk shows it. Grip's own fields win when it sent them (display id, SLA, assignee);
+   * The thread's ticket as the desk shows it. Grip's own fields win when it sent them (display id, assignee);
    * otherwise priority and status are what this service last set, and the owner is the account's DRI.
    */
   private deskTicket(id: number, root: number) {
@@ -392,8 +392,8 @@ export class Sync {
     const owner = g.assignee_name || g.assignee_email || dri?.dri_name || dri?.dri_email;
     return {
       ticket_id: t.ticketId, ticket_url: t.ticketUrl, ticket_priority: g.priority || t.priority, ticket_status: g.status || DESK_STATUS[t.status] || 'open',
-      // Always sent (null when unknown), so a cleared SLA or owner clears in the desk too
-      ticket_owner: owner || null, ticket_display_id: g.display_id || null, ticket_sla_due_at: g.sla_due_at || null,
+      // Always sent (null when unknown), so a cleared owner clears in the desk too
+      ticket_owner: owner || null, ticket_display_id: g.display_id || null,
     };
   }
 
@@ -412,7 +412,7 @@ export class Sync {
 /** Grip's optional ticket fields from a POST/PATCH response, over what we had. Absent fields keep their last value. */
 function gripFields(r: any, prev: GripTicketFields = {}): GripTicketFields {
   const out: GripTicketFields = { ...prev };
-  for (const k of ['display_id', 'priority', 'status', 'assignee_email', 'assignee_name', 'sla_due_at'] as const)
+  for (const k of ['display_id', 'priority', 'status', 'assignee_email', 'assignee_name'] as const)
     if (r && r[k] !== undefined) out[k] = r[k];
   return out;
 }

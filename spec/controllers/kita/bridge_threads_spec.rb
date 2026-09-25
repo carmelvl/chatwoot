@@ -29,18 +29,16 @@ RSpec.describe 'Kita bridge thread metadata', type: :request do
                                       status: 'open')
   end
 
-  it "stores the ticket's display id, priority, status, owner and SLA, and clears what grip-sync sends as null" do
+  it "stores the ticket's display id, priority, status and owner, and clears what grip-sync sends as null" do
     ticket = { conversation_id: conversation.display_id, root_message_id: root.id, ticket_id: 'T-42', ticket_url: 'https://grip/t/42',
-               ticket_display_id: 'KT-142', ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel',
-               ticket_sla_due_at: '2026-09-24T04:00:00Z' }
+               ticket_display_id: 'KT-142', ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel' }
     post path, params: ticket, headers: headers, as: :json
 
     thread = Kita::MessageThread.find_by!(root_message_id: root.id)
-    expect(thread).to have_attributes(ticket_display_id: 'KT-142', ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel',
-                                      ticket_sla_due_at: Time.zone.parse('2026-09-24T04:00:00Z'))
+    expect(thread).to have_attributes(ticket_display_id: 'KT-142', ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel')
 
-    post path, params: ticket.merge(ticket_sla_due_at: nil, ticket_status: 'resolved'), headers: headers, as: :json
-    expect(thread.reload).to have_attributes(ticket_sla_due_at: nil, ticket_status: 'resolved')
+    post path, params: ticket.merge(ticket_owner: nil, ticket_status: 'resolved'), headers: headers, as: :json
+    expect(thread.reload).to have_attributes(ticket_owner: nil, ticket_status: 'resolved')
   end
 
   it 'rejects a root message from another conversation' do

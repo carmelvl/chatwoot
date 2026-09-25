@@ -100,7 +100,7 @@ export class ChatwootApi {
   }
 }
 
-/** What the desk shows per thread. Grip's display id and SLA are sent once Grip returns them. */
+/** What the desk shows per thread. Grip's display id is sent once Grip returns it. SLA is deliberately not shown. */
 export interface DeskThread {
   conversation_id: number;
   root_message_id: number;
@@ -114,8 +114,6 @@ export interface DeskThread {
   ticket_owner?: string | null;
   /** Grip's display number, e.g. "KT-142" (when Grip sends it). */
   ticket_display_id?: string | null;
-  /** ISO time the ticket's SLA is due (when Grip sends it). */
-  ticket_sla_due_at?: string | null;
 }
 
 /**

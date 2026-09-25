@@ -48,7 +48,6 @@ export interface GripTicketFields {
   status?: string | null;
   assignee_email?: string | null;
   assignee_name?: string | null;
-  sla_due_at?: string | null;
 }
 
 export interface ThreadMessage {
@@ -168,7 +167,7 @@ export class Store {
         ALTER TABLE tickets_v2 RENAME TO tickets;
         COMMIT;`);
     }
-    // Grip's ticket fields (display id, SLA, assignee...), kept for the desk.
+    // Grip's ticket fields (display id, assignee...), kept for the desk.
     const tcols2 = (this.db.prepare('PRAGMA table_info(tickets)').all() as any[]).map((c) => c.name);
     if (!tcols2.includes('grip')) this.db.exec("ALTER TABLE tickets ADD COLUMN grip TEXT NOT NULL DEFAULT '{}'");
     const dcols = (this.db.prepare('PRAGMA table_info(dismissals)').all() as any[]).map((c) => c.name);

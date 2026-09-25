@@ -8,8 +8,6 @@ import {
   isPressingTicket,
   kitaComposerBlock,
   openTicketCount,
-  slaDuration,
-  slaStatus,
   parseKitaChannels,
   threadFooterSummary,
   threadMessages,
@@ -180,32 +178,5 @@ describe('Kita tickets', () => {
     expect(isPressingTicket(done.ticket)).toBe(true);
     expect(isPressingTicket({ priority: 'medium' })).toBe(false);
     expect(isOpenTicket(null)).toBe(false);
-  });
-});
-
-describe('Kita ticket SLA', () => {
-  const now = Date.UTC(2026, 8, 24, 2, 0, 0);
-  const inMinutes = minutes => now / 1000 + minutes * 60;
-
-  it('formats the time left', () => {
-    expect(slaDuration(108)).toBe('1h 48m');
-    expect(slaDuration(48)).toBe('48m');
-    expect(slaDuration(120)).toBe('2h');
-    expect(slaDuration(24 * 60 * 2 + 180)).toBe('2d 3h');
-  });
-
-  it('is red within 2 hours and once breached', () => {
-    expect(slaStatus(inMinutes(108), now)).toEqual({
-      duration: '1h 48m',
-      breached: false,
-      pressing: true,
-    });
-    expect(slaStatus(inMinutes(300), now).pressing).toBe(false);
-    expect(slaStatus(inMinutes(-5), now)).toEqual({
-      duration: '',
-      breached: true,
-      pressing: true,
-    });
-    expect(slaStatus(null, now)).toBeNull();
   });
 });
