@@ -1,4 +1,10 @@
-import { isSameDay, isToday, isYesterday, format, fromUnixTime } from 'date-fns';
+import {
+  isSameDay,
+  isToday,
+  isYesterday,
+  format,
+  fromUnixTime,
+} from 'date-fns';
 
 /**
  * The day divider above a message (Paper S03: "TODAY" between hairlines), or
