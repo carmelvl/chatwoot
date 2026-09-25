@@ -43,4 +43,12 @@ describe('KitaReplyGate', () => {
     );
     expect(wrapper.find('button').exists()).toBe(false);
   });
+
+  it('shows the mirror notice for WhatsApp and Viber, with no Connect button', () => {
+    const wrapper = mountGate({ platform: 'viber', reason: 'mirror' });
+    expect(wrapper.text()).toContain(
+      'Reply in Viber yourself — this inbox is a mirror'
+    );
+    expect(wrapper.find('button').exists()).toBe(false);
+  });
 });

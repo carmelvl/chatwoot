@@ -1126,7 +1126,7 @@
   },
   "KITA_CONNECT": {
     "TITLE": "Connect your accounts",
-    "DESCRIPTION": "Connect Slack and Teams to reply there. Replies go out under your own name, and nothing is sent until you connect.",
+    "DESCRIPTION": "Connect Slack and Teams to reply there. Replies go out under your own name, and nothing is sent until you connect. WhatsApp and Viber are mirrors: you reply in those apps yourself.",
     "CONNECT": "Connect",
     "CLOSE": "Close",
     "STATUS_UNAVAILABLE": "Connection status is unavailable right now. Try again in a moment.",
@@ -1141,14 +1141,16 @@
       "NOT_CONNECTED": "Not connected",
       "UNAVAILABLE": "Not available yet"
     },
-    "WHATSAPP_DESCRIPTION": "Your WhatsApp Business number is linked by an admin (QR scan).",
+    "WHATSAPP_DESCRIPTION": "Your WhatsApp Business number is linked by an admin (QR scan). Reply in WhatsApp yourself: the desk never sends on WhatsApp.",
     "WHATSAPP_NOT_LINKED": "Not linked",
-    "VIBER_DESCRIPTION": "Replies go out through the Kita Viber bot. Viber has no personal accounts for businesses, so there's no personal link.",
+    "VIBER_DESCRIPTION": "Customers' messages to the Kita Viber bot show up here. Reply in Viber yourself: the desk never sends on Viber, and Kita can't see your personal Viber chats.",
     "SENT_VIA": "Sent via {platform}",
     "REPLY_GATE": {
       "TITLE": "Connect your {platform} account to reply here",
       "UNAVAILABLE": "{platform} replies aren't available yet",
-      "DESCRIPTION": "Replies are only ever sent from your own account. Private notes still work."
+      "DESCRIPTION": "Replies are only ever sent from your own account. Private notes still work.",
+      "MIRROR": "Reply in {platform} yourself — this inbox is a mirror",
+      "MIRROR_DESCRIPTION": "Nothing typed here is sent to the customer. Private notes still work."
     }
   }
 }

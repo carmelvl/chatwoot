@@ -16,12 +16,23 @@ const title = computed(() => {
   const names = {
     slack: t('KITA_CONNECT.PLATFORMS.SLACK'),
     teams: t('KITA_CONNECT.PLATFORMS.TEAMS'),
+    whatsapp: t('KITA_CONNECT.PLATFORMS.WHATSAPP'),
+    viber: t('KITA_CONNECT.PLATFORMS.VIBER'),
   };
   const platform = names[props.platform];
-  return props.reason === 'unavailable'
-    ? t('KITA_CONNECT.REPLY_GATE.UNAVAILABLE', { platform })
-    : t('KITA_CONNECT.REPLY_GATE.TITLE', { platform });
+  const titles = {
+    mirror: t('KITA_CONNECT.REPLY_GATE.MIRROR', { platform }),
+    unavailable: t('KITA_CONNECT.REPLY_GATE.UNAVAILABLE', { platform }),
+    not_connected: t('KITA_CONNECT.REPLY_GATE.TITLE', { platform }),
+  };
+  return titles[props.reason];
 });
+
+const description = computed(() =>
+  props.reason === 'mirror'
+    ? t('KITA_CONNECT.REPLY_GATE.MIRROR_DESCRIPTION')
+    : t('KITA_CONNECT.REPLY_GATE.DESCRIPTION')
+);
 </script>
 
 <template>
@@ -33,7 +44,7 @@ const title = computed(() => {
     <div class="flex flex-col flex-1 min-w-0 gap-0.5">
       <span class="text-sm font-medium text-n-slate-12">{{ title }}</span>
       <span class="text-xs text-n-slate-11">
-        {{ t('KITA_CONNECT.REPLY_GATE.DESCRIPTION') }}
+        {{ description }}
       </span>
     </div>
     <Button

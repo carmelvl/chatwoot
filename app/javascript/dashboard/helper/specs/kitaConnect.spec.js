@@ -59,13 +59,21 @@ describe('kitaReplyBlock (composer gate per platform)', () => {
     );
   });
 
-  it('never gates Viber, WhatsApp or non-bridge conversations', () => {
-    expect(kitaReplyBlock(status, 'viber')).toBe(null);
-    expect(kitaReplyBlock(status, 'whatsapp')).toBe(null);
+  it('never gates non-bridge conversations', () => {
     expect(kitaReplyBlock(status, undefined)).toBe(null);
+    expect(kitaReplyBlock(status, 'email')).toBe(null);
   });
 
   it('does not gate when the status is unknown', () => {
     expect(kitaReplyBlock(null, 'slack')).toBe(null);
+  });
+});
+
+describe('kitaReplyBlock (mirrors)', () => {
+  it('always gates WhatsApp and Viber: the desk never sends there', () => {
+    const status = { slack: 'connected', teams: 'connected' };
+    expect(kitaReplyBlock(status, 'whatsapp')).toBe('mirror');
+    expect(kitaReplyBlock(status, 'viber')).toBe('mirror');
+    expect(kitaReplyBlock(null, 'viber')).toBe('mirror');
   });
 });

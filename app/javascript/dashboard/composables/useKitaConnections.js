@@ -7,7 +7,8 @@ const status = ref(null);
 let pending = null;
 
 const fetchStatus = () => {
-  pending ??= KitaConnectionsAPI.get()
+  pending ??= Promise.resolve()
+    .then(() => KitaConnectionsAPI.get())
     .then(({ data }) => {
       status.value = data;
     })
