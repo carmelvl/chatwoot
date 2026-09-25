@@ -42,6 +42,10 @@ export interface ThreadMessage {
   role: Speaker;
   content: string;
   createdAt: string;
+  /** Who wrote it (Chatwoot message sender name). In per-channel conversations this is the person, not the channel contact. */
+  sender?: string | null;
+  /** A reply inside a Slack/Teams thread (content_attributes.in_reply_to / external_thread). */
+  threadReply?: boolean;
 }
 
 export interface Job {
@@ -86,7 +90,8 @@ export class Store {
         classified_upto INTEGER NOT NULL DEFAULT 0, dismissed INTEGER NOT NULL DEFAULT 0, out_of_scope INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+        id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL,
+        sender TEXT, thread_reply INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS messages_by_conv ON messages (conversation_id, id);
       CREATE TABLE IF NOT EXISTS tickets (
         conversation_id INTEGER PRIMARY KEY, ticket_id TEXT NOT NULL, ticket_url TEXT NOT NULL, title TEXT NOT NULL,
@@ -105,6 +110,10 @@ export class Store {
     // Databases created before the out-of-scope column existed.
     const cols = (this.db.prepare('PRAGMA table_info(conversations)').all() as any[]).map((c) => c.name);
     if (!cols.includes('out_of_scope')) this.db.exec('ALTER TABLE conversations ADD COLUMN out_of_scope INTEGER NOT NULL DEFAULT 0');
+    // Databases created before per-message sender / thread-reply columns existed.
+    const mcols = (this.db.prepare('PRAGMA table_info(messages)').all() as any[]).map((c) => c.name);
+    if (!mcols.includes('sender')) this.db.exec('ALTER TABLE messages ADD COLUMN sender TEXT');
+    if (!mcols.includes('thread_reply')) this.db.exec('ALTER TABLE messages ADD COLUMN thread_reply INTEGER NOT NULL DEFAULT 0');
   }
 
   // ---- dedupe ----
@@ -139,15 +148,15 @@ export class Store {
 
   // ---- thread (recent public messages, for the classifier) ----
   addMessage(conversationId: number, m: ThreadMessage): void {
-    this.db.prepare('INSERT OR IGNORE INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(m.id, conversationId, m.role, m.content, m.createdAt);
+    this.db.prepare('INSERT OR IGNORE INTO messages (id, conversation_id, role, content, created_at, sender, thread_reply) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(m.id, conversationId, m.role, m.content, m.createdAt, m.sender ?? null, m.threadReply ? 1 : 0);
     this.db.prepare(`DELETE FROM messages WHERE conversation_id = ? AND id NOT IN
         (SELECT id FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ${THREAD_KEEP})`).run(conversationId, conversationId);
   }
 
   thread(conversationId: number, upto = Number.MAX_SAFE_INTEGER): ThreadMessage[] {
     return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND id <= ? ORDER BY id').all(conversationId, upto) as any[])
-      .map((r) => ({ id: Number(r.id), role: r.role, content: r.content, createdAt: r.created_at }));
+      .map((r) => ({ id: Number(r.id), role: r.role, content: r.content, createdAt: r.created_at, sender: r.sender ?? null, threadReply: !!r.thread_reply }));
   }
 
   // ---- tickets ----
