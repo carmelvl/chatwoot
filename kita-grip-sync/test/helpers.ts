@@ -17,7 +17,7 @@ export interface Call { host: string; method: string; path: string; headers: Rec
  *  - rails.test      Chatwoot application API (notes, labels) + the desk's POST /api/v1/kita/threads
  *  - anthropic.test  Claude Messages API (answers from a queue of classifications)
  */
-export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owners?: boolean } = {}) {
+export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owners?: boolean; scopeFilter?: boolean } = {}) {
   const calls: Call[] = [];
   const classifications: Classification[] = [];
   const fail: Record<string, number[]> = { grip: [], rails: [], anthropic: [] }; // queued HTTP statuses to fail with
@@ -121,7 +121,7 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owner
   const chatwoot = new ChatwootApi('http://rails.test', 'cw-bot-token', fetchImpl);
   const sync = new Sync({
     store,
-    owners: opts.owners ? new Owners({ store, chatwoot, directory: new ChatwootApi('http://rails.test', 'cw-admin-token', fetchImpl), now: () => clock }) : undefined,
+    owners: opts.owners ? new Owners({ store, chatwoot, directory: new ChatwootApi('http://rails.test', 'cw-admin-token', fetchImpl), now: () => clock, scopeFilter: opts.scopeFilter }) : undefined,
     grip: new GripClient('https://grip.test', 'grip_testkey', fetchImpl),
     chatwoot,
     desk: new KitaDesk('http://rails.test', 'bridge-secret', fetchImpl),
@@ -129,6 +129,7 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owner
     publicUrl: 'https://support.internal.kita.ai',
     debounceMs: opts.debounceMs ?? 60_000,
     debounceMaxMs: opts.debounceMaxMs ?? 300_000,
+    scopeFilter: opts.scopeFilter,
     now: () => clock,
   });
   return {

@@ -384,8 +384,23 @@ test('retries: Claude 429 and a failed ticket POST retry without duplicating tic
 
 // ---------- out-of-scope accounts (Grip answers in_scope: false) ----------
 
-test('out of scope: resolved via toggle_status + label out-of-scope (existing labels kept), never classified', async () => {
+test('SCOPE_FILTER off (default): an out-of-scope account is never resolved or labelled, and classifies like any customer', async () => {
   const w = world();
+  w.grip.inScope = false;
+  w.classifications.push(NOT_ISSUE);
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.equal(!!w.store.getConversation(42)!.outOfScope, false);
+  assert.equal(w.of('rails', 'POST', /toggle_status$/).length, 0);
+  assert.equal(w.of('rails', 'POST', /\/labels$/).length, 0);
+  assert.equal(w.of('anthropic').length, 1);
+});
+
+// The rest run with SCOPE_FILTER=on.
+
+test('out of scope: resolved via toggle_status + label out-of-scope (existing labels kept), never classified', async () => {
+  const w = world({ scopeFilter: true });
   w.grip.inScope = false;
   w.labels.set(42, ['vip']);
   w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
@@ -406,7 +421,7 @@ test('out of scope: resolved via toggle_status + label out-of-scope (existing la
 });
 
 test('out of scope: done once per conversation; later messages and our own status/label echoes do nothing more', async () => {
-  const w = world();
+  const w = world({ scopeFilter: true });
   w.grip.inScope = false;
   w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
   await w.drain();
@@ -424,7 +439,7 @@ test('out of scope: done once per conversation; later messages and our own statu
 });
 
 test('out of scope: resolve/label retries are idempotent (Chatwoot 503 then success, one label)', async () => {
-  const w = world();
+  const w = world({ scopeFilter: true });
   w.grip.inScope = false;
   w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
   await w.sync.runDue(); // sync job -> Grip says out of scope -> enqueues out_of_scope
@@ -440,7 +455,7 @@ test('out of scope: resolve/label retries are idempotent (Chatwoot 503 then succ
 });
 
 test('out of scope -> back in scope: block lifted, no auto-reopen, new customer messages classify again', async () => {
-  const w = world();
+  const w = world({ scopeFilter: true });
   w.grip.inScope = false;
   w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
   await w.drain();
@@ -460,7 +475,7 @@ test('out of scope -> back in scope: block lifted, no auto-reopen, new customer 
 
 test('in scope or an older Grip without in_scope: nothing is resolved or labelled', async () => {
   for (const v of [true, undefined]) {
-    const w = world();
+    const w = world({ scopeFilter: true });
     w.grip.inScope = v;
     w.classifications.push(NOT_ISSUE);
     w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
@@ -474,7 +489,7 @@ test('in scope or an older Grip without in_scope: nothing is resolved or labelle
 
 test('in_scope is read from both the flat response and Grip\'s { success, data } envelope', async () => {
   for (const envelope of [false, true]) {
-    const w = world();
+    const w = world({ scopeFilter: true });
     w.grip.envelope = envelope;
     w.grip.inScope = false;
     w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
@@ -634,4 +649,35 @@ test('store: an old one-ticket-per-conversation database migrates in place (tick
   assert.deepEqual(s.tickets(42).map((t) => [t.issueKey, t.ticketId]), [['', 't-9'], ['5001', 't-10']]);
   s.close();
   new Store(path).close(); // reopening is a no-op
+});
+
+// ---------- history imported by kita-bridges (content_attributes.kita_backfill) ----------
+
+const backfilled = (id: number, content: string, at: string, root?: number) =>
+  msg('message_incoming_slack.json', { id, content, created_at: at, content_attributes: { kita_backfill: true, ...(root ? { in_reply_to: root } : {}) } });
+
+test('backfill: old history is counted but never classified', async () => {
+  const w = world();
+  w.sync.ingest(backfilled(6001, 'old question', '2026-01-02T00:00:00Z'), 'b1');
+  w.sync.ingest(backfilled(6002, 'older thread reply', '2026-01-03T00:00:00Z', 6001), 'b2');
+  w.advance(10 * 60 * SEC);
+  await w.drain();
+  assert.equal(w.store.getConversation(42)!.messageCount, 2);
+  assert.equal(w.of('anthropic').length, 0);
+  assert.equal(w.store.getJob('classify:42:6001'), undefined);
+  assert.equal(w.store.getJob('classify_backfill:42'), undefined);
+});
+
+test('backfill: only the most recent thread is classified, when its last message is under 7 days old', async () => {
+  const w = world();
+  w.classifications.push(ISSUE);
+  w.sync.ingest(backfilled(6001, 'old question', '2026-01-02T00:00:00Z'), 'b1');
+  w.sync.ingest(backfilled(6010, 'recent thread A', '2026-09-20T00:00:00Z'), 'b2');
+  w.sync.ingest(backfilled(6020, 'recent thread B', '2026-09-22T00:00:00Z'), 'b3');
+  w.sync.ingest(backfilled(6021, 'B reply', '2026-09-23T00:00:00Z', 6020), 'b4');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.equal(w.of('anthropic').length, 1, 'one classification for the whole import');
+  assert.ok(w.store.getTicket(42, '6020'), 'ticket on the most recent thread');
+  assert.equal(w.store.getTicket(42, '6010'), undefined);
 });

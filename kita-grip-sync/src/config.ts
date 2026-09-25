@@ -30,6 +30,8 @@ export function loadConfig() {
     ownerSync: env('OWNER_SYNC', 'true') !== 'false',
     /** Shared secret for the desk's Kita endpoints (POST /api/v1/kita/threads: thread titles + ticket links). Same value as the bridges'. */
     bridgeLinkSecret: env('BRIDGE_LINK_SECRET'),
+    /** on: Grip's out-of-scope accounts are resolved + labelled out-of-scope and never classified. off (default): shown like any customer. */
+    scopeFilter: env('SCOPE_FILTER', 'off') === 'on',
     agentsRefreshMs: Number(env('AGENTS_REFRESH_SECONDS', '600')) * 1000,
   };
 }

@@ -7,6 +7,9 @@ import { log } from './log.ts';
 import { gripOwner, type Owners } from './owner.ts';
 import type { ConversationState, GripTicketFields, Job, Priority, Store, ThreadState, TicketRow } from './store.ts';
 
+/** Message imported from the platform's history by kita-bridges (never notified, rarely classified). */
+export const isBackfill = (msg: any) => msg?.content_attributes?.kita_backfill === true || msg?.content_attributes?.kita_backfill === 'true';
+
 export const MAX_ATTEMPTS = 10;
 const RANK: Record<Priority, number> = { low: 0, medium: 1, high: 2, urgent: 3 };
 const HANDLED = new Set(['message_created', 'conversation_created', 'conversation_status_changed', 'conversation_updated']);
@@ -23,8 +26,16 @@ export interface SyncDeps {
   publicUrl: string;
   debounceMs: number;
   debounceMaxMs: number;
+  /**
+   * SCOPE_FILTER=on: Grip's in_scope: false resolves + labels the conversation and stops classification.
+   * Off (default): every conversation stays visible and is treated alike; Grip only maps accounts and owners.
+   */
+  scopeFilter?: boolean;
   now?: () => number;
 }
+
+/** Backfilled history (content_attributes.kita_backfill) is only classified for a thread active this recently. */
+export const BACKFILL_CLASSIFY_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
 export type IngestResult = 'duplicate' | 'ignored' | 'ok';
 
@@ -127,7 +138,12 @@ export class Sync {
     if (!s.dismissed && s.status === 'resolved' && tickets.some((t) => t.status !== 'done' && t.status !== 'dismissed'))
       this.enqueueStatusAll(id, 'done', now);
 
-    if (fresh && speaker === 'customer' && this.ticketsEnabled && this.eligible(s))
+    // Imported history: no classification per message. Only the most recent thread (the last backfilled
+    // message's, since history arrives oldest first) is classified, and only if that message is under 7 days old.
+    const backfill = isBackfill(p);
+    if (fresh && backfill && this.ticketsEnabled && this.eligible(s) && now - Date.parse(toIso(p.created_at)) < BACKFILL_CLASSIFY_WINDOW_MS)
+      store.enqueue(`classify_backfill:${id}`, 'classify_backfill', id, { runAt: now + this.d.debounceMs, payload: { root }, mode: 'replace', now });
+    if (fresh && !backfill && speaker === 'customer' && this.ticketsEnabled && this.eligible(s))
       store.enqueue(`classify:${id}:${root}`, 'classify', id, { runAt: now + this.d.debounceMs, payload: { root }, mode: 'debounce', maxWaitMs: this.d.debounceMaxMs, now });
     return 'ok';
   }
@@ -153,7 +169,7 @@ export class Sync {
   }
 
   private eligible(s: ConversationState) {
-    return !s.dismissed && !s.outOfScope && !s.labels.includes(NOT_A_TICKET) && s.status !== 'resolved';
+    return !s.dismissed && !(this.d.scopeFilter && s.outOfScope) && !s.labels.includes(NOT_A_TICKET) && s.status !== 'resolved';
   }
 
   /**
@@ -215,7 +231,7 @@ export class Sync {
         if (!s?.channelKey || !this.d.grip) return;
         const r = await this.d.grip.upsertConversation(conversationBody(s, this.d.publicUrl));
         log.info('conversation_synced', { conversation: id, account: r?.account_id ?? null, support_status: r?.support_status ?? null, in_scope: r?.in_scope ?? null });
-        if (typeof r?.in_scope === 'boolean') this.applyScope(id, r.in_scope);
+        if (this.d.scopeFilter && typeof r?.in_scope === 'boolean') this.applyScope(id, r.in_scope);
         const owner = this.d.owners ? gripOwner(r) : undefined;
         if (owner) {
           const prev = store.getOwner(id);
@@ -258,6 +274,7 @@ export class Sync {
         return;
       }
       case 'classify':
+      case 'classify_backfill':
         return this.classify(id, Number(job.payload.root));
       case 'announce':
         return this.announce(id, String(job.payload.issue_key ?? ''));

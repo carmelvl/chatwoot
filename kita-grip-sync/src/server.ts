@@ -14,7 +14,7 @@ const caps = capabilities(cfg);
 const store = new Store(cfg.dbPath);
 const botApi = cfg.chatwootApiToken ? new ChatwootApi(cfg.chatwootBaseUrl, cfg.chatwootApiToken) : undefined;
 const owners = caps.owners && botApi
-  ? new Owners({ store, chatwoot: botApi, directory: cfg.chatwootAdminToken ? new ChatwootApi(cfg.chatwootBaseUrl, cfg.chatwootAdminToken) : undefined, agentsRefreshMs: cfg.agentsRefreshMs })
+  ? new Owners({ store, chatwoot: botApi, directory: cfg.chatwootAdminToken ? new ChatwootApi(cfg.chatwootBaseUrl, cfg.chatwootAdminToken) : undefined, agentsRefreshMs: cfg.agentsRefreshMs, scopeFilter: cfg.scopeFilter })
   : undefined;
 const sync = new Sync({
   store,
@@ -31,6 +31,7 @@ const sync = new Sync({
   publicUrl: cfg.chatwootPublicUrl,
   debounceMs: cfg.debounceMs,
   debounceMaxMs: cfg.debounceMaxMs,
+  scopeFilter: cfg.scopeFilter,
 });
 
 const tick = () => void sync.runDue().catch((e) => log.error('runner_failed', { error: String(e?.message ?? e) }));

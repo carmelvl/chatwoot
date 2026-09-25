@@ -49,6 +49,8 @@ export interface OwnersDeps {
   chatwoot: ChatwootApi;
   /** User token that may call agents#index and custom_attribute_definitions (an administrator's). Defaults to `chatwoot`. */
   directory?: ChatwootApi;
+  /** SCOPE_FILTER=on: never assign conversations Grip calls out of scope. Off (default): assign like any other. */
+  scopeFilter?: boolean;
   /** Agent list cache lifetime. */
   agentsRefreshMs?: number;
   now?: () => number;
@@ -136,7 +138,7 @@ export class Owners {
     }
 
     // 2. Assignment.
-    if (row.grip.in_scope === false || !row.grip.dri_email) return;
+    if ((this.d.scopeFilter && row.grip.in_scope === false) || !row.grip.dri_email) return;
     const target = await this.agentId(accountId, row.grip.dri_email);
     if (target === undefined) {
       if (!this.agentsUnavailable) log.info('dri_not_agent', { conversation: conversationId, dri_email: row.grip.dri_email });

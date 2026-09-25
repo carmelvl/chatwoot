@@ -6,8 +6,8 @@ import { fixture, msg, world } from './helpers.ts';
 const RHEA = { dri_email: 'rhea@kita.ai', dri_name: 'Rhea Malhotra', sales_owner_email: 'carmel@kita.ai', account_name: 'Acme Lending' };
 const customer = (id: number) => msg('message_incoming_slack.json', { id, content: `m${id}` });
 
-function ownerWorld(owner: Record<string, unknown> = RHEA) {
-  const w = world({ owners: true, debounceMs: 10 ** 12 }); // keep the classifier out of these tests
+function ownerWorld(owner: Record<string, unknown> = RHEA, scopeFilter = false) {
+  const w = world({ owners: true, debounceMs: 10 ** 12, scopeFilter }); // keep the classifier out of these tests
   Object.assign(w.owner, owner);
   return w;
 }
@@ -85,13 +85,21 @@ test('owner: agent bot token cannot list agents -> attributes still set, no assi
   assert.equal(w.store.getJob('owner:42'), undefined);
 });
 
-test('owner: out-of-scope conversations get attributes but are never assigned', async () => {
-  const w = ownerWorld();
+test('owner (SCOPE_FILTER=on): out-of-scope conversations get attributes but are never assigned', async () => {
+  const w = ownerWorld(RHEA, true);
   w.grip.inScope = false;
   w.sync.ingest(customer(5001), 'd1');
   await w.drain();
   assert.equal(assigns(w).length, 0);
   assert.equal(attrWrites(w).length, 1);
+});
+
+test('owner (SCOPE_FILTER off, default): out-of-scope accounts are assigned to their DRI like any customer', async () => {
+  const w = ownerWorld();
+  w.grip.inScope = false;
+  w.sync.ingest(customer(5001), 'd1');
+  await w.drain();
+  assert.equal(assigns(w).length, 1);
 });
 
 test('owner: idempotent, unchanged values cause no Chatwoot writes; only changed keys are sent', async () => {
