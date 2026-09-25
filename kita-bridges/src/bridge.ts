@@ -471,7 +471,10 @@ export class Bridge {
     const seenKey = `out:${decision.message.messageId}`;
     if (MIRROR_PLATFORMS.includes(platform)) {
       if (!store.markSeen(seenKey)) return 'skip:duplicate';
-      await this.d.app?.createMessage(conv.conversationId, { content: MIRROR_NOTE[platform as 'whatsapp' | 'viber'], private: true });
+      await this.d.app?.createMessage(conv.conversationId, {
+        content: MIRROR_NOTE[platform as 'whatsapp' | 'viber'], private: true,
+        contentAttributes: { kita_notice: 'mirror', external_source: platform },
+      });
       return 'skip:mirror';
     }
     const sender = this.d.senders[platform];
@@ -505,7 +508,10 @@ export class Bridge {
       reason === 'not_connected'
         ? `Not sent — connect your ${name} account first (Profile → Connect accounts).${link ? ` ${link}` : ''}`
         : `Not sent — you're not in this ${platform === 'teams' ? 'channel or chat' : 'channel'} yet. Ask to be added, then send it again.`;
-    await this.d.app.createMessage(conversationId, { content, private: true }).catch((e) => log.warn('refused_note_failed', { error: String(e?.message ?? e) }));
+    const contentAttributes: MessageAttributes = {
+      kita_notice: 'not_sent', kita_notice_reason: reason, external_source: platform, ...(link ? { kita_connect_url: link } : {}),
+    };
+    await this.d.app.createMessage(conversationId, { content, private: true, contentAttributes }).catch((e) => log.warn('refused_note_failed', { error: String(e?.message ?? e) }));
   }
 }
 

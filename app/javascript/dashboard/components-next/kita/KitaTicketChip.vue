@@ -3,43 +3,47 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { isPressingTicket } from 'dashboard/helper/kitaThreads';
 
+// The Grip ticket on a thread root: "Urgent ticket KT-142 · AI underwriter
+// stopped working". Red for urgent/high, amber otherwise.
 const props = defineProps({
   ticket: { type: Object, required: true },
-  // Inside another button (the threads list) the chip can't be a link
+  // The thread's title (the ticket is named after it)
+  title: { type: String, default: '' },
+  // Inside another button the chip can't be a link
   asLink: { type: Boolean, default: true },
 });
 
 const { t } = useI18n();
 
-const priority = computed(() =>
-  props.ticket.priority
-    ? t(`KITA_THREADS.PRIORITY.${props.ticket.priority}`)
-    : null
-);
+const label = computed(() => {
+  const kind = props.ticket.priority
+    ? t('KITA_THREADS.PRIORITY_TICKET', {
+        priority: t(`KITA_THREADS.PRIORITY.${props.ticket.priority}`),
+      })
+    : t('KITA_THREADS.TICKET');
+  return [kind, props.ticket.display_id].filter(Boolean).join(' ');
+});
 </script>
 
 <template>
   <Component
-    :is="asLink ? 'a' : 'span'"
+    :is="asLink && ticket.url ? 'a' : 'span'"
     :href="asLink ? ticket.url : undefined"
     :target="asLink ? '_blank' : undefined"
     :rel="asLink ? 'noopener noreferrer' : undefined"
     data-test="kita-ticket-chip"
-    class="flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md shrink-0"
+    class="inline-flex items-center max-w-full min-w-0 gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-md shrink"
     :class="
       isPressingTicket(ticket)
         ? 'bg-n-ruby-3 text-n-ruby-11 hover:bg-n-ruby-4'
         : 'bg-n-amber-3 text-n-amber-11 hover:bg-n-amber-4'
     "
   >
-    {{
-      ticket.display_id
-        ? t('KITA_THREADS.TICKET_WITH_ID', { id: ticket.display_id })
-        : t('KITA_THREADS.TICKET')
-    }}
-    <template v-if="priority">
-      <span class="opacity-60">/</span>
-      {{ priority }}
+    <span class="i-lucide-ticket size-3.5 shrink-0" />
+    <span class="shrink-0">{{ label }}</span>
+    <template v-if="title">
+      <span class="opacity-60 shrink-0">·</span>
+      <span class="truncate">{{ title }}</span>
     </template>
   </Component>
 </template>

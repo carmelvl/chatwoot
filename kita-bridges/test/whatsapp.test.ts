@@ -176,7 +176,8 @@ test('mirror mode: an agent typing in the desk sends nothing and gets a private 
   assert.equal((await hit(body)).result, 'skip:duplicate');
   const notes = w.appPosts.slice(before);
   assert.equal(notes.length, 1);
-  assert.deepEqual(notes[0].body, { content: MIRROR_NOTE.whatsapp, message_type: 'outgoing', private: true, content_attributes: { kita_bridge_origin: true } });
+  assert.deepEqual(notes[0].body, { content: MIRROR_NOTE.whatsapp, message_type: 'outgoing', private: true,
+    content_attributes: { kita_bridge_origin: true, kita_notice: 'mirror', external_source: 'whatsapp' } });
   // the echo we mirrored comes back as an outgoing webhook: skipped, never re-noted
   assert.equal((await hit(JSON.stringify({ ...payload, id: 9999, content_attributes: { kita_bridge_origin: true } }))).result, 'skip:external_echo');
   // the old per-number route is gone

@@ -15,14 +15,12 @@ export const isOwnMessage = message =>
   senderIdOf(message) === message.currentUserId;
 
 /**
- * Chat-app alignment: only the current user's own messages sit on the right.
- * Customers, other teammates, bots and sender-less messages sit on the left.
- * With `flat` (Slack/Teams layout) every message sits on the left.
+ * Chat-app alignment on every platform (Slack/Teams included): only the
+ * current user's own messages sit on the right. Customers, other teammates,
+ * bots and sender-less messages sit on the left.
  */
 export const getMessageOrientation = message => {
   if (message.messageType === MESSAGE_TYPES.ACTIVITY) return ORIENTATION.CENTER;
-  // Slack/Teams read as a flat channel: everyone on the left, you included
-  if (message.flat) return ORIENTATION.LEFT;
   // an outgoing message still processing was sent by the current user
   if (
     message.status === MESSAGE_STATUS.PROGRESS &&
@@ -45,4 +43,19 @@ export const isKitaTeammate = message => {
   const { sender } = message;
   const attributes = sender?.customAttributes ?? sender?.custom_attributes;
   return (attributes?.kitaStaff ?? attributes?.kita_staff) === true;
+};
+
+/**
+ * An external person: anyone who isn't on the Kita side (a desk contact or a
+ * customer-side sender the bridge named), shown with an "External" tag.
+ */
+export const isExternalSender = message => {
+  if (isOwnMessage(message) || isKitaTeammate(message)) return false;
+  const type = senderTypeOf(message);
+  if (type === SENDER_TYPES.CONTACT.toLowerCase()) return true;
+  return (
+    !type &&
+    message.messageType === MESSAGE_TYPES.INCOMING &&
+    !!(message.additionalAttributes?.senderName ?? message.sender?.name)
+  );
 };

@@ -122,6 +122,12 @@ export interface MessageAttributes {
   external_thread?: { root: string };
   in_reply_to?: number;
   kita_bridge_origin?: boolean;
+  /** A bridge notice the desk renders as a full-width strip: why a reply was not sent, or the mirror reminder. */
+  kita_notice?: 'not_sent' | 'mirror';
+  /** not_sent: not_connected | not_member */
+  kita_notice_reason?: string;
+  /** not_sent + not_connected: the agent's connect link */
+  kita_connect_url?: string;
 }
 
 /** Multipart body with Rails-style nested keys (content_attributes[external_thread][root]). */

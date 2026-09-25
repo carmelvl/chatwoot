@@ -1,4 +1,8 @@
-import { getMessageOrientation, isKitaTeammate } from '../messageSide';
+import {
+  getMessageOrientation,
+  isExternalSender,
+  isKitaTeammate,
+} from '../messageSide';
 import { MESSAGE_STATUS, MESSAGE_TYPES, ORIENTATION } from '../../constants';
 
 const currentUserId = 1;
@@ -15,15 +19,18 @@ describe('messageSide', () => {
     expect(isKitaTeammate(message)).toBe(false);
   });
 
-  it('puts every message on the left in a flat (Slack/Teams) layout', () => {
+  it('puts your own message on the right on every platform, Slack/Teams included', () => {
     const own = {
       messageType: MESSAGE_TYPES.OUTGOING,
       status: MESSAGE_STATUS.SENT,
       sender: { id: 1, type: 'user' },
       currentUserId,
-      flat: true,
     };
-    expect(getMessageOrientation(own)).toBe(ORIENTATION.LEFT);
+    ['slack', 'teams', 'whatsapp', 'viber', undefined].forEach(channel => {
+      expect(
+        getMessageOrientation({ ...own, conversationChannel: channel })
+      ).toBe(ORIENTATION.RIGHT);
+    });
     expect(
       getMessageOrientation({ ...own, messageType: MESSAGE_TYPES.ACTIVITY })
     ).toBe(ORIENTATION.CENTER);
@@ -100,5 +107,33 @@ describe('messageSide', () => {
       currentUserId,
     };
     expect(getMessageOrientation(message)).toBe(ORIENTATION.CENTER);
+  });
+
+  it('marks everyone outside Kita as external', () => {
+    const contact = {
+      messageType: MESSAGE_TYPES.INCOMING,
+      sender: { id: 9, type: 'contact', name: 'Carmel', customAttributes: {} },
+      currentUserId,
+    };
+    expect(isExternalSender(contact)).toBe(true);
+    expect(
+      isExternalSender({
+        ...contact,
+        sender: { ...contact.sender, customAttributes: { kitaStaff: true } },
+      })
+    ).toBe(false);
+    expect(
+      isExternalSender({
+        messageType: MESSAGE_TYPES.INCOMING,
+        additionalAttributes: { senderName: 'Jun Lim' },
+        currentUserId,
+      })
+    ).toBe(true);
+    expect(
+      isExternalSender({ sender: { id: 1, type: 'user' }, currentUserId })
+    ).toBe(false);
+    expect(
+      isExternalSender({ sender: { id: 2, type: 'user' }, currentUserId })
+    ).toBe(false);
   });
 });

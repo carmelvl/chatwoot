@@ -80,7 +80,10 @@ const threadsByRoot = computed(() => {
 watch(
   () => [currentChat.value?.id, currentChat.value?.messages?.length],
   ([conversationId]) => {
-    if (conversationId && isBridge.value) fetchThreads(conversationId);
+    // Any Kita customer conversation has threads (and their Grip tickets),
+    // including ones merged before kita_channels was recorded
+    if (conversationId && (isBridge.value || conversationChannel.value))
+      fetchThreads(conversationId);
   },
   { immediate: true }
 );
