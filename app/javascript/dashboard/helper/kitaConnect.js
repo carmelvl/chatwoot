@@ -15,7 +15,11 @@ export const openKitaConnect = () =>
  * @param {number} now - Current time in ms
  * @returns {boolean}
  */
-export const shouldPromptKitaConnect = (status, skippedAt, now = Date.now()) => {
+export const shouldPromptKitaConnect = (
+  status,
+  skippedAt,
+  now = Date.now()
+) => {
   if (!status) return false;
 
   const linkable = [status.slack, status.teams].filter(state =>

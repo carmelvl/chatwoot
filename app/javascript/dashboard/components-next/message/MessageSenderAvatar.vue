@@ -14,11 +14,14 @@ const props = defineProps({
 const { t } = useI18n();
 
 const platformLabel = computed(() => {
-  if (!props.platform) return '';
-  const platformName = t(
-    `KITA_CONNECT.PLATFORMS.${props.platform.toUpperCase()}`
-  );
-  return t('KITA_CONNECT.SENT_VIA', { platform: platformName });
+  const names = {
+    slack: t('KITA_CONNECT.PLATFORMS.SLACK'),
+    teams: t('KITA_CONNECT.PLATFORMS.TEAMS'),
+    whatsapp: t('KITA_CONNECT.PLATFORMS.WHATSAPP'),
+    viber: t('KITA_CONNECT.PLATFORMS.VIBER'),
+  };
+  if (!names[props.platform]) return '';
+  return t('KITA_CONNECT.SENT_VIA', { platform: names[props.platform] });
 });
 </script>
 

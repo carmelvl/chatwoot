@@ -64,7 +64,6 @@ onMounted(async () => {
     openDialog(true);
   }
 });
-
 </script>
 
 <template>
