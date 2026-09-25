@@ -24,6 +24,7 @@ const {
   id,
   sender,
   senderType,
+  timeInHeader,
 } = useMessageContext();
 const { t } = useI18n();
 
@@ -93,12 +94,15 @@ const scrollToMessage = () => {
   });
 };
 
-const shouldShowMeta = computed(
+const shouldShowFooter = computed(
   () =>
     !props.hideMeta &&
     !shouldGroupWithNext.value &&
     variant.value !== MESSAGE_VARIANTS.ACTIVITY
 );
+
+// Chat layouts show the time in the header line above the bubble instead
+const shouldShowMeta = computed(() => !timeInHeader?.value);
 
 const replyToPreview = computed(() => {
   if (!inReplyTo) return '';
@@ -123,7 +127,7 @@ const replyToPreview = computed(() => {
     :class="[
       messageClass,
       {
-        'max-w-lg': variant !== MESSAGE_VARIANTS.EMAIL,
+        'max-w-full': variant !== MESSAGE_VARIANTS.EMAIL,
       },
     ]"
   >
@@ -138,18 +142,18 @@ const replyToPreview = computed(() => {
       />
     </div>
     <slot />
-    <template v-if="shouldShowMeta">
+    <template v-if="shouldShowFooter">
       <CaptainGenerationDetails
         v-if="isCaptainMessage"
         :message-id="id"
         class="mt-2"
       >
-        <template #meta>
+        <template v-if="shouldShowMeta" #meta>
           <MessageMeta :class="[emailMetaClass, metaColorClass]" />
         </template>
       </CaptainGenerationDetails>
       <MessageMeta
-        v-else
+        v-else-if="shouldShowMeta"
         :class="[flexOrientationClass, emailMetaClass, metaColorClass]"
         class="mt-2"
       />

@@ -45,6 +45,10 @@ jobs:
           app/javascript/dashboard/components/widgets/conversation/ReplyBox.vue
           app/javascript/dashboard/components-next/message/helpers/messageSide.js
           app/javascript/dashboard/components-next/message/helpers/specs/messageSide.spec.js
+          app/javascript/dashboard/components-next/message/helpers/messageLayout.js
+          app/javascript/dashboard/components-next/message/helpers/specs/messageLayout.spec.js
+          app/javascript/dashboard/components-next/message/specs/MessageLayout.spec.js
+          app/javascript/dashboard/components-next/message/MessageMeta.vue
           app/javascript/dashboard/components-next/message/bubbles/Base.vue
           app/javascript/dashboard/components-next/message/constants.js
           app/javascript/dashboard/api/kitaCustomers.js
