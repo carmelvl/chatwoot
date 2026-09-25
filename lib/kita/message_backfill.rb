@@ -27,7 +27,7 @@ module Kita::MessageBackfill
   def dispatch_create_events
     return super unless kita_backfill?
 
-    Rails.configuration.dispatcher.dispatch(MESSAGE_CREATED, Time.zone.now, message: self, performed_by: Current.executed_by)
+    Rails.configuration.dispatcher.dispatch(Events::Types::MESSAGE_CREATED, Time.zone.now, message: self, performed_by: Current.executed_by)
   end
 
   def set_conversation_activity
