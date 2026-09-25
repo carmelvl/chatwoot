@@ -26,7 +26,7 @@ class Kita::Threads
   private
 
   def replies
-    @conversation.messages.where("#{IN_REPLY_TO} ~ '^[0-9]+$'")
+    @conversation.messages.reorder(nil).where("#{IN_REPLY_TO} ~ '^[0-9]+$'")
   end
 
   # root id => [reply count, last reply at, last reply at by someone other than this agent]
