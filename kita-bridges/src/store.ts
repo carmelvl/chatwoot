@@ -37,6 +37,21 @@ export interface ChannelRow {
   lastAt: number;
 }
 
+/** History import of one channel/chat: `cursor` is the platform timestamp of the last message imported (oldest first). */
+export type BackfillState = 'running' | 'completed' | 'failed' | 'skipped_out_of_scope';
+export interface BackfillRow {
+  channelKey: string;
+  platform: Platform;
+  /** What the platform runner needs to fetch the history again (Slack channel id, Teams team/channel or chat id). */
+  ref: Record<string, unknown>;
+  state: BackfillState;
+  cursor?: string;
+  imported: number;
+  startedAt?: number;
+  completedAt?: number;
+  error?: string;
+}
+
 export interface SubscriptionRow {
   id: string;
   resource: string;
@@ -72,6 +87,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS media (token TEXT PRIMARY KEY, source_url TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS backfills (
+        channel_key TEXT PRIMARY KEY, platform TEXT NOT NULL, ref TEXT NOT NULL, state TEXT NOT NULL, cursor TEXT,
+        imported INTEGER NOT NULL DEFAULT 0, started_at INTEGER, completed_at INTEGER, error TEXT, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS graph_subscriptions (
         id TEXT PRIMARY KEY, resource TEXT NOT NULL UNIQUE, client_state TEXT NOT NULL, expires_at INTEGER NOT NULL);
     `);
@@ -192,6 +210,30 @@ export class Store {
 
   deleteKv(key: string): void {
     this.db.prepare('DELETE FROM kv WHERE key = ?').run(key);
+  }
+
+  private backfill(r: any): BackfillRow | undefined {
+    if (!r) return undefined;
+    return {
+      channelKey: r.channel_key, platform: r.platform, ref: JSON.parse(r.ref), state: r.state, imported: Number(r.imported),
+      ...(r.cursor ? { cursor: r.cursor } : {}), ...(r.started_at ? { startedAt: Number(r.started_at) } : {}),
+      ...(r.completed_at ? { completedAt: Number(r.completed_at) } : {}), ...(r.error ? { error: r.error } : {}),
+    };
+  }
+
+  getBackfill(channelKey: string): BackfillRow | undefined {
+    return this.backfill(this.db.prepare('SELECT * FROM backfills WHERE channel_key = ?').get(channelKey));
+  }
+
+  putBackfill(b: BackfillRow): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO backfills (channel_key, platform, ref, state, cursor, imported, started_at, completed_at, error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(b.channelKey, b.platform, JSON.stringify(b.ref), b.state, b.cursor ?? null, b.imported, b.startedAt ?? null, b.completedAt ?? null, b.error ?? null, Date.now());
+  }
+
+  listBackfills(state?: BackfillState): BackfillRow[] {
+    const rows = state ? this.db.prepare('SELECT * FROM backfills WHERE state = ?').all(state) : this.db.prepare('SELECT * FROM backfills').all();
+    return (rows as any[]).map((r) => this.backfill(r)!);
   }
 
   listSubscriptions(): SubscriptionRow[] {

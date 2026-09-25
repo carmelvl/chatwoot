@@ -29,7 +29,9 @@ export interface SlackParseOptions {
 export type SlackParsed =
   | { kind: 'challenge'; challenge: string }
   | { kind: 'ignore'; reason: string }
-  | { kind: 'message'; message: InboundMessage };
+  | { kind: 'message'; message: InboundMessage }
+  /** member_joined_channel. `self` = the joining user is this app's bot (undefined when the payload can't tell). */
+  | { kind: 'joined'; channel: string; user: string; self?: boolean };
 
 const ALLOWED_SUBTYPES = new Set([undefined, 'file_share', 'thread_broadcast']);
 
@@ -43,12 +45,25 @@ export function parseSlackEvent(payload: any, opts: SlackParseOptions): SlackPar
   if (payload?.type === 'url_verification') return { kind: 'challenge', challenge: String(payload.challenge ?? '') };
   if (payload?.type !== 'event_callback') return { kind: 'ignore', reason: `type:${payload?.type}` };
   const ev = payload.event ?? {};
+  const botUserIds: string[] = (payload.authorizations ?? []).filter((a: any) => a.is_bot).map((a: any) => a.user_id);
+  if (ev.type === 'member_joined_channel') {
+    if (!ev.channel || !ev.user) return { kind: 'ignore', reason: 'join_without_channel' };
+    if (opts.allowedChannels.length && !opts.allowedChannels.includes(ev.channel)) return { kind: 'ignore', reason: 'channel_not_allowed' };
+    return { kind: 'joined', channel: ev.channel, user: ev.user, self: botUserIds.length ? botUserIds.includes(ev.user) : undefined };
+  }
   if (ev.type !== 'message') return { kind: 'ignore', reason: `event:${ev.type}` };
+  return parseSlackMessage(ev, opts, botUserIds);
+}
+
+/**
+ * One Slack message object (an Events API `message` event, or an item of conversations.history /
+ * conversations.replies with `channel` added) -> normalised message. Live and history share this.
+ */
+export function parseSlackMessage(ev: any, opts: SlackParseOptions, botUserIds: string[] = []): SlackParsed {
   // Loop prevention: our own chat.postMessage echoes back as a bot message.
   if (ev.bot_id || ev.bot_profile || ev.subtype === 'bot_message') return { kind: 'ignore', reason: 'bot' };
   if (!ALLOWED_SUBTYPES.has(ev.subtype)) return { kind: 'ignore', reason: `subtype:${ev.subtype}` };
   if (!ev.user) return { kind: 'ignore', reason: 'no_user' };
-  const botUserIds = (payload.authorizations ?? []).filter((a: any) => a.is_bot).map((a: any) => a.user_id);
   if (botUserIds.includes(ev.user)) return { kind: 'ignore', reason: 'self' };
   const userTeam = ev.user_team ?? ev.team;
   // Kita staff typing directly in the shared channel: synced as outgoing agent messages, not customer ones.
@@ -79,6 +94,7 @@ export function parseSlackEvent(payload: any, opts: SlackParseOptions): SlackPar
       channelConversation: true,
       text: slackToMarkdown(ev.text ?? ''),
       attachments,
+      createdAt: Number(ev.ts),
       conversationAttributes: { channel_key: `slack:${ev.channel}`, slack_channel: ev.channel, slack_team: String(userTeam ?? '') },
     },
   };
@@ -105,6 +121,8 @@ export function markdownToSlack(text: string): string {
 
 export interface SlackProfile {
   name?: string;
+  /** Workspace of the user (users.info user.team_id): tells Kita staff from customers when a message lacks user_team. */
+  teamId?: string;
   email?: string;
   avatarUrl?: string;
 }
@@ -208,7 +226,7 @@ export class SlackSender implements Sender {
       });
       const j: any = await res.json();
       const p = j.user?.profile ?? {};
-      const profile = { name: p.real_name || p.display_name || j.user?.name || undefined, email: p.email ? String(p.email).toLowerCase() : undefined, avatarUrl: p.image_192 || p.image_72 || undefined };
+      const profile = { name: p.real_name || p.display_name || j.user?.name || undefined, teamId: j.user?.team_id || undefined, email: p.email ? String(p.email).toLowerCase() : undefined, avatarUrl: p.image_192 || p.image_72 || undefined };
       if (profile.name) this.profiles.set(userId, profile);
       return profile;
     } catch {

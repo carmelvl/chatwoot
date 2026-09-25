@@ -38,6 +38,7 @@ settings:
       - message.groups
       - message.im
       - message.mpim
+      - member_joined_channel   # history backfill when the Kita bot is added to a channel
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false

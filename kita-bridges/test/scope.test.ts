@@ -34,7 +34,7 @@ const scopeBody = (out: string[], inn: string[] = []) => ({ success: true, data:
 
 async function loadedScope(out: string[], inn: string[] = []) {
   const g = fakeGrip(scopeBody(out, inn));
-  const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'grip_test', fetchImpl: g.fetchImpl });
+  const s = new ScopeCache({ filter: true, baseUrl: GRIP, apiKey: 'grip_test', fetchImpl: g.fetchImpl });
   assert.equal(await s.refresh(), true);
   return s;
 }
@@ -43,7 +43,7 @@ async function loadedScope(out: string[], inn: string[] = []) {
 
 test('scope cache: GET {GRIP_BASE_URL}/api/v1/support/scope with the Bearer key; out_of_scope dropped, in_scope and unknown pass', async () => {
   const g = fakeGrip(scopeBody(['slack:CZED'], ['slack:CTALA']));
-  const s = new ScopeCache({ baseUrl: `${GRIP}/`, apiKey: 'grip_test', fetchImpl: g.fetchImpl });
+  const s = new ScopeCache({ filter: true, baseUrl: `${GRIP}/`, apiKey: 'grip_test', fetchImpl: g.fetchImpl });
   assert.equal(s.allows('slack:CZED'), true, 'no list yet -> allow everything');
   assert.equal(await s.refresh(), true);
   assert.deepEqual(g.calls, [{ url: `${GRIP}/api/v1/support/scope`, auth: 'Bearer grip_test' }]);
@@ -60,7 +60,7 @@ test('scope cache: GET {GRIP_BASE_URL}/api/v1/support/scope with the Bearer key;
 
 test('scope cache: fails open, keeps the last good list on HTTP errors, network errors and malformed bodies', async () => {
   const g = fakeGrip(() => { throw new Error('ECONNREFUSED'); });
-  const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
+  const s = new ScopeCache({ filter: true, baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
   assert.equal(await s.refresh(), false);
   assert.equal(s.loaded, false);
   assert.equal(s.allows('slack:CZED'), true, 'never loaded -> allow all');
@@ -87,7 +87,7 @@ test('scope cache: disabled when GRIP_* is not configured (allows all, never cal
 
 test('scope cache: start() loads now and refreshes on the interval; a channel can flip out and back in', async () => {
   const g = fakeGrip(scopeBody([]));
-  const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', refreshMs: 20, fetchImpl: g.fetchImpl });
+  const s = new ScopeCache({ filter: true, baseUrl: GRIP, apiKey: 'k', refreshMs: 20, fetchImpl: g.fetchImpl });
   assert.equal(s.refreshMs, 20);
   assert.equal(await s.start(), true);
   assert.equal(s.allows('slack:CZED'), true);
@@ -102,7 +102,7 @@ test('scope cache: start() loads now and refreshes on the interval; a channel ca
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(g.calls.length, n, 'stop() halts refreshes');
   assert.ok(n >= 3);
-  assert.equal(new ScopeCache({ baseUrl: GRIP, apiKey: 'k' }).refreshMs, 300_000, 'default 5 minutes');
+  assert.equal(new ScopeCache({ filter: true, baseUrl: GRIP, apiKey: 'k' }).refreshMs, 300_000, 'default 5 minutes');
 });
 
 test('config: GRIP_BASE_URL, GRIP_API_KEY, SCOPE_REFRESH_SECONDS', () => {
@@ -111,10 +111,20 @@ test('config: GRIP_BASE_URL, GRIP_API_KEY, SCOPE_REFRESH_SECONDS', () => {
   process.env.GRIP_API_KEY = 'grip_x';
   process.env.SCOPE_REFRESH_SECONDS = '60';
   try {
-    assert.deepEqual(loadConfig().grip, { baseUrl: 'https://grip.example', apiKey: 'grip_x', scopeRefreshMs: 60_000 });
+    assert.deepEqual(loadConfig().grip, { baseUrl: 'https://grip.example', apiKey: 'grip_x', scopeRefreshMs: 60_000, scopeFilter: false });
+    process.env.SCOPE_FILTER = 'on';
+    assert.equal(loadConfig().grip.scopeFilter, true);
   } finally {
-    for (const k of ['GRIP_BASE_URL', 'GRIP_API_KEY', 'SCOPE_REFRESH_SECONDS']) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    for (const k of ['GRIP_BASE_URL', 'GRIP_API_KEY', 'SCOPE_REFRESH_SECONDS', 'SCOPE_FILTER']) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
   }
+});
+
+test('SCOPE_FILTER off (default): out_of_scope is loaded (accounts, owners) but nothing is dropped', async () => {
+  const g = fakeGrip(scopeBody(['slack:CGAJI']));
+  const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
+  assert.equal(s.filter, false);
+  assert.equal(await s.refresh(), true);
+  assert.equal(s.allows('slack:CGAJI'), true);
 });
 
 // ---------- every inbound path, at the bridge ----------
@@ -159,6 +169,14 @@ for (const p of PATHS) {
     assert.equal(w.chatwootCalls(), 0);
   });
 
+  test(`scope/${p.name}: SCOPE_FILTER off (default) imports an out-of-scope key like any other`, async () => {
+    const g = fakeGrip(scopeBody([p.key]));
+    const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
+    await s.refresh();
+    const w = world(s);
+    assert.equal(await deliver(w.bridge, p), p.echo ? 'staff_synced' : 'created');
+  });
+
   test(`scope/${p.name}: in-scope and unknown keys pass`, async () => {
     for (const s of [await loadedScope([], [p.key]), await loadedScope(['slack:COTHER'])]) {
       const w = world(s);
@@ -168,7 +186,7 @@ for (const p of PATHS) {
   });
 
   test(`scope/${p.name}: fail-open (Grip never reachable) and disabled (no GRIP_*) both pass`, async () => {
-    const down = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', fetchImpl: (async () => { throw new Error('down'); }) as typeof fetch });
+    const down = new ScopeCache({ filter: true, baseUrl: GRIP, apiKey: 'k', fetchImpl: (async () => { throw new Error('down'); }) as typeof fetch });
     await down.refresh();
     for (const s of [down, new ScopeCache({}), undefined]) {
       const w = world(s);
@@ -179,7 +197,7 @@ for (const p of PATHS) {
 
 test('scope: an open conversation stops ingesting once its channel turns out_of_scope (and resumes if it comes back)', async () => {
   const g = fakeGrip(scopeBody([]));
-  const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
+  const s = new ScopeCache({ filter: true, baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
   await s.refresh();
   const w = world(s);
   const slack = PATHS[0];
@@ -233,7 +251,7 @@ test('scope cache: data.channels[] is exposed per channel_key (account, DRI, pha
     { channel_key: 'slack:CTALA', account_id: 42, account_name: 'Tala', in_scope: true, dri_email: 'carmel@kita.ai', dri_name: 'Carmel Limcaoco', sales_owner_email: 'rhea@kita.ai', phase: 'pilot' },
     { channel_key: 'whatsapp:+639998887777', account_id: null, in_scope: false },
   ] } });
-  const s = new ScopeCache({ baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
+  const s = new ScopeCache({ filter: true, baseUrl: GRIP, apiKey: 'k', fetchImpl: g.fetchImpl });
   await s.refresh();
   assert.deepEqual(s.channel('slack:CTALA'), {
     channel_key: 'slack:CTALA', account_id: '42', account_name: 'Tala', in_scope: true, dri_email: 'carmel@kita.ai', dri_name: 'Carmel Limcaoco',

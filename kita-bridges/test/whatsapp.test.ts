@@ -62,10 +62,10 @@ test('phone-app echo -> business echo for the customer in `to`; multiple numbers
   assert.deepEqual(b.skipped, ['echo_type:revoke']);
 });
 
-test('statuses, history, smb_app_state_sync and unknown numbers are acknowledged but not mirrored', () => {
+test('statuses, an empty history chunk, smb_app_state_sync and unknown numbers are acknowledged but not mirrored', () => {
   const { items, skipped } = parseWhatsAppWebhook(fixture('wa_statuses_history.json'), numbers);
   assert.equal(items.length, 0);
-  assert.deepEqual(skipped, ['statuses:1', 'field:history', 'field:smb_app_state_sync', 'unknown_number']);
+  assert.deepEqual(skipped, ['statuses:1', 'history:empty', 'field:smb_app_state_sync', 'unknown_number']);
 });
 
 test('media: GET /<media-id> then download the URL with the same bearer token', async () => {

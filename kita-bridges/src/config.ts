@@ -28,6 +28,16 @@ export function loadConfig() {
       baseUrl: env('GRIP_BASE_URL').replace(/\/$/, ''),
       apiKey: env('GRIP_API_KEY'),
       scopeRefreshMs: Number(env('SCOPE_REFRESH_SECONDS', '300')) * 1000,
+      /** SCOPE_FILTER=on drops Grip's out_of_scope channels (live and history). off (default): everything shows. */
+      scopeFilter: env('SCOPE_FILTER', 'off') === 'on',
+    },
+    backfill: {
+      /** BACKFILL=off disables history import on join. */
+      enabled: env('BACKFILL', 'on') !== 'off',
+      /** Only import this many days of history (0 / unset = the whole history). */
+      maxDays: Number(env('BACKFILL_MAX_DAYS', '0')) || 0,
+      /** Slack: re-check every channel the bot is in (users.conversations) this often, catching joins missed while down. */
+      reconcileMs: Number(env('BACKFILL_RECONCILE_SECONDS', '21600')) * 1000,
     },
     teamSync: {
       /** off | dry-run (default: log what would be added) | on */

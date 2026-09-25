@@ -1,9 +1,9 @@
 import { log } from './log.ts';
 
 /**
- * Which channels the desk should show, from Grip (GET /api/v1/support/scope). Accounts that are
- * paused/closed/not on Grip's Customers page come back in `out_of_scope`; their messages are dropped
- * before any Chatwoot contact or conversation exists.
+ * Grip's view of the channels (GET /api/v1/support/scope): which account and owner each belongs to.
+ * With SCOPE_FILTER=on, accounts that are paused/closed/not on Grip's Customers page (`out_of_scope`)
+ * are dropped before any Chatwoot contact or conversation exists. Off (default): nothing is dropped.
  *
  * Fails open: a failed refresh keeps the last good list, and with no list yet (or Grip not
  * configured) everything is allowed. Unknown keys (channels not linked in Grip yet) always pass.
@@ -32,6 +32,11 @@ export interface ScopeOptions {
   apiKey: string;
   refreshMs?: number;
   fetchImpl?: typeof fetch;
+  /**
+   * SCOPE_FILTER=on: channels in `out_of_scope` are dropped. Off (default): nothing is dropped; the list only
+   * maps channels to accounts and owners, and everything the Kita bot/user is in shows in the desk.
+   */
+  filter?: boolean;
   /** Called after every successful refresh (team sync runs on the same cadence). Errors are logged, never thrown. */
   onRefresh?: (inScope: string[]) => Promise<unknown> | unknown;
 }
@@ -42,6 +47,7 @@ export class ScopeCache implements ScopeCheck {
   private outOfScope: Set<string> | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   readonly enabled: boolean;
+  readonly filter: boolean;
   readonly refreshMs: number;
   generatedAt: string | undefined;
   /** Channel keys Grip lists as in scope (in_scope, plus channels[] rows with in_scope: true). */
@@ -53,6 +59,7 @@ export class ScopeCache implements ScopeCheck {
   constructor(o: Partial<ScopeOptions> = {}) {
     this.o = o;
     this.enabled = Boolean(o.baseUrl && o.apiKey);
+    this.filter = o.filter === true;
     this.refreshMs = o.refreshMs && o.refreshMs > 0 ? o.refreshMs : DEFAULT_SCOPE_REFRESH_SECONDS * 1000;
   }
 
@@ -62,7 +69,7 @@ export class ScopeCache implements ScopeCheck {
   }
 
   allows(channelKey: string | undefined): boolean {
-    if (!this.enabled || !this.outOfScope || !channelKey) return true;
+    if (!this.filter || !this.enabled || !this.outOfScope || !channelKey) return true;
     return !this.outOfScope.has(channelKey);
   }
 

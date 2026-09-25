@@ -126,7 +126,7 @@ export class Bridge {
     const { store } = this.d;
     if (this.outOfScope(msg)) return 'out_of_scope';
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
-    if (msg.echoKeys?.some((k) => store.isSeen(`in:${msg.platform}:${k}`))) return 'duplicate';
+    if (this.known(msg)) return 'duplicate';
     if (!store.markSeen(seenKey)) return 'duplicate';
     try {
       return msg.author === 'staff' ? await this.staffInbound(msg) : await this.customerInbound(msg);
@@ -134,6 +134,16 @@ export class Bridge {
       store.forget(seenKey); // allow the platform's retry to succeed
       throw e;
     }
+  }
+
+  /**
+   * Already in the desk: an echo of our own post (file ids), or a message imported before. `seen` keys are
+   * pruned after 7 days, so the permanent message map is checked too (live vs history import never duplicate).
+   */
+  private known(msg: InboundMessage): boolean {
+    const { store } = this.d;
+    if (store.getMessageByExt(msg.platform, msg.eventId)) return true;
+    return !!msg.echoKeys?.some((k) => store.isSeen(`in:${msg.platform}:${k}`) || store.getMessageByExt(msg.platform, k));
   }
 
   /** Desk contact in the Customers inbox, created on first sight; returns its source_id. */
@@ -337,6 +347,7 @@ export class Bridge {
       external_channel_key: channelKey,
       ...(t ? { external_thread: { root: t.root } } : {}),
       ...(inReplyTo ? { in_reply_to: inReplyTo } : {}),
+      ...(msg.backfill ? { kita_backfill: true, ...(msg.createdAt ? { external_created_at: msg.createdAt } : {}) } : {}),
     };
   }
 
@@ -396,7 +407,7 @@ export class Bridge {
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
     if (!desk && !o.ownerApp) return 'ignored';
     if (this.outOfScope(msg)) return 'out_of_scope';
-    if (!store.markSeen(seenKey)) return 'duplicate';
+    if (this.known(msg) || !store.markSeen(seenKey)) return 'duplicate';
     try {
       const { conv, channelKey, label } = await this.ensureConversation(msg);
       const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
@@ -483,9 +494,13 @@ export class Bridge {
       this.rememberOut(channel.channelKey, msg.text);
       const ref = root ? { ...channel.replyRef, ...threadRef(platform, root) } : topLevelRef(channel.replyRef);
       const result = await sender.send(ref, msg);
-      for (const id of result?.echoes ?? []) store.markSeen(`in:${platform}:${id}`);
       const first = result?.echoes?.find((id) => !id.startsWith('file:'));
       if (first) store.putMessage(platform, first, msg.messageId, root ?? first, channel.channelKey);
+      for (const id of result?.echoes ?? []) {
+        store.markSeen(`in:${platform}:${id}`);
+        // Kept for good (seen keys expire): a later history import must not bring our own post back in.
+        if (id !== first) store.putMessage(platform, id, msg.messageId, root ?? first ?? '', channel.channelKey);
+      }
       refused = result?.refused;
     } catch (e) {
       store.forget(seenKey);

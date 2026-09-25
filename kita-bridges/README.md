@@ -65,17 +65,40 @@ Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifica
   * Outbound, Slack uploads native files (as the agent when connected). Teams embeds images inline (`hostedContents`, up to 3 MB) and sends other files as a named link to the bridge media URL.
 * Logs contain ids only, never message bodies or tokens.
 
-## Grip scope: only Customers-page accounts reach the desk
+## Grip scope: accounts and owners (no filtering by default)
 
-The desk only shows channels whose account is on Grip's **Customers** page (Active or Pending). The bridge asks Grip which channels are out of scope and drops their messages at the door.
+**Everything the Kita bot/user is in shows up in the desk**, whatever the account's status in Grip. Grip's scope list is used to map each channel to its account and owner (DRI), not to hide anything. Linked accounts that aren't Active/Pending in Grip (paused, closed, no pilot) show under their account like any other customer; channels Grip hasn't linked yet show under **Unlinked**.
 
-* **Source.** `GET {GRIP_BASE_URL}/api/v1/support/scope` with `Authorization: Bearer {GRIP_API_KEY}` (the same `grip_` key grip-sync uses) returns `{ success, data: { in_scope, out_of_scope, generated_at } }` (a bare `{ in_scope, … }` is accepted too), lists of `channel_key`s (`slack:<channel>`, `teams:<channel or chat>`, `whatsapp:<E.164>`, `viber:<user>`). `src/scope.ts` caches it and refreshes every `SCOPE_REFRESH_SECONDS` (default 300).
-* **Where.** Every inbound path: Slack events, Teams Graph notifications, WhatsApp `messages` **and** `smb_message_echoes`, Viber. The key is the same `channel_key` the bridge stamps on the conversation. If it's in `out_of_scope`, the message is dropped before any Chatwoot contact or conversation is created (and, for Slack and WhatsApp, before the user lookup or media download). One `out_of_scope_dropped` info log with the platform and key only, never content. The platform still gets its 200/202, so it doesn't retry.
-* **Unknown keys pass.** A channel Grip hasn't linked yet isn't in either list, so it goes through and auto-link keeps working. If it then auto-links to a paused account, grip-sync resolves that conversation and labels it `out-of-scope`.
-* **Fails open.** If a refresh fails, the last good list stays in effect. With no list yet (Grip down at boot), everything is let through.
-* **Disabled** when `GRIP_BASE_URL` or `GRIP_API_KEY` is blank: everything is ingested, as before.
-* **Outbound is unchanged.** Agents can still reply in a conversation that's already in the desk.
-* **Mid-conversation changes.** Scope is checked per message, not per conversation. When an account is paused or closed in Grip, the next refresh (within `SCOPE_REFRESH_SECONDS`) puts its channel in `out_of_scope`, and **new customer messages in conversations that are already open stop arriving in the desk**; the open conversation just goes quiet. Dropped messages are not queued or replayed. If the account becomes Active or Pending again, new messages flow again from the next refresh.
+* **Source.** `GET {GRIP_BASE_URL}/api/v1/support/scope` with `Authorization: Bearer {GRIP_API_KEY}` (the same `grip_` key grip-sync uses) returns `{ success, data: { in_scope, out_of_scope, channels, generated_at } }` (a bare `{ in_scope, … }` is accepted too), lists of `channel_key`s (`slack:<channel>`, `teams:<channel or chat>`, `whatsapp:<E.164>`, `viber:<user>`). `src/scope.ts` caches it and refreshes every `SCOPE_REFRESH_SECONDS` (default 300). `channels[]` gives each channel's account, DRI and stage.
+* **`SCOPE_FILTER=off|on`, default `off`.** Off: `out_of_scope` is ignored for dropping, live and in history backfill. `on` restores the old behaviour, below. grip-sync has the same flag (default off: it never resolves or labels conversations `out-of-scope`).
+* **With `SCOPE_FILTER=on`:**
+  * Every inbound path (Slack events, Teams notifications, WhatsApp `messages`, `smb_message_echoes` and `history`, Viber) drops messages whose `channel_key` is in `out_of_scope`, before any Chatwoot contact or conversation is created (and, for Slack and WhatsApp, before the user lookup or media download). One `out_of_scope_dropped` info log with the platform and key only. The platform still gets its 200/202.
+  * A history backfill of an out-of-scope channel is recorded `skipped_out_of_scope`, and re-runs automatically after the Grip refresh that puts it in scope.
+  * Unknown keys (not linked in Grip yet) pass. Scope is checked per message: when an account is paused, new messages in its open conversations stop arriving; they come back if it's reactivated. Dropped messages are not replayed.
+* **Fails open.** If a refresh fails, the last good list stays in effect. With no list yet, everything is let through. **Disabled** when `GRIP_BASE_URL` or `GRIP_API_KEY` is blank.
+* **Outbound is unchanged.** Agents can reply in any conversation that's in the desk.
+
+## History backfill: the whole chat when Kita joins
+
+When the Kita bot (Slack) or the Kita user (Teams) is added to a channel or chat, the bridge imports that channel's **whole history** into the desk (`src/backfill.ts`), so agents see the full context from day one.
+
+* **Same path as live messages.** Every imported message goes through `Bridge.inbound`, so senders, staff vs customer, External and Kita attribution, threads (`in_reply_to`), files, labels, account linking and dedupe behave exactly as live. Unlinked channels are imported into their own unlinked conversation (they show under **Unlinked**) and merge into the customer's conversation when Grip links them, like live ones.
+* **Oldest first, original timestamps.** Messages are imported in chronological order and carry `content_attributes.kita_backfill = true` plus `external_created_at` (unix seconds the message was really sent). The desk (`lib/kita/message_backfill.rb`) uses it as the message's `created_at`, keeps the conversation's `last_activity_at` on its real latest message, and never reopens a resolved conversation, starts waiting/first-reply metrics, notifies agents, plays the new-message sound, or runs automations/hooks/bots for them. grip-sync counts them but only classifies the most recent thread, and only if its last message is under 7 days old.
+* **No duplicates.** A message's dedupe key is its platform id (Slack `channel:ts`, Teams `container:message id`, WhatsApp `wamid`), the same for live and history. The permanent `messages` map is checked as well as the 7-day `seen` keys, so a live message is never imported again by a later backfill and vice versa. The agent replies the bridge posted (text and files) are recorded too, so they never come back as history.
+* **Resumable.** SQLite `backfills` holds one row per channel: `state` (`running`, `completed`, `failed`, `skipped_out_of_scope` with `SCOPE_FILTER=on`), `cursor` (platform timestamp of the last imported message), `imported`, `started_at`, `completed_at`, `error`. An interrupted or failed run resumes from its cursor on the next reconciliation (restart or `BACKFILL_RECONCILE_SECONDS`). A completed channel is never re-imported.
+* **One channel at a time.** A small FIFO queue shares the platform rate limits.
+* **Slack.**
+  * Trigger: the `member_joined_channel` event where the joining user is the bot itself (from the event's `authorizations`, else `auth.test`).
+  * Fetch: `conversations.history` (all pages, 200 per page), then `conversations.replies` for every thread root; all merged and sorted by `ts`. `BACKFILL_MAX_DAYS` sets `oldest` (default: unlimited).
+  * Rate limits: Tier 3, one call every 1.2s (about 50 a minute); HTTP 429 / `ratelimited` waits `Retry-After` seconds and retries.
+  * Reconciliation: 10s after start and every `BACKFILL_RECONCILE_SECONDS` (default 6h), `users.conversations` lists every channel the bot is in; any channel with no backfill row is backfilled. This catches channels joined while the bridge was down, or before this feature existed (for example `#kita-gajigesa2` on the first start after deploy).
+  * Staff vs customer: from `user_team`/`team` on the message; when history omits it, from the user's workspace (`users.info` `team_id`).
+  * Scopes: the ones live messages already use (`channels:history`, `groups:history`, `channels:read`, `groups:read`, `users:read`). Only the new event subscription is needed (see Setup → Slack).
+* **Teams.** After every subscription sync (on connect and every 15 minutes), every subscribed channel and every chat the Kita user is in (`GET /users/{kita}/chats`) with no completed backfill is imported with the service account's delegated token: `GET /teams/{t}/channels/{c}/messages` + `/messages/{id}/replies`, and `GET /chats/{id}/messages`, following `@odata.nextLink`, sorted by `createdDateTime`. 429/503 wait `Retry-After`. No new permissions (`ChannelMessage.Read.All`, `Chat.Read`).
+* **WhatsApp (coexistence).** Meta gives history **only** through the one-time `history` webhook sync (up to 180 days of the Business app's chats), which is requested at onboarding (`POST /<PHONE_NUMBER_ID>/smb_app_data {"sync_type":"history"}`, within 24 hours of onboarding) and only if the business owner agreed to share history on the phone. The bridge imports those payloads through the same path (customer messages as incoming, the phone's own messages as the number owner), oldest first with their original timestamps. Nothing older, and nothing for a number onboarded without the history sync, can be fetched later.
+* **Viber** has no history API; nothing is backfilled.
+* **Settings.** `BACKFILL=on|off` (default on), `BACKFILL_MAX_DAYS` (default 0 = everything), `BACKFILL_RECONCILE_SECONDS` (default 21600).
+* **Logs.** `backfill_started`, `slack_backfill_fetched`/`teams_backfill_fetched {messages}`, `backfill_completed {imported}`, `backfill_failed {error}`, `slack_backfill_reconcile {member_of, missing}`; ids only, never content.
 
 ## Team in every customer channel (`src/teamsync.ts`)
 
@@ -189,8 +212,9 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
 2. Install to Workspace. Copy the **Bot User OAuth Token** (`xoxb-…`) → `SLACK_BOT_TOKEN`, and from Basic Information copy the **Signing Secret** → `SLACK_SIGNING_SECRET`.
 3. Put Kita's team id (`T…`, shown in the workspace URL or in `auth.test`) in `SLACK_INTERNAL_TEAM_IDS`, so staff chatter in shared channels isn't ingested. You can also limit ingestion to specific channels with `SLACK_ALLOWED_CHANNELS`.
 4. Once the bridge is live, open Event Subscriptions and confirm the Request URL shows **Verified**. The bridge answers Slack's challenge.
-5. In each customer's Slack Connect channel, run `/invite @Kita`. Some customer orgs restrict external apps in shared channels, and their admin may need to allow it.
-6. Behaviour: each channel is one Chatwoot conversation. Thread replies show as native replies to their root; an agent's "Reply to" goes into that thread, a plain reply is a new top-level message.
+5. **History backfill (new).** In the app's **Event Subscriptions → Subscribe to bot events**, add **`member_joined_channel`** and **Save Changes**; if Slack shows a banner asking to reinstall the app, click **reinstall your app** and approve. No new OAuth scopes are needed (`channels:read` / `groups:read` / `*:history` are already granted). The manifest already lists the event.
+6. In each customer's Slack Connect channel, run `/invite @Kita`. The bridge then imports the channel's whole history (see [History backfill](#history-backfill-the-whole-chat-when-kita-joins)). Some customer orgs restrict external apps in shared channels, and their admin may need to allow it.
+7. Behaviour: each channel is one Chatwoot conversation. Thread replies show as native replies to their root; an agent's "Reply to" goes into that thread, a plain reply is a new top-level message.
 
 ### 2. Microsoft Teams (Graph, as the "Kita" user; customers install nothing)
 
@@ -251,7 +275,8 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
   * otherwise as "**Carmel Limcaoco:** …" through the bridge's token.
 * **Echo types.** `revoke` and `edit` echoes aren't mirrored (the original stays).
 * **Media.** Images, video, audio, documents and stickers are fetched with `GET /<media-id>` → download URL (bearer token) and attached. If that fails, the message still arrives without the file.
-* **Ignored.** `statuses` are ignored. `history` (up to 180 days of past chats) and `smb_app_state_sync` (contacts) are **acknowledged but not imported**, so the desk starts from the day you connect. A backfill importer can be added later if needed.
+* **History.** The one-time `history` sync (up to 180 days of past chats, requested at onboarding) **is imported** through the same path, with original timestamps and `kita_backfill` (see [History backfill](#history-backfill-the-whole-chat-when-kita-joins)). WhatsApp history is limited to what Meta's history sync provides.
+* **Ignored.** `statuses` and `smb_app_state_sync` (contacts) are acknowledged but not imported.
 * **Mirror only.** Nothing typed in the desk is ever sent to WhatsApp (there is no send mode). A desk reply targeted at a WhatsApp channel (picked in the composer, or a "Reply to" on a WhatsApp message) only produces the private note *"Reply in WhatsApp yourself — this inbox is a mirror"*.
 * **Who wrote what.** Customer messages are authored by the customer contact; the teammate's phone replies are authored by their desk user when the number's entry has `agentEmail` (posted by the desk's staff endpoint), else by `agentAccessToken`, else by the bridge user as "**Owner:** …". Every message carries the WhatsApp badge (`external_source`).
 * **Security.** Webhooks are verified with the `hub.challenge` handshake (`WHATSAPP_VERIFY_TOKEN`) and the `X-Hub-Signature-256` HMAC with the Meta **app secret**. Deliveries are de-duplicated on the `wamid`, so Meta's retries are harmless.
@@ -311,7 +336,8 @@ The bridge adds those three and posts every number into the Customers inbox. Its
 ## Limitations and next steps
 * Teams non-image files go out as a link to the bridge media URL; native Teams files would need uploading to the channel's SharePoint (`Files.ReadWrite.All`).
 * Teams: files customers share live in *their* SharePoint/OneDrive; agents get the link (the Kita user can't always read cross-tenant files). Inline images are copied.
-* Teams: messages in a `missed` window, or sent while the bridge was down longer than the Graph retry window, aren't back-filled. Catch-up via delta would be the next step if this happens in practice.
+* Teams: messages in a `missed` window, or sent while the bridge was down longer than the Graph retry window, aren't replayed for a channel whose history backfill already completed. Catch-up via delta would be the next step if this happens in practice.
+* Slack: messages missed while the bridge was down in a channel that was already backfilled aren't replayed either (Slack retries events for a few hours).
 * Teams: only channels hosted in Kita's tenant are watched. Channels a customer hosts and shares *into* Kita can't be subscribed with Kita's delegated token.
 * Media links expire after `MEDIA_TTL_DAYS` (default 90). Slack files are native and don't expire.
 * Message edits and deletes aren't synced in either direction.

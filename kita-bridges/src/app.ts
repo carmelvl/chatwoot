@@ -32,6 +32,11 @@ export interface AppDeps {
   gripLinks?: GripLinks;
   /** Refresh Grip scope now and merge newly linked channels (POST /internal/link-refresh). */
   linkRefresh?: () => Promise<unknown>;
+  /**
+   * Slack member_joined_channel: `self` is true/false when the payload's authorizations tell whether the
+   * joining user is our bot, undefined otherwise. The handler backfills the channel's history when it is.
+   */
+  onSlackJoin?: (channel: string, user: string, self?: boolean) => Promise<unknown>;
 }
 
 /**
@@ -203,6 +208,7 @@ export function createHandler(d: AppDeps) {
         const parsed = parseSlackEvent(JSON.parse(raw), { botToken: cfg.slack.botToken, internalTeamIds: cfg.slack.internalTeamIds, allowedChannels: cfg.slack.allowedChannels });
         if (parsed.kind === 'challenge') return send(res, 200, { challenge: parsed.challenge });
         send(res, 200); // Slack requires an ack within 3s
+        if (parsed.kind === 'joined' && d.onSlackJoin) background('slack_join', d.onSlackJoin(parsed.channel, parsed.user, parsed.self));
         if (parsed.kind === 'message') {
           const m = parsed.message;
           if (bridge.outOfScope(m)) return; // before the Slack user lookup or any Chatwoot call

@@ -79,8 +79,9 @@ export function messageContent(m: any): { text: string; media: PendingMedia[] } 
 }
 
 /**
- * One webhook POST -> normalised customer messages and business echoes. Statuses, history and
- * smb_app_state_sync are acknowledged and counted but not mirrored (see README).
+ * One webhook POST -> normalised customer messages and business echoes. `history` (the one-time
+ * coexistence history sync Meta sends after onboarding) is imported through the same path, marked
+ * `backfill` with its original timestamps. Statuses and smb_app_state_sync are acknowledged, not mirrored.
  */
 export function parseWhatsAppWebhook(body: any, numbers: WhatsAppNumber[]) {
   const out: ParsedWhatsApp[] = [];
@@ -121,10 +122,47 @@ export function parseWhatsAppWebhook(body: any, numbers: WhatsAppNumber[]) {
           }
           out.push({ kind: 'echo', number, media: c.media, message: base(number, who, m.id, c.text) });
         }
-      } else skipped.push(`field:${change.field}`); // history, smb_app_state_sync, ...
+      } else if (change.field === 'history') {
+        if (!number) {
+          skipped.push('unknown_number');
+          continue;
+        }
+        const before = out.length;
+        out.push(...historyItems(number, v, skipped));
+        if (out.length === before) skipped.push('history:empty');
+      } else skipped.push(`field:${change.field}`); // smb_app_state_sync, ...
     }
   }
   return { items: out, skipped };
+}
+
+/**
+ * Coexistence history sync (field `history`): value.history[] chunks of threads, one per customer
+ * (thread.id = their wa_id), each with messages sent by either side. A message `from` the customer is a
+ * customer message; anything else was sent from the business phone (an echo, authored by the owner).
+ * Items come back oldest first. A chunk carrying `errors` (e.g. the business declined sharing) imports nothing.
+ */
+function historyItems(number: WhatsAppNumber, v: any, skipped: string[]): ParsedWhatsApp[] {
+  const out: (ParsedWhatsApp & { at: number })[] = [];
+  for (const chunk of Array.isArray(v.history) ? v.history : []) {
+    if (chunk?.errors?.length) skipped.push(`history_error:${chunk.errors[0]?.code ?? 'unknown'}`);
+    for (const thread of chunk?.threads ?? []) {
+      const customer = String(thread?.id ?? '');
+      if (!customer) continue;
+      for (const m of thread.messages ?? []) {
+        const c = messageContent(m);
+        if (!c || !m.id) {
+          skipped.push(`history_type:${m?.type}`);
+          continue;
+        }
+        const fromCustomer = String(m.from ?? '').replace(/^\+/, '') === customer.replace(/^\+/, '');
+        const at = Number(m.timestamp) || 0;
+        const message = { ...base(number, customer, m.id, c.text), backfill: true, ...(at ? { createdAt: at } : {}) };
+        out.push({ kind: fromCustomer ? 'customer' : 'echo', number, media: c.media, message, at });
+      }
+    }
+  }
+  return out.sort((a, b) => a.at - b.at).map(({ at: _at, ...it }) => it);
 }
 
 function base(number: WhatsAppNumber, customerWaId: string, id: string, text: string, name?: string): InboundMessage {

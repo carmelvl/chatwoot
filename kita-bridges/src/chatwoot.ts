@@ -122,6 +122,10 @@ export interface MessageAttributes {
   external_thread?: { root: string };
   in_reply_to?: number;
   kita_bridge_origin?: boolean;
+  /** Imported history: the desk skips notifications/reopen and keeps external_created_at as created_at. */
+  kita_backfill?: boolean;
+  /** Unix seconds (fractions allowed) the message was really sent; honoured by the desk for kita_backfill messages. */
+  external_created_at?: number;
 }
 
 /** Multipart body with Rails-style nested keys (content_attributes[external_thread][root]). */

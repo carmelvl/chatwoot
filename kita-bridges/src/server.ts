@@ -14,6 +14,9 @@ import { ScopeCache } from './scope.ts';
 import { GripLinks } from './griplinks.ts';
 import { teamsLabel } from './platforms/teams/labels.ts';
 import { Store } from './store.ts';
+import { Backfiller } from './backfill.ts';
+import { SlackHistory } from './platforms/slack-history.ts';
+import { teamsChannelKey } from './platforms/teams/history.ts';
 import { parseTeamSyncMode, rosterSource, SlackMembership, TeamSync, TeamsMembership } from './teamsync.ts';
 import type { Platform, Sender } from './types.ts';
 
@@ -44,11 +47,15 @@ const teamSync = new TeamSync({
 // Grip scope (fails open; disabled when GRIP_* is unset). First refresh runs in the background.
 // After each refresh: team sync, then merge newly linked channel conversations into their account's.
 let bridge: Bridge | undefined;
+let backfiller: Backfiller | undefined;
+// SCOPE_FILTER=off (default): nothing is dropped; Grip only maps channels to accounts and owners.
 const scope = new ScopeCache({
-  baseUrl: cfg.grip.baseUrl, apiKey: cfg.grip.apiKey, refreshMs: cfg.grip.scopeRefreshMs,
+  baseUrl: cfg.grip.baseUrl, apiKey: cfg.grip.apiKey, refreshMs: cfg.grip.scopeRefreshMs, filter: cfg.grip.scopeFilter,
   onRefresh: async (inScope) => {
     void teamSync.run(inScope).catch((e) => log.error('teamsync_failed', { error: String(e?.message ?? e) }));
     await bridge?.linkChannels();
+    // Channels skipped while out of scope (SCOPE_FILTER=on) are imported once they are in scope.
+    void backfiller?.rerunSkipped().catch((e) => log.error('backfill_rerun_failed', { error: String(e?.message ?? e) }));
   },
 });
 // Staff typing in Slack/Teams are posted by the desk as the matching agent; merges (shared BRIDGE_LINK_SECRET).
@@ -58,6 +65,49 @@ const labeler = teams
   ? (platform: Platform, ref: Record<string, unknown>) => (platform === 'teams' ? teamsLabel(teams.graph, ref, cfg.teams.kitaUserUpn) : Promise.resolve(undefined))
   : undefined;
 bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope, labeler });
+// History import when the Kita bot/user joins a channel or chat (Slack, Teams). WhatsApp history comes from Meta's
+// one-time `history` webhook (processed in app.ts).
+const slackHistory = slack
+  ? new SlackHistory({
+      botToken: cfg.slack.botToken,
+      parse: { botToken: cfg.slack.botToken, internalTeamIds: cfg.slack.internalTeamIds, allowedChannels: cfg.slack.allowedChannels },
+      profile: (id) => slack.userProfile(id),
+      channelName: (id) => slack.channelName(id),
+    })
+  : undefined;
+if (cfg.backfill.enabled) {
+  backfiller = new Backfiller({
+    store, scope, maxDays: cfg.backfill.maxDays,
+    deliver: (m) => bridge!.inbound(m),
+    runners: { ...(slackHistory ? { slack: slackHistory.runner } : {}), ...(teams ? { teams: teams.history.runner } : {}) },
+  });
+}
+const backfillSlack = (channel: string) => backfiller?.request('slack', `slack:${channel}`, { channel });
+/** Every channel the bot is in with no backfill recorded yet (joined while the bridge was down, or before this feature). */
+const reconcileSlack = async () => {
+  if (!backfiller || !slackHistory) return;
+  await backfiller.resumeUnfinished();
+  const channels = (await slackHistory.memberChannels()).filter((c) => !cfg.slack.allowedChannels.length || cfg.slack.allowedChannels.includes(c));
+  const missing = channels.filter((c) => !backfiller!.known(`slack:${c}`));
+  log.info('slack_backfill_reconcile', { member_of: channels.length, missing: missing.length });
+  for (const c of missing) await backfillSlack(c);
+};
+const onSlackJoin = async (channel: string, user: string, self?: boolean) => {
+  const isBot = self ?? (user === (await slackHistory?.botUserId()));
+  if (!isBot) return;
+  log.info('slack_bot_joined', { channel });
+  await backfillSlack(channel);
+};
+if (teams && backfiller) {
+  teams.onSynced = async () => {
+    for (const ref of await teams.backfillTargets()) await backfiller!.request('teams', teamsChannelKey(ref), ref);
+  };
+}
+if (backfiller && slackHistory) {
+  const run = () => reconcileSlack().catch((e) => log.error('slack_backfill_reconcile_failed', { error: String(e?.message ?? e) }));
+  setTimeout(run, 10_000).unref();
+  setInterval(run, cfg.backfill.reconcileMs).unref();
+}
 // Desk "Link to customer": Grip link, then refresh scope (which runs linkChannels) right away.
 const linkRefresh = async () => {
   if (!(await scope.refresh())) await bridge!.linkChannels();
@@ -72,7 +122,7 @@ const whatsappOwnerApps = new Map(
     .filter((n) => n.agentAccessToken && cfg.chatwootAccountId)
     .map((n) => [n.phoneNumberId, new ChatwootAppClient(cfg.chatwootBaseUrl, n.agentAccessToken!, cfg.chatwootAccountId)] as const),
 );
-const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, connect, whatsappOwnerApps, gripLinks, linkRefresh }));
+const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, connect, whatsappOwnerApps, gripLinks, linkRefresh, onSlackJoin }));
 
 // Keep Graph subscriptions alive (renewed well before the 3-day cap) and pick up newly joined channels.
 if (teams) {

@@ -44,6 +44,14 @@ export interface InboundMessage {
   echoKeys?: string[];
   /** Contact identifier override (WhatsApp: whatsapp:+E164, shared across numbers). */
   contactIdentifier?: string;
+  /** When the platform says it was sent (unix seconds). The desk keeps it as created_at for imported history. */
+  createdAt?: number;
+  /**
+   * Imported from the platform's history (Slack/Teams backfill, WhatsApp history sync), not live: the desk keeps
+   * the original timestamp and marks it content_attributes.kita_backfill (no agent notifications, no reopening,
+   * no per-message AI classification).
+   */
+  backfill?: boolean;
 }
 
 /** The Chatwoot agent who wrote a reply. Replies go out as this person where the platform allows. */

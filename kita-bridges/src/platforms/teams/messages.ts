@@ -152,7 +152,8 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
   }
   if (!text && attachments.length === 0) return { kind: 'ignore', reason: 'empty' };
 
-  const base = { platform: 'teams' as const, userKey: user.id, userName: user.displayName, text, attachments, author } as const;
+  const createdAt = m.createdDateTime ? Date.parse(m.createdDateTime) / 1000 : undefined;
+  const base = { platform: 'teams' as const, userKey: user.id, userName: user.displayName, text, attachments, author, ...(createdAt ? { createdAt } : {}) } as const;
   if (loc.kind === 'chat') {
     return {
       kind: 'message',
@@ -188,6 +189,11 @@ export async function resolveNotification(graph: Graph, classifier: SenderClassi
   const loc = n.resource ? parseResource(n.resource) : undefined;
   if (!loc) return { kind: 'ignore', reason: 'unknown_resource' };
   const m = await graph.request('GET', messagePath(loc));
+  return classifyAndParse(graph, classifier, m, loc);
+}
+
+/** Graph chatMessage -> classify the sender -> normalised message, with staff email and hosted-content auth. Live and history share it. */
+export async function classifyAndParse(graph: Graph, classifier: SenderClassifier, m: any, loc: MessageLocation): Promise<ParsedTeams> {
   const parsed = parseGraphMessage(m, loc, await classifier.classify(m?.from));
   if (parsed.kind === 'message' && parsed.message.author === 'staff') parsed.message.userEmail = classifier.email(parsed.message.userKey);
   if (parsed.kind === 'message' && parsed.message.attachments.some((a) => a.url.startsWith('https://graph.microsoft.com/'))) {

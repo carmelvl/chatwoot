@@ -6,6 +6,7 @@ import type { InboundMessage } from '../../types.ts';
 import { Graph, GraphAuth } from './graph.ts';
 import { filterNotifications, resolveNotification, SenderClassifier, TeamsSender, type GraphNotification, type TeamsMessageFormat } from './messages.ts';
 import { discoverResources, SubscriptionManager } from './subscriptions.ts';
+import { TeamsHistory, type TeamsRef } from './history.ts';
 
 export interface TeamsConfig {
   tenantId: string;
@@ -30,6 +31,8 @@ export class TeamsIntegration {
   subs: SubscriptionManager;
   classifier: SenderClassifier;
   sender: TeamsSender;
+  /** History backfill of newly discovered channels and chats. */
+  history: TeamsHistory;
   private cfg: TeamsConfig;
   private states = new Map<string, ConnectState>();
   private store: Store;
@@ -51,6 +54,7 @@ export class TeamsIntegration {
       () => discoverResources(this.graph, { kitaUserId: this.auth.kitaUserId()!, tenantId: cfg.tenantId, teamIds: cfg.teamIds, extraChannels: cfg.extraChannels }),
     );
     this.classifier = new SenderClassifier(this.graph, { kitaUserId: () => this.auth.kitaUserId(), internalTenantIds: cfg.internalTenantIds });
+    this.history = new TeamsHistory(this.graph, this.classifier);
     this.sender = new TeamsSender(this.graph, cfg.messageFormat, fetchImpl, (id) => {
       const a = this.agentAuth(id);
       return a.isConnected() ? new Graph(a, fetchImpl) : undefined;
@@ -86,12 +90,24 @@ export class TeamsIntegration {
     if (!code || !st || st.exp < Date.now()) throw new Error('invalid or expired state');
     if (st.kind === 'agent') return (await this.agentAuth(st.agentId).completeConnect(code, st.email)).upn;
     const who = await this.auth.completeConnect(code);
-    await this.subs.sync();
+    await this.sync();
     return who.upn;
   }
 
-  sync() {
-    return this.auth.isConnected() ? this.subs.sync() : Promise.resolve();
+  /** Called (not awaited) after each subscription sync: the backfill of newly discovered channels and chats. */
+  onSynced?: () => Promise<unknown>;
+
+  async sync() {
+    if (!this.auth.isConnected()) return;
+    await this.subs.sync();
+    if (this.onSynced) void this.onSynced().catch((e) => log.error('teams_backfill_discovery_failed', { error: String(e?.message ?? e) }));
+  }
+
+  /** Every channel (subscribed) and chat the Kita user is in: what the backfill should cover. Empty until connected. */
+  async backfillTargets(): Promise<TeamsRef[]> {
+    const me = this.auth.kitaUserId();
+    if (!me || !this.auth.isConnected()) return [];
+    return this.history.targets(this.store.listSubscriptions().map((s) => s.resource), me);
   }
 
   /** Trusted notifications only; each resolves to a customer message or a skip reason. */
