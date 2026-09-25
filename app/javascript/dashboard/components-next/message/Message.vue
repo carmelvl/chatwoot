@@ -22,7 +22,8 @@ import {
   CONTENT_TYPES,
 } from './constants';
 
-import Avatar from 'next/avatar/Avatar.vue';
+import MessageSenderAvatar from './MessageSenderAvatar.vue';
+import { KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
 
 import TextBubble from './bubbles/Text/Index.vue';
 import ActivityBubble from './bubbles/Activity.vue';
@@ -45,6 +46,7 @@ import WhatsappFlowResponseBubble from './bubbles/WhatsappFlowResponse.vue';
 import WhatsappReferral from './bubbles/Text/WhatsappReferral.vue';
 
 import MessageError from './MessageError.vue';
+import MessageThreadChip from './MessageThreadChip.vue';
 import ContextMenu from 'dashboard/modules/conversations/components/MessageContextMenu.vue';
 import { useBranding } from 'shared/composables/useBranding';
 
@@ -96,6 +98,9 @@ import { useBranding } from 'shared/composables/useBranding';
  * @property {string|null} [senderType=null] - The type of the sender
  * @property {string} content - The message content
  * @property {boolean} [groupWithNext=false] - Whether the message should be grouped with the next message
+ * @property {boolean} [groupWithPrevious=false] - Whether the message is grouped with the previous message
+ * @property {Object|null} [threadReplies=null] - Loaded replies to this thread root ({ count, firstReplyId })
+ * @property {string|null} [conversationChannel=null] - Kita bridge channel of the conversation (slack/teams/whatsapp/viber)
  * @property {Object|null} [inReplyTo=null] - The message to which this message is a reply
  * @property {boolean} [isEmailInbox=false] - Whether the message is from an email inbox
  * @property {number} conversationId - The ID of the conversation to which the message belongs
@@ -128,6 +133,9 @@ const props = defineProps({
   createdAt: { type: Number, required: true }, // eslint-disable-line vue/no-unused-properties
   currentUserId: { type: Number, required: true }, // eslint-disable-line vue/no-unused-properties
   groupWithNext: { type: Boolean, default: false },
+  groupWithPrevious: { type: Boolean, default: false },
+  conversationChannel: { type: String, default: null },
+  threadReplies: { type: Object, default: null },
   inboxId: { type: Number, default: null }, // eslint-disable-line vue/no-unused-properties
   inboxSupportsReplyTo: { type: Object, default: () => ({}) },
   inReplyTo: { type: Object, default: null }, // eslint-disable-line vue/no-unused-properties
@@ -255,7 +263,34 @@ const flexOrientationClass = computed(() => {
   return map[orientation.value];
 });
 
+/**
+ * Platform a Kita bridge message came from (or went out to). Bridge messages
+ * carry externalSource; desk replies fall back to the conversation channel.
+ */
+const sourcePlatform = computed(() => {
+  if (props.private || props.isEmailInbox) return null;
+  const { externalSource, externalEcho } = props.contentAttributes || {};
+  if (KITA_PLATFORMS.includes(externalSource)) return externalSource;
+  if (externalEcho || variant.value === MESSAGE_VARIANTS.BOT) return null;
+
+  const isPublicMessage = [MESSAGE_TYPES.INCOMING, MESSAGE_TYPES.OUTGOING];
+  if (!isPublicMessage.includes(props.messageType)) return null;
+  return KITA_PLATFORMS.includes(props.conversationChannel)
+    ? props.conversationChannel
+    : null;
+});
+
+const showSenderName = computed(
+  () =>
+    !!sourcePlatform.value &&
+    !props.groupWithPrevious &&
+    orientation.value !== ORIENTATION.CENTER
+);
+
 const gridClass = computed(() => {
+  if (orientation.value === ORIENTATION.LEFT && sourcePlatform.value) {
+    return 'grid grid-cols-[24px_1fr]';
+  }
   const map = {
     [ORIENTATION.LEFT]: 'grid grid-cols-1fr',
     [ORIENTATION.RIGHT]: 'grid grid-cols-[1fr_24px]',
@@ -265,12 +300,17 @@ const gridClass = computed(() => {
 });
 
 const gridTemplate = computed(() => {
+  if (orientation.value === ORIENTATION.LEFT && sourcePlatform.value) {
+    const nameRow = showSenderName.value ? '"spacer name"' : '';
+    return `${nameRow} "avatar bubble" "spacer meta"`;
+  }
   const map = {
     [ORIENTATION.LEFT]: `
       "bubble"
       "meta"
     `,
     [ORIENTATION.RIGHT]: `
+      ${showSenderName.value ? '"name spacer"' : ''}
       "bubble avatar"
       "meta spacer"
     `,
@@ -287,7 +327,7 @@ const shouldGroupWithNext = computed(() => {
 
 const shouldShowAvatar = computed(() => {
   if (props.messageType === MESSAGE_TYPES.ACTIVITY) return false;
-  if (orientation.value === ORIENTATION.LEFT) return false;
+  if (orientation.value === ORIENTATION.LEFT) return !!sourcePlatform.value;
 
   return true;
 });
@@ -581,14 +621,24 @@ provideMessageContext({
         v-tooltip.left-end="avatarTooltip"
         class="[grid-area:avatar] flex items-end"
       >
-        <Avatar v-bind="avatarInfo" :size="24" />
+        <MessageSenderAvatar v-bind="avatarInfo" :platform="sourcePlatform" />
       </div>
+      <span
+        v-if="showSenderName && avatarInfo.name"
+        class="[grid-area:name] mb-1 text-xs font-medium truncate text-n-slate-11"
+        :class="{ 'text-end': orientation === ORIENTATION.RIGHT }"
+      >
+        {{ avatarInfo.name }}
+      </span>
       <div
         class="[grid-area:bubble] flex min-w-0"
         :class="{
           'ltr:ml-8 rtl:mr-8 justify-end': orientation === ORIENTATION.RIGHT,
           'ltr:mr-8 rtl:ml-8': orientation === ORIENTATION.LEFT,
           'flex-col items-start gap-2': shouldShowWhatsappReferral,
+          'flex-col gap-1': threadReplies,
+          'items-end': threadReplies && orientation === ORIENTATION.RIGHT,
+          'items-start': threadReplies && orientation === ORIENTATION.LEFT,
         }"
         @contextmenu="openContextMenu($event)"
       >
@@ -597,6 +647,7 @@ provideMessageContext({
           :referral="contentAttributes.referral"
         />
         <Component :is="componentToRender" />
+        <MessageThreadChip v-if="threadReplies" v-bind="threadReplies" />
       </div>
       <MessageError
         v-if="contentAttributes.externalError"

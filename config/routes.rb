@@ -39,6 +39,7 @@ Rails.application.routes.draw do
   end
 
   get '/health', to: 'health#show'
+  get '/kita/connect', to: 'kita/connect#show'
   get '/robots.txt', to: 'robots#show', format: false
   get '/api', to: 'api#index'
   namespace :api, defaults: { format: 'json' } do
@@ -498,6 +499,12 @@ Rails.application.routes.draw do
       end
 
       resource :notification_subscriptions, only: [:create, :destroy]
+
+      # Kita: per-agent channel connections (kita-bridges) and bridge -> desk staff messages
+      namespace :kita do
+        resource :connections, only: [:show]
+        resources :staff_messages, only: [:create]
+      end
 
       namespace :widget do
         resource :direct_uploads, only: [:create]

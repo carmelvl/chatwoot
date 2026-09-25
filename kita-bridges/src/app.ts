@@ -115,6 +115,10 @@ export function createHandler(d: AppDeps) {
       }
       if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true, platforms: d.enabled, teamsConnected: d.teams?.auth.isConnected() ?? false });
 
+      if (d.connect && req.method === 'GET' && path === '/connect/status') {
+        const r = d.connect.statusRequest(url.searchParams, h(req, 'x-kita-bridge-secret'));
+        return send(res, r.status, r.body);
+      }
       if (d.connect && req.method === 'GET' && path === '/connect') {
         const p = d.connect.page(url.searchParams);
         return html(res, p.status, p.html);
@@ -122,7 +126,7 @@ export function createHandler(d: AppDeps) {
       const start = path.match(/^\/connect\/(slack|teams)\/start$/);
       if (d.connect && req.method === 'GET' && start) {
         const target = d.connect.start(start[1] as 'slack' | 'teams', url.searchParams);
-        if (!target) return html(res, 403, d.connect.layout('<p>This link is invalid or has expired.</p>'));
+        if (!target) return html(res, 403, d.connect.invalidLink());
         res.writeHead(302, { location: target });
         return res.end();
       }
@@ -169,7 +173,8 @@ export function createHandler(d: AppDeps) {
           background('slack_inbound', (async () => {
             const channelLabel = await d.slack?.channelName(String(m.replyRef.channel ?? ''));
             const attrs = channelLabel ? { ...m.conversationAttributes, channel_label: channelLabel } : m.conversationAttributes;
-            return bridge.inbound({ ...m, conversationAttributes: attrs, userName: (await d.slack?.userName(m.userKey)) ?? m.userKey });
+            const p = (await d.slack?.userProfile(m.userKey)) ?? {};
+            return bridge.inbound({ ...m, conversationAttributes: attrs, userName: p.name ?? m.userKey, userEmail: p.email, userAvatarUrl: p.avatarUrl });
           })());
         }
         return;

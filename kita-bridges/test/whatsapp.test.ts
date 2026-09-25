@@ -141,7 +141,7 @@ test('e2e: customer message then phone-app echo land in the same conversation (i
   assert.equal(echoes[0].token, 'BRIDGE_TOKEN');
   assert.equal(echoes[0].body.content, '**Carmel Limcaoco:** Yes Maria, approved today!');
   assert.equal(echoes[0].body.message_type, 'outgoing');
-  assert.deepEqual(echoes[0].body.content_attributes, { kita_bridge_origin: true });
+  assert.deepEqual(echoes[0].body.content_attributes, { external_source: 'whatsapp', kita_bridge_origin: true });
 });
 
 test('e2e: echo to a new customer creates the conversation; owner token -> native attribution (no prefix); media attached', async () => {

@@ -54,11 +54,15 @@ Like `kita-bridges`, it is **Node 24 + TypeScript with no dependencies**: Node s
   1. A public customer message in a non-resolved conversation (re)arms a trailing debounce: 60s after the last message, capped at 300s after the first unclassified one.
   2. The classify job skips the call if no customer message arrived since the last classification. Otherwise it sends the last 40 public messages plus any existing ticket to Claude:
      * `POST /v1/messages`, model `claude-sonnet-5`, `effort: low`;
-     * `output_config.format` = JSON schema `{is_issue, title, priority, summary}`.
-     The transcript is wrapped in `<thread>` and treated as data.
+     * `output_config.format` = JSON schema `{is_issue, is_new_issue, title, priority, summary}`.
+     The transcript is wrapped in `<thread>` and treated as data. Each line carries the sender's name (`payload.sender.name`), because kita-bridges now keeps **one conversation per Slack channel / Teams channel / Teams group chat** and many people speak in it; replies inside a Slack/Teams thread (`content_attributes.in_reply_to` or `external_thread`) are marked `(thread reply)`.
   3. If it's an issue and there's no ticket yet: `POST /support/tickets`, then a private note with the Grip link, then label `ticket`.
-  4. If a ticket exists, the same upsert updates the title, summary and priority. Priority only ever goes **up** automatically; an escalation adds a short private note. The classifier never closes tickets.
-  5. When the conversation resolves, the ticket goes to `done`. When it reopens (`open`/`pending`), the ticket goes to `todo`. Snoozed changes nothing.
+  4. **One ticket per conversation = the latest open issue.** Grip keys tickets by `chatwoot_conversation_id`, and a per-channel conversation carries many issues over time, so the single ticket always describes the most recent open issue:
+     * same issue (`is_new_issue: false`): the upsert updates title, summary and priority. Priority only ever goes **up** automatically; an escalation adds a short private note.
+     * different issue (`is_new_issue: true`): title and summary are overwritten with the new issue, and priority is **reset** to the new issue's own priority (it may go down: an urgent outage last week must not make a feature request urgent). A private note says the ticket now tracks a new issue and names the previous title, so the change is visible in the desk.
+     * The classifier never closes tickets.
+  5. When the conversation resolves, the ticket goes to `done`. **Reopening does not flip it back to `todo`** (a reopen of a per-channel conversation usually means a new issue): the next classification decides. If the new customer messages are an issue, the done ticket is overwritten with it (new title, summary and its own priority), set to `todo`, and a private "ticket reopened" note is posted. If not (thanks, chit-chat), the ticket stays `done`. A reopen by an agent with no new customer message leaves it `done`. Snoozed changes nothing.
+     Until Grip supports several tickets per conversation (contract section "Next: one ticket per issue"), a previous issue's history lives only in the Grip ticket's activity and the desk notes.
   6. When label `not-a-ticket` is added:
      * the pending classification is cancelled;
      * the ticket (if any) is PATCHed to `dismissed`;
@@ -128,7 +132,8 @@ The tests use recorded Chatwoot webhook payloads (`test/fixtures/`) and one inje
 * waiting_on;
 * debounce and its cap;
 * ticket create-once, update and escalation;
-* resolve and reopen;
+* a new distinct issue overwriting the ticket (priority reset), sender names and thread-reply markers in the transcript;
+* resolve, bare reopen (ticket stays done), and reopen by a new issue (overwrite + todo);
 * dismissal before and after a ticket exists;
 * out-of-scope resolve + label, no classification, and recovery when back in scope;
 * owner in the desk: assignment when unassigned or still on the previous DRI we set, manual reassignments kept, DRI not an agent, bot token without agents access, out-of-scope never assigned, only changed attribute values written, attribute definitions created once;

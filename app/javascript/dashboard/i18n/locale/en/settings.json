@@ -253,7 +253,8 @@
     "SUPER_ADMIN_CONSOLE": "SuperAdmin console",
     "DOCS": "Read documentation",
     "CHANGELOG": "Changelog",
-    "LOGOUT": "Log out"
+    "LOGOUT": "Log out",
+    "CONNECT_ACCOUNTS": "Connect accounts"
   },
   "APP_GLOBAL": {
     "TRIAL_MESSAGE": "days trial remaining.",
@@ -1122,5 +1123,28 @@
       "CONFIRM_BUTTON_LABEL": "Delete",
       "CANCEL_BUTTON_LABEL": "Cancel"
     }
+  },
+  "KITA_CONNECT": {
+    "TITLE": "Connect your accounts",
+    "DESCRIPTION": "Link your Slack and Teams accounts so replies you send from Kita go out under your own name.",
+    "CONNECT": "Connect",
+    "SKIP": "Skip for now",
+    "CLOSE": "Close",
+    "STATUS_UNAVAILABLE": "Connection status is unavailable right now. Try again in a moment.",
+    "PLATFORMS": {
+      "SLACK": "Slack",
+      "TEAMS": "Microsoft Teams",
+      "WHATSAPP": "WhatsApp",
+      "VIBER": "Viber"
+    },
+    "STATUS": {
+      "CONNECTED": "Connected",
+      "NOT_CONNECTED": "Not connected",
+      "UNAVAILABLE": "Not available yet"
+    },
+    "WHATSAPP_DESCRIPTION": "Your WhatsApp Business number is linked by an admin (QR scan).",
+    "WHATSAPP_NOT_LINKED": "Not linked",
+    "VIBER_DESCRIPTION": "Replies go out through the Kita Viber bot with your name. There's no personal link.",
+    "SENT_VIA": "Sent via {platform}"
   }
 }

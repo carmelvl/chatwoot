@@ -33,6 +33,24 @@ jobs:
           node-version: 24
           cache: 'pnpm'
       - run: pnpm i
+      - name: ESLint + vitest on Kita-touched frontend
+        run: >-
+          pnpm exec eslint
+          app/javascript/dashboard/api/kitaConnections.js
+          app/javascript/dashboard/helper/kitaConnect.js
+          app/javascript/dashboard/helper/specs/kitaConnect.spec.js
+          app/javascript/dashboard/components-next/kita/*.vue
+          app/javascript/dashboard/components-next/message/Message.vue
+          app/javascript/dashboard/components-next/message/MessageList.vue
+          app/javascript/dashboard/components-next/message/MessageSenderAvatar.vue
+          app/javascript/dashboard/components-next/message/MessageThreadChip.vue
+          app/javascript/dashboard/components-next/sidebar/SidebarProfileMenu.vue
+          app/javascript/dashboard/routes/dashboard/Dashboard.vue
+          app/javascript/shared/constants/busEvents.js
+          && pnpm exec vitest run app/javascript/dashboard/helper/specs/kitaConnect.spec.js
+          app/javascript/dashboard/components-next/message
+      - name: Bridge tests
+        run: cd kita-bridges && npm test
       - uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
@@ -42,6 +60,11 @@ jobs:
       - name: Kita specs + the upstream OAuth callback spec
         env:
           NODE_OPTIONS: --openssl-legacy-provider
-        run: bundle exec rspec spec/controllers/kita spec/controllers/devise/omniauth_callbacks_controller_spec.rb
+        run: >-
+          bundle exec rspec spec/controllers/kita spec/controllers/devise/omniauth_callbacks_controller_spec.rb
+          spec/controllers/public/api/v1/inbox/messages_controller_spec.rb
       - name: Rubocop on Kita-touched Ruby
-        run: bundle exec rubocop app/controllers/devise_overrides/omniauth_callbacks_controller.rb spec/controllers/kita
+        run: >-
+          bundle exec rubocop app/controllers/devise_overrides/omniauth_callbacks_controller.rb spec/controllers/kita
+          lib/kita app/controllers/kita app/controllers/api/v1/kita app/controllers/concerns/kita
+          app/controllers/public/api/v1/inboxes/messages_controller.rb

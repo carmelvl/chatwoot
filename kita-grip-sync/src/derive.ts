@@ -56,6 +56,18 @@ export function speakerOf(msg: any): Speaker | null {
   return null; // activity
 }
 
+/** Sender display name of a message_created payload (the person, even when the conversation contact is a channel). */
+export function senderName(msg: any): string | null {
+  const n = msg?.sender?.name;
+  return typeof n === 'string' && n.trim() ? n.trim().slice(0, 80) : null;
+}
+
+/** True for a reply inside a Slack/Teams thread, as marked by kita-bridges. */
+export function isThreadReply(msg: any): boolean {
+  const ca = msg?.content_attributes ?? {};
+  return ca.in_reply_to != null || ca.external_thread?.root != null;
+}
+
 export function preview(content: unknown, attachments: unknown[] = [], max = 200): string {
   const text = typeof content === 'string' ? content.replace(/\s+/g, ' ').trim() : '';
   const out = text || (attachments.length ? `[${attachments.length} attachment${attachments.length > 1 ? 's' : ''}]` : '');

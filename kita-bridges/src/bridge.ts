@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { ChatwootAppClient, ChatwootClient, downloadAttachments, toOutbound } from './chatwoot.ts';
+import { ChatwootAppClient, ChatwootClient, downloadAttachments, toOutbound, type KitaDeskClient, type MessageAttributes } from './chatwoot.ts';
 import { log } from './log.ts';
 import type { ScopeCheck } from './scope.ts';
 import type { Store } from './store.ts';
@@ -12,8 +12,10 @@ export interface BridgeDeps {
   senders: Partial<Record<Platform, Sender>>;
   /** Public base URL of the bridge, used for customer-facing /media links. */
   publicUrl: string;
-  /** Application API client: private notes, staff-typed sync, avatars. Optional. */
+  /** Application API client: private notes, staff-typed sync fallback, avatars. Optional. */
   app?: ChatwootAppClient;
+  /** Desk endpoint that posts staff messages as the matching agent (by email). Optional. */
+  desk?: KitaDeskClient;
   /** Signed per-agent connect link, included in "connect your account" notes. */
   connectLink?: (agent: AgentIdentity) => string | undefined;
   fetchImpl?: typeof fetch;
@@ -91,76 +93,101 @@ export class Bridge {
     }
   }
 
-  /** Contact (by identifier) + mapped conversation for this thread, created on first contact. */
+  /** Desk contact for a platform user (or channel), created on first sight; returns its source_id. */
+  private async ensureContact(inbox: string, platform: Platform, userKey: string, c: { identifier: string; name: string; avatarUrl?: string }) {
+    let sourceId = this.d.store.getContactSourceId(platform, userKey);
+    if (!sourceId) {
+      sourceId = await this.d.chatwoot.createContact(inbox, {
+        identifier: c.identifier,
+        name: c.name,
+        ...(c.avatarUrl ? { avatar_url: c.avatarUrl } : {}),
+        custom_attributes: { channel: platform },
+      });
+      this.d.store.putContact(platform, userKey, sourceId);
+    }
+    return sourceId;
+  }
+
+  /**
+   * Mapped conversation for this thread/chat, created on first contact. Slack/Teams channels and
+   * group chats are one conversation whose contact is the channel; a resolved one is reopened by
+   * the next message (Chatwoot reopens on incoming), never replaced.
+   */
   private async ensureConversation(msg: InboundMessage) {
     const { store, chatwoot } = this.d;
     const inbox = msg.inboxIdentifier ?? this.d.inboxes[msg.platform].inboxIdentifier;
-    let sourceId = store.getContactSourceId(msg.platform, msg.userKey);
-    if (!sourceId) {
-      sourceId = await chatwoot.createContact(inbox, {
-        identifier: msg.contactIdentifier ?? contactIdentifier(msg.platform, msg.userKey),
-        name: msg.userName || `${msg.platform} user ${msg.userKey}`,
-        custom_attributes: { channel: msg.platform },
-      });
-      store.putContact(msg.platform, msg.userKey, sourceId);
-    }
+    const owner = msg.channelConversation ? channelContact(msg) : { userKey: msg.userKey, identifier: msg.contactIdentifier ?? contactIdentifier(msg.platform, msg.userKey), name: msg.userName || `${msg.platform} user ${msg.userKey}`, avatarUrl: msg.userAvatarUrl };
+    const sourceId = await this.ensureContact(inbox, msg.platform, owner.userKey, owner);
 
     let conv = store.getByThread(msg.platform, msg.threadKey);
     let result: InboundResult = 'appended';
-    if (conv && conv.status === 'resolved' && msg.newConversationIfResolved) conv = undefined;
     if (!conv) {
       const conversationId = await chatwoot.createConversation(inbox, sourceId, { channel: msg.platform, ...msg.conversationAttributes });
       conv = { platform: msg.platform, threadKey: msg.threadKey, conversationId, sourceId, replyRef: msg.replyRef };
       result = 'created';
     } else {
-      // Keep the reply reference fresh (merge, so thread roots are never lost).
       conv = { ...conv, replyRef: { ...conv.replyRef, ...msg.replyRef } };
     }
     store.putConversation(conv);
     return { inbox, sourceId, conv, result };
   }
 
+  /** Platform, thread and native reply target recorded on every message the bridge creates. */
+  private attributes(msg: InboundMessage): MessageAttributes {
+    const t = msg.thread;
+    const inReplyTo = t?.reply ? this.d.store.getMessageByExt(msg.platform, t.root)?.deskId : undefined;
+    return { external_source: msg.platform, ...(t ? { external_thread: { root: t.root } } : {}), ...(inReplyTo ? { in_reply_to: inReplyTo } : {}) };
+  }
+
+  private remember(msg: InboundMessage, deskId: number) {
+    this.d.store.putMessage(msg.platform, msg.eventId, deskId, msg.thread?.root ?? msg.eventId);
+  }
+
   private async customerInbound(msg: InboundMessage): Promise<InboundResult> {
     const { chatwoot } = this.d;
-    const { inbox, sourceId, conv, result } = await this.ensureConversation(msg);
-
-    // A Chatwoot conversation belongs to one contact. Others joining the same Slack/Teams thread are
-    // posted under the owner contact, with their name prefixed so agents can tell who spoke.
-    const foreign = conv.sourceId !== sourceId;
+    const { inbox, conv, result } = await this.ensureConversation(msg);
+    // Channel conversations: the message is authored by the person who wrote it, not the channel contact.
+    let senderIdentifier: string | undefined;
+    if (msg.channelConversation) {
+      senderIdentifier = contactIdentifier(msg.platform, msg.userKey);
+      await this.ensureContact(inbox, msg.platform, msg.userKey, { identifier: senderIdentifier, name: msg.userName || msg.userKey, avatarUrl: msg.userAvatarUrl });
+    }
     const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
-    const content = composeInboundText(msg.text, foreign ? msg.userName ?? msg.userKey : undefined, failed.map((f) => f.url));
-    await chatwoot.createMessage(inbox, conv.sourceId, conv.conversationId, content, files, `${msg.platform}:${msg.eventId}`);
+    const content = composeInboundText(msg.text, undefined, failed.map((f) => f.url));
+    const deskId = await chatwoot.createMessage(inbox, conv.sourceId, conv.conversationId, content, files, `${msg.platform}:${msg.eventId}`, {
+      senderIdentifier,
+      contentAttributes: this.attributes(msg),
+    });
+    this.remember(msg, deskId);
     log.info('inbound', { platform: msg.platform, conversation: conv.conversationId, result, files: files.length });
     return result;
   }
 
   /**
-   * A Kita team member wrote in Slack/Teams outside the desk: mirror it into the thread's conversation
-   * as an outgoing message so the desk shows the full thread. Only for threads already mapped;
-   * marked kita_bridge_origin (and its id pre-marked) so it is never sent back out.
+   * A Kita team member wrote in Slack/Teams outside the desk: mirror it into the channel's
+   * conversation as an outgoing message authored by the matching desk agent (by email). With no
+   * matching agent it goes through the bridge's own desk user as "**Name (in Slack):** …".
+   * Either way it's marked kita_bridge_origin and its id pre-marked, so it is never sent back out.
    */
   private async staffInbound(msg: InboundMessage): Promise<InboundResult> {
-    const { store, app } = this.d;
+    const { store, app, desk } = this.d;
     if (this.isOurEcho(msg)) return 'duplicate';
-    if (!app) return 'ignored';
-    let conv = store.getByThread(msg.platform, msg.threadKey);
-    if (!conv || (conv.status === 'resolved' && msg.newConversationIfResolved)) {
-      // Kita started this thread: still a customer conversation. Its contact is the customer channel
-      // itself (e.g. "#kita-tala"), so Grip links it to the account and later customer replies join it.
-      const channelKey = msg.conversationAttributes?.channel_key ?? msg.threadKey;
-      const label = msg.conversationAttributes?.channel_label ?? channelKey;
-      ({ conv } = await this.ensureConversation({
-        ...msg,
-        userKey: `channel:${channelKey}`,
-        userName: label,
-        contactIdentifier: `${msg.platform}-channel:${channelKey}`,
-      }));
-    }
+    if (!app && !desk) return 'ignored';
+    // Kita may start the channel's conversation: its contact is still the channel ("#kita-tala").
+    const { conv } = await this.ensureConversation(msg);
     const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
-    const content = composeInboundText(msg.text, `${msg.userName ?? msg.userKey} (in ${PLATFORM_NAME[msg.platform]})`, failed.map((f) => f.url));
-    const created = await app.createMessage(conv.conversationId, { content, private: false, files });
+    const failedUrls = failed.map((f) => f.url);
+    const contentAttributes = this.attributes(msg);
+    let created = msg.userEmail && desk ? await desk.staffMessage(conv.conversationId, msg.userEmail, { content: composeInboundText(msg.text, undefined, failedUrls), files, contentAttributes }) : undefined;
+    const asAgent = Boolean(created);
+    if (!created) {
+      if (!app) return 'ignored';
+      const content = composeInboundText(msg.text, `${msg.userName ?? msg.userKey} (in ${PLATFORM_NAME[msg.platform]})`, failedUrls);
+      created = await app.createMessage(conv.conversationId, { content, private: false, files, contentAttributes });
+    }
     store.markSeen(`out:${msg.platform}:${created.id}`);
-    log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId });
+    this.remember(msg, created.id);
+    log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId, as_agent: asAgent });
     return 'staff_synced';
   }
 
@@ -180,7 +207,7 @@ export class Bridge {
       const { conv } = await this.ensureConversation(msg);
       const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
       const content = composeInboundText(msg.text, o.ownerApp ? undefined : o.ownerName, failed.map((f) => f.url));
-      const created = await app.createMessage(conv.conversationId, { content, private: false, files });
+      const created = await app.createMessage(conv.conversationId, { content, private: false, files, contentAttributes: this.attributes(msg) });
       store.markSeen(`out:${msg.platform}:${created.id}`);
       log.info('business_echo', { platform: msg.platform, conversation: conv.conversationId });
       return 'staff_synced';
@@ -244,8 +271,12 @@ export class Bridge {
         agent: platform === 'slack' ? await this.withAvatar(decision.message.agent) : decision.message.agent,
       };
       this.rememberOut(platform, conv.threadKey, msg.text);
-      const result = await sender.send(conv.replyRef, msg);
+      // "Reply to" in the desk -> that message's platform thread; otherwise a new top-level post.
+      const root = msg.inReplyTo ? this.d.store.getMessageByDesk(platform, msg.inReplyTo)?.root : undefined;
+      const result = await sender.send(root ? { ...conv.replyRef, ...threadRef(platform, root) } : topLevelRef(conv.replyRef), msg);
       for (const id of result?.echoes ?? []) this.d.store.markSeen(`in:${platform}:${id}`);
+      const first = result?.echoes?.find((id) => !id.startsWith('file:'));
+      if (first) this.d.store.putMessage(platform, first, msg.messageId, root ?? first);
       fallback = result?.fallback;
     } catch (e) {
       this.d.store.forget(seenKey);
@@ -267,6 +298,28 @@ export class Bridge {
         : `${agent.firstName}, this reply was sent from the shared Kita account because your ${name} account isn't a member of this ${platform === 'teams' ? 'channel or chat' : 'channel'}. Ask to be added, and your next replies will come from you.`;
     await this.d.app.createMessage(conversationId, { content, private: true }).catch((e) => log.warn('fallback_note_failed', { error: String(e?.message ?? e) }));
   }
+}
+
+/** The channel as a contact ("#kita-tala"): owner of a Slack/Teams channel conversation. */
+function channelContact(msg: InboundMessage) {
+  const channelKey = msg.conversationAttributes?.channel_key ?? msg.threadKey;
+  return { userKey: `channel:${channelKey}`, identifier: `${msg.platform}-channel:${channelKey}`, name: msg.conversationAttributes?.channel_label ?? channelKey };
+}
+
+/** Message id part of an eventId-format id ("<channel>:<ts>", "<teams channel id>:<message id>"). */
+const lastPart = (id: string) => id.slice(id.lastIndexOf(':') + 1);
+
+/** Reply target for a thread root: Slack thread_ts, Teams channel root message (chats have no threads). */
+function threadRef(platform: Platform, root: string): Record<string, unknown> {
+  if (platform === 'slack') return { threadTs: lastPart(root) };
+  if (platform === 'teams') return { rootId: lastPart(root) };
+  return {};
+}
+
+/** Same container, no thread: a new top-level Slack/Teams channel message. */
+function topLevelRef(ref: Record<string, unknown>): Record<string, unknown> {
+  const { threadTs: _t, rootId: _r, ...rest } = ref;
+  return rest;
 }
 
 export function composeInboundText(text: string, speaker: string | undefined, failedUrls: string[]): string {

@@ -1,4 +1,5 @@
 class Public::Api::V1::Inboxes::MessagesController < Public::Api::V1::InboxesController
+  prepend Kita::PublicMessageSender
   before_action :set_message, only: [:update]
 
   def index

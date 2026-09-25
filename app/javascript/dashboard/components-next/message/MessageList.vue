@@ -52,6 +52,21 @@ const allMessages = computed(() => {
 });
 
 const currentChat = useMapGetter('getSelectedChat');
+const conversationChannel = computed(
+  () => currentChat.value?.custom_attributes?.channel ?? null
+);
+
+// Thread replies loaded in view, keyed by root message id
+const threadReplies = computed(() => {
+  const replies = {};
+  allMessages.value.forEach(message => {
+    const rootId = message.contentAttributes?.inReplyTo;
+    if (!rootId) return;
+    replies[rootId] ??= { count: 0, firstReplyId: message.id };
+    replies[rootId].count += 1;
+  });
+  return replies;
+});
 
 // Cache for fetched reply messages to avoid duplicate API calls
 const fetchedReplyMessages = reactive(new Map());
@@ -178,6 +193,11 @@ const getInReplyToMessage = parentMessage => {
         :is-email-inbox="isAnEmailChannel"
         :in-reply-to="getInReplyToMessage(message)"
         :group-with-next="shouldGroupWithNext(index, allMessages)"
+        :group-with-previous="
+          index > 0 && shouldGroupWithNext(index - 1, allMessages)
+        "
+        :conversation-channel="conversationChannel"
+        :thread-replies="threadReplies[message.id]"
         :inbox-supports-reply-to="inboxSupportsReplyTo"
         :current-user-id="currentUserId"
         data-clarity-mask="True"

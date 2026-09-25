@@ -145,7 +145,7 @@ test('classification: Kita user and apps ignored; Kita staff -> staff messages; 
   const lookups: string[] = [];
   const { graph } = fakeGraph({
     'GET /users/guest-lee': () => (lookups.push('guest-lee'), { id: 'guest-lee', userType: 'Guest' }),
-    'GET /users/staff-sam': () => (lookups.push('staff-sam'), { id: 'staff-sam', userType: 'Member' }),
+    'GET /users/staff-sam': () => (lookups.push('staff-sam'), { id: 'staff-sam', userType: 'Member', mail: null, userPrincipalName: 'Sam@kita.ai' }),
   });
   const c = new SenderClassifier(graph, { kitaUserId: () => 'kita-user-id', internalTenantIds: ['kita-tenant'] });
   assert.equal(await c.classify({ user: { id: 'kita-user-id', tenantId: 'kita-tenant' } }), 'self');
@@ -156,6 +156,8 @@ test('classification: Kita user and apps ignored; Kita staff -> staff messages; 
   assert.equal(await c.classify({ user: { id: 'ext-no-tenant' } }), 'customer'); // 404 in Kita's directory
   assert.equal(await c.classify({ application: { id: 'some-bot' } }), 'not_a_user');
   assert.deepEqual(lookups, ['guest-lee', 'staff-sam']); // cached
+  assert.equal(c.email('staff-sam'), 'sam@kita.ai'); // UPN when there's no mail: matched to the desk agent
+  assert.equal(c.email('guest-lee'), undefined);
   for (const kind of ['self', 'not_a_user'] as const)
     assert.deepEqual(parseGraphMessage(fixture('graph_chat_message_from_kita.json'), { kind: 'chat', chatId: 'c', messageId: '1' }, kind), { kind: 'ignore', reason: kind });
   const staff = parseGraphMessage(fixture('graph_chat_message_from_kita.json'), { kind: 'chat', chatId: 'c', messageId: '1' }, 'internal');
@@ -163,27 +165,29 @@ test('classification: Kita user and apps ignored; Kita staff -> staff messages; 
   assert.deepEqual(parseGraphMessage(fixture('graph_system_event.json'), { kind: 'chat', chatId: 'c', messageId: '1' }, 'customer'), { kind: 'ignore', reason: 'type:systemEventMessage' });
 });
 
-test('channel reply -> thread keyed by root message; mention stripped; inline image + file captured', () => {
+test('channel reply -> the channel\'s conversation, thread root recorded; mention stripped; inline image + file captured', () => {
   const loc = parseResource(fixture('graph_notification_channel.json').value[0].resource)!;
   const p = parseGraphMessage(fixture('graph_channel_reply_external.json'), loc, 'customer');
   assert.equal(p.kind, 'message');
   if (p.kind !== 'message') return;
   const m = p.message;
-  assert.equal(m.threadKey, 'channel:team-acme:19:acme-shared@thread.tacv2:1790000000000');
-  assert.deepEqual(m.replyRef, { kind: 'channel', teamId: 'team-acme', channelId: '19:acme-shared@thread.tacv2', rootId: '1790000000000' });
+  assert.equal(m.threadKey, 'channel:team-acme:19:acme-shared@thread.tacv2');
+  assert.deepEqual(m.replyRef, { kind: 'channel', teamId: 'team-acme', channelId: '19:acme-shared@thread.tacv2' });
+  assert.deepEqual(m.thread, { root: '19:acme-shared@thread.tacv2:1790000000000', reply: true });
+  assert.equal(m.channelConversation, true);
   assert.equal(m.eventId, '19:acme-shared@thread.tacv2:1790000050000');
   assert.equal(m.text, 'payouts are delayed & stuck\nsee screenshot');
   assert.equal(m.userKey, 'acme-user-dana');
   assert.equal(m.userName, 'Dana Reyes');
-  assert.equal(m.newConversationIfResolved, undefined);
   assert.match(m.attachments[0].url, /hostedContents\/aWQ9eF8x\/\$value$/);
   assert.equal(m.attachments[1].url, 'https://acme.sharepoint.com/sites/x/Shared%20Documents/log.txt');
 });
 
-test('group chat -> one conversation per chat, reopened as new after resolution', () => {
+test('group chat -> one conversation per chat (reopened, not replaced, after resolution)', () => {
   const p = parseGraphMessage(fixture('graph_chat_message_guest.json'), { kind: 'chat', chatId: '19:acme-group@thread.v2', messageId: '1790000100000' }, 'customer');
   assert.equal(p.kind === 'message' && p.message.threadKey, 'chat:19:acme-group@thread.v2');
-  assert.equal(p.kind === 'message' && p.message.newConversationIfResolved, true);
+  assert.equal(p.kind === 'message' && p.message.channelConversation, true);
+  assert.equal(p.kind === 'message' && p.message.thread, undefined);
   assert.deepEqual(p.kind === 'message' && p.message.replyRef, { kind: 'chat', chatId: '19:acme-group@thread.v2' });
 });
 
@@ -229,6 +233,7 @@ test('message transforms: escaped HTML with inline hostedContents; card fallback
   assert.doesNotMatch(JSON.stringify(card), /chatwoot|active_storage|Carmel/i);
   assert.equal(sendPath({ kind: 'chat', chatId: '19:a@thread.v2' }), '/chats/19%3Aa%40thread.v2/messages');
   assert.equal(sendPath({ kind: 'channel', teamId: 'T', channelId: '19:c@thread.tacv2', rootId: '1' }), '/teams/T/channels/19%3Ac%40thread.tacv2/messages/1/replies');
+  assert.equal(sendPath({ kind: 'channel', teamId: 'T', channelId: '19:c@thread.tacv2' }), '/teams/T/channels/19%3Ac%40thread.tacv2/messages'); // new top-level post
 });
 
 const imageFetch = (async (url: any) => (String(url).startsWith('https://cw/') ? new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } }) : new Response('x', { status: 404 }))) as typeof fetch;

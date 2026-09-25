@@ -12,11 +12,16 @@ export const fixture = (name: string) => JSON.parse(raw(name));
 export function fakeChatwoot() {
   const calls: { method: string; path: string; body: any }[] = [];
   let nextConv = 100;
+  let nextMessage = 1;
   const contacts = new Map<string, string>();
   const fetchImpl = (async (input: any, init: any = {}) => {
     const url = new URL(String(input));
     let body: any = init.body;
-    if (body instanceof FormData) body = { content: body.get('content'), echo_id: body.get('echo_id'), files: body.getAll('attachments[]').map((f: any) => f.name) };
+    if (body instanceof FormData) {
+      const form = body;
+      body = { files: form.getAll('attachments[]').map((f: any) => f.name) };
+      for (const [k, v] of form.entries()) if (k !== 'attachments[]') body[k] = v;
+    }
     else if (typeof body === 'string') body = JSON.parse(body);
     calls.push({ method: init.method ?? 'GET', path: url.pathname, body });
     const p = url.pathname;
@@ -25,7 +30,7 @@ export function fakeChatwoot() {
       return Response.json({ source_id: contacts.get(body.identifier) });
     }
     if (/\/conversations$/.test(p)) return Response.json({ id: nextConv++ });
-    if (/\/messages$/.test(p)) return Response.json({ id: 1 });
+    if (/\/messages$/.test(p)) return Response.json({ id: nextMessage++ });
     // attachment downloads
     if (url.host.includes('fail')) return new Response('nope', { status: 403 });
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });

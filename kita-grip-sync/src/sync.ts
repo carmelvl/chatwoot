@@ -1,6 +1,6 @@
 import type { ChatwootApi } from './chatwoot.ts';
 import type { Classifier } from './claude.ts';
-import { chatwootUrl, conversationBody, deriveChannelKey, NOT_A_TICKET, OUT_OF_SCOPE_LABEL, platformOf, preview, speakerOf, TICKET_LABEL, toIso } from './derive.ts';
+import { chatwootUrl, conversationBody, deriveChannelKey, isThreadReply, NOT_A_TICKET, OUT_OF_SCOPE_LABEL, platformOf, preview, senderName, speakerOf, TICKET_LABEL, toIso } from './derive.ts';
 import type { GripClient } from './grip.ts';
 import { backoffMs, isRetryable } from './http.ts';
 import { log } from './log.ts';
@@ -87,7 +87,8 @@ export class Sync {
         s.lastCustomerMessageAt = !s.lastCustomerMessageAt || at > s.lastCustomerMessageAt ? at : s.lastCustomerMessageAt;
         s.lastCustomerMessageId = Math.max(s.lastCustomerMessageId, msgId);
       }
-      store.addMessage(id, { id: msgId, role: speaker, content: String(p.content ?? '') || preview(p.content, p.attachments ?? []), createdAt: at });
+      store.addMessage(id, { id: msgId, role: speaker, content: String(p.content ?? '') || preview(p.content, p.attachments ?? []), createdAt: at,
+        sender: senderName(p), threadReply: isThreadReply(p) });
     }
 
     const ticket = store.getTicket(id);
@@ -106,7 +107,9 @@ export class Sync {
     }
 
     if (ticket && !s.dismissed && ticket.status !== 'dismissed') {
-      const want = s.status === 'resolved' ? 'done' : s.status === 'open' || s.status === 'pending' ? 'todo' : null;
+      // Reopen does NOT flip a done ticket back to todo: with one conversation per channel, a reopen usually
+      // means a new issue. The next classification decides (see classify): issue -> overwrite + todo; else stays done.
+      const want = s.status === 'resolved' ? 'done' : null;
       if (want && want !== ticket.status) this.enqueueTicketStatus(id, want, now);
     }
 
@@ -239,19 +242,23 @@ export class Sync {
     // Re-read: an agent may have added not-a-ticket or resolved while Claude was thinking.
     const s = store.getConversation(id)!;
     const t = store.getTicket(id);
-    log.info('classified', { conversation: id, is_issue: result.is_issue, priority: result.priority, ticket: !!t });
+    // A done ticket (conversation was resolved, then reopened) is only a template: whatever is open now is a fresh issue.
+    const fresh = !t || t.status === 'done' || result.is_new_issue;
+    log.info('classified', { conversation: id, is_issue: result.is_issue, is_new_issue: result.is_new_issue, priority: result.priority, ticket: !!t });
     if (result.is_issue && this.eligible(s) && t?.status !== 'dismissed') {
       const url = chatwootUrl(this.d.publicUrl, s.accountId, id);
-      const priority: Priority = t && RANK[t.priority] > RANK[result.priority] ? t.priority : result.priority; // never auto-downgrade
+      // Same issue: never auto-downgrade. New issue: its own priority (the old issue's urgency doesn't carry over).
+      const priority: Priority = !fresh && t && RANK[t.priority] > RANK[result.priority] ? t.priority : result.priority;
       const title = result.title.trim() || t?.title || 'Support request';
       const summary = result.summary.trim() || t?.summary || '';
-      if (!t || t.title !== title || t.summary !== summary || t.priority !== priority) {
+      const reopen = t?.status === 'done';
+      if (!t || reopen || t.title !== title || t.summary !== summary || t.priority !== priority) {
         const r = await grip.upsertTicket({ chatwoot_conversation_id: id, title, body: ticketBody(summary, s.channelLabel, url), priority, chatwoot_url: url });
         const row: TicketRow = t
           ? { ...t, title, summary, priority, ticketId: r.ticket_id ?? t.ticketId, ticketUrl: r.ticket_url ?? t.ticketUrl }
           : { conversationId: id, ticketId: r.ticket_id, ticketUrl: r.ticket_url, title, summary, priority, status: 'todo', notePosted: false, labelAdded: false };
         store.putTicket(row);
-        log.info(t ? 'ticket_updated' : 'ticket_created', { conversation: id, ticket: row.ticketId, priority });
+        log.info(!t ? 'ticket_created' : fresh ? 'ticket_new_issue' : 'ticket_updated', { conversation: id, ticket: row.ticketId, priority, reopened: reopen });
         const now = this.now();
         // not-a-ticket landed while the ticket request was in flight: dismiss what we just created.
         if (store.getConversation(id)?.dismissed) {
@@ -259,7 +266,11 @@ export class Sync {
           return;
         }
         if (!t) store.enqueue(`announce:${id}`, 'announce', id, { runAt: now, mode: 'coalesce', now });
-        else if (RANK[priority] > RANK[t.priority])
+        else if (fresh) {
+          if (reopen) this.enqueueTicketStatus(id, 'todo', now);
+          store.enqueue(`note:${id}`, 'note', id, { runAt: now, mode: 'replace', now,
+            payload: { text: `${reopen ? 'Grip ticket reopened' : 'Grip ticket now tracks a new issue'} (${priority}): **${title}** (was: ${t.title})\n${row.ticketUrl}` } });
+        } else if (RANK[priority] > RANK[t.priority])
           store.enqueue(`note:${id}`, 'note', id, { runAt: now, mode: 'replace', now, payload: { text: `Grip ticket escalated to **${priority}** (was ${t.priority}): ${row.ticketUrl}` } });
       }
     }

@@ -68,6 +68,7 @@ export class SenderClassifier {
   private graph: Graph;
   private o: { kitaUserId: () => string | undefined; internalTenantIds: string[] };
   private cache = new Map<string, SenderKind>();
+  private emails = new Map<string, string>();
 
   constructor(graph: Graph, o: { kitaUserId: () => string | undefined; internalTenantIds: string[] }) {
     this.graph = graph;
@@ -83,8 +84,10 @@ export class SenderClassifier {
     if (hit) return hit;
     let kind: SenderKind;
     try {
-      const u = await this.graph.request('GET', `/users/${user.id}?$select=id,userType`);
+      const u = await this.graph.request('GET', `/users/${user.id}?$select=id,userType,mail,userPrincipalName`);
       kind = u.userType === 'Guest' ? 'customer' : 'internal';
+      const email = u.mail || u.userPrincipalName;
+      if (kind === 'internal' && email) this.emails.set(user.id, String(email).toLowerCase());
     } catch (e) {
       // Not in Kita's directory at all -> external; anything else: fail safe (don't ingest staff by accident).
       kind = e instanceof GraphError && e.status === 404 ? 'customer' : 'internal';
@@ -92,6 +95,11 @@ export class SenderClassifier {
     }
     this.cache.set(user.id, kind);
     return kind;
+  }
+
+  /** Mail (or UPN) of a Kita staff member seen by classify(); matched to their desk agent. */
+  email(userId: string): string | undefined {
+    return this.emails.get(userId);
   }
 }
 
@@ -154,7 +162,7 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
         threadKey: `chat:${loc.chatId}`,
         replyRef: { kind: 'chat', chatId: loc.chatId },
         conversationAttributes: { channel_key: `teams:${loc.chatId}`, teams_chat: loc.chatId },
-        newConversationIfResolved: true,
+        channelConversation: true,
       },
     };
   }
@@ -164,9 +172,12 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
     message: {
       ...base,
       eventId: teamsEventId(loc.channelId, m.id),
-      threadKey: `channel:${loc.teamId}:${loc.channelId}:${rootId}`,
-      replyRef: { kind: 'channel', teamId: loc.teamId, channelId: loc.channelId, rootId },
+      // One conversation per channel; the Teams thread is surfaced per message (thread root + native reply).
+      threadKey: `channel:${loc.teamId}:${loc.channelId}`,
+      replyRef: { kind: 'channel', teamId: loc.teamId, channelId: loc.channelId },
+      thread: { root: teamsEventId(loc.channelId, rootId), reply: rootId !== m.id },
       conversationAttributes: { channel_key: `teams:${loc.channelId}`, teams_team: loc.teamId, teams_channel: loc.channelId },
+      channelConversation: true,
     },
   };
 }
@@ -178,6 +189,7 @@ export async function resolveNotification(graph: Graph, classifier: SenderClassi
   if (!loc) return { kind: 'ignore', reason: 'unknown_resource' };
   const m = await graph.request('GET', messagePath(loc));
   const parsed = parseGraphMessage(m, loc, await classifier.classify(m?.from));
+  if (parsed.kind === 'message' && parsed.message.author === 'staff') parsed.message.userEmail = classifier.email(parsed.message.userKey);
   if (parsed.kind === 'message' && parsed.message.attachments.some((a) => a.url.startsWith('https://graph.microsoft.com/'))) {
     const token = await graph.auth.accessToken();
     parsed.message.attachments = parsed.message.attachments.map((a) =>
@@ -244,7 +256,8 @@ export function buildCardMessage(msg: OutboundMessage) {
 
 export function sendPath(ref: Record<string, unknown>): string {
   if (ref.kind === 'chat') return `/chats/${encodeURIComponent(String(ref.chatId))}/messages`;
-  return `/teams/${ref.teamId}/channels/${encodeURIComponent(String(ref.channelId))}/messages/${ref.rootId}/replies`;
+  const channel = `/teams/${ref.teamId}/channels/${encodeURIComponent(String(ref.channelId))}/messages`;
+  return ref.rootId ? `${channel}/${ref.rootId}/replies` : channel;
 }
 
 export type TeamsMessageFormat = 'auto' | 'html' | 'card';

@@ -80,7 +80,7 @@ test('debounce: a burst of customer messages is classified once, 60s after the l
   assert.equal(claude[0].headers['anthropic-version'], '2023-06-01');
   assert.equal(claude[0].body.model, 'claude-sonnet-5');
   assert.equal(claude[0].body.output_config.format.type, 'json_schema');
-  assert.deepEqual(claude[0].body.output_config.format.schema.required, ['is_issue', 'title', 'priority', 'summary']);
+  assert.deepEqual(claude[0].body.output_config.format.schema.required, ['is_issue', 'is_new_issue', 'title', 'priority', 'summary']);
   const prompt = claude[0].body.messages[0].content as string;
   assert.ok(prompt.includes('first') && prompt.includes('second') && prompt.includes('third'));
   // Nothing new since: another tick costs nothing.
@@ -156,7 +156,7 @@ test('tickets: non-issues create nothing; agent replies never trigger classifica
   assert.equal(w.of('rails').length, 0);
 });
 
-test('resolve -> ticket done; reopen -> ticket todo; conversations without tickets get no PATCH', async () => {
+test('resolve -> ticket done; a bare reopen leaves it done; conversations without tickets get no PATCH', async () => {
   const w = world();
   w.sync.ingest(fixture('conversation_resolved.json'), 'r0');
   await w.drain();
@@ -174,11 +174,74 @@ test('resolve -> ticket done; reopen -> ticket todo; conversations without ticke
   await w.drain();
   assert.equal(w.of('grip', 'PATCH').length, 1, 'already done: no repeat PATCH');
 
+  // Agent reopens with no new customer message: the done ticket stays done (reopen usually means a new issue).
   w.sync.ingest({ ...fixture('conversation_resolved.json'), status: 'open' }, 'r2');
   await w.drain();
-  patches = w.of('grip', 'PATCH');
-  assert.equal(patches.at(-1)!.body.status, 'todo');
-  assert.equal(w.tickets.get(42).status, 'todo');
+  assert.equal(w.of('grip', 'PATCH').length, 1);
+  assert.equal(w.tickets.get(42).status, 'done');
+});
+
+test('reopen by a new customer message: an issue overwrites the done ticket, resets priority, and sets it back to todo', async () => {
+  const w = world();
+  w.classifications.push({ ...ISSUE, priority: 'urgent' });
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  w.advance(60 * SEC);
+  await w.drain();
+  w.sync.ingest(fixture('conversation_resolved.json'), 'r1');
+  await w.drain();
+  assert.equal(w.tickets.get(42).status, 'done');
+
+  // Next message in the same per-channel conversation: small talk. Ticket stays done, untouched.
+  w.classifications.push(NOT_ISSUE);
+  w.sync.ingest({ ...customer(5100, 'thanks all!'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open' } }, 'd2');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.equal(w.tickets.get(42).status, 'done');
+  assert.equal(w.of('grip', 'POST', '/api/v1/support/tickets').length, 1);
+  assert.ok(w.of('anthropic').at(-1)!.body.messages[0].content.includes('Existing ticket for this conversation (resolved)'));
+
+  // Then a real new issue: same ticket row, new title/summary, its own (lower) priority, back to todo, one note.
+  w.classifications.push({ is_issue: true, is_new_issue: true, title: 'Add two users to the LOS', priority: 'medium', summary: 'Needs access for two new loan officers.' });
+  w.sync.ingest(customer(5101, 'can you add two new users?'), 'd3');
+  w.advance(60 * SEC);
+  await w.drain();
+  const t = w.tickets.get(42);
+  assert.deepEqual([t.title, t.priority, t.status], ['Add two users to the LOS', 'medium', 'todo']);
+  assert.equal(w.tickets.size, 1);
+  const notes = w.of('rails', 'POST', /\/messages$/);
+  assert.equal(notes.length, 2);
+  assert.ok(notes[1].body.private && notes[1].body.content.includes('reopened') && notes[1].body.content.includes('Add two users'));
+});
+
+test('new distinct issue on an open ticket: title/summary move to the latest issue and priority may reset', async () => {
+  const w = world();
+  w.classifications.push({ ...ISSUE, priority: 'urgent' });
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  w.advance(60 * SEC);
+  await w.drain();
+  w.classifications.push({ is_issue: true, is_new_issue: true, title: 'Export CSV of decisions', priority: 'low', summary: 'Wants a CSV export.' });
+  w.sync.ingest(customer(5200, 'separately, can we get a CSV export?'), 'd2');
+  w.advance(60 * SEC);
+  await w.drain();
+  const t = w.tickets.get(42);
+  assert.deepEqual([t.title, t.priority, t.status], ['Export CSV of decisions', 'low', 'todo']);
+  assert.equal(w.of('grip', 'PATCH').length, 0);
+  assert.ok(w.of('rails', 'POST', /\/messages$/).at(-1)!.body.content.includes('now tracks a new issue'));
+});
+
+test('per-channel conversations: transcript carries each sender and marks thread replies; waiting_on and channel_label unaffected', async () => {
+  const w = world();
+  w.classifications.push(NOT_ISSUE);
+  const base = fixture('message_incoming_slack.json');
+  w.sync.ingest(base, 'd1');
+  w.sync.ingest({ ...customer(5301, 'same here'), sender: { ...base.sender, id: 99, name: 'Ben Cruz' }, content_attributes: { in_reply_to: 5001, external_thread: { root: '1790301480.000100', reply_count: 1 } } }, 'd2');
+  w.advance(60 * SEC);
+  await w.drain();
+  const prompt = w.of('anthropic')[0].body.messages[0].content as string;
+  assert.ok(prompt.includes('CUSTOMER Maria Santos: Hi team'));
+  assert.ok(prompt.includes('(thread reply) CUSTOMER Ben Cruz: same here'));
+  const conv = w.of('grip', 'POST', '/api/v1/support/conversations').at(-1)!;
+  assert.deepEqual([conv.body.waiting_on, conv.body.channel_label, conv.body.message_count], ['kita', '#kita-acme-lending', 2]);
 });
 
 test('not-a-ticket: ticket dismissed, dismissal logged, conversation never auto-ticketed again', async () => {
@@ -427,5 +490,5 @@ test('openai classifier: strict json_schema request, parses the reply', async ()
   const c = new OpenAIClassifier({ apiKey: 'k', model: 'gpt-5-mini' }, fake);
   const r = await c.classify([{ role: 'customer', content: 'export broken', createdAt: '2026-09-25T00:00:00Z' } as any]);
   assert.equal(sent.response_format.json_schema.strict, true);
-  assert.deepEqual(r, { is_issue: true, title: 'Fix export', priority: 'high', summary: 's' });
+  assert.deepEqual(r, { is_issue: true, is_new_issue: false, title: 'Fix export', priority: 'high', summary: 's' });
 });

@@ -135,5 +135,5 @@ export function msg(name: string, patch: Record<string, unknown>) {
   return { ...fixture(name), ...patch };
 }
 
-export const ISSUE: Classification = { is_issue: true, title: 'Risk score API returning 500s', priority: 'high', summary: 'All risk score calls fail with 500 since this morning; loan officers are blocked.' };
-export const NOT_ISSUE: Classification = { is_issue: false, title: '', priority: 'low', summary: '' };
+export const ISSUE: Classification = { is_issue: true, is_new_issue: false, title: 'Risk score API returning 500s', priority: 'high', summary: 'All risk score calls fail with 500 since this morning; loan officers are blocked.' };
+export const NOT_ISSUE: Classification = { is_issue: false, is_new_issue: false, title: '', priority: 'low', summary: '' };
