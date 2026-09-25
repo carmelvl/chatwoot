@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createHandler } from '../src/app.ts';
 import { Bridge } from '../src/bridge.ts';
-import { ChatwootAppClient } from '../src/chatwoot.ts';
+import { ChatwootAppClient, KitaDeskClient } from '../src/chatwoot.ts';
 import { loadConfig } from '../src/config.ts';
 import { hmacHex } from '../src/crypto.ts';
 import { ScopeCache, type ScopeCheck } from '../src/scope.ts';
@@ -127,7 +127,8 @@ function world(scope?: ScopeCheck) {
   const appFetch = (async (_u: any, init: any) => (appPosts.push(init.body), Response.json({ id: 7000 + appPosts.length }))) as typeof fetch;
   const app = new ChatwootAppClient('http://rails:3000', 'BRIDGE_TOKEN', '1', appFetch);
   const inboxes = { slack: { inboxIdentifier: 'IN_SLACK' }, teams: { inboxIdentifier: 'IN_TEAMS' }, viber: { inboxIdentifier: 'IN_VIBER' }, whatsapp: { inboxIdentifier: '' } } as Record<Platform, { inboxIdentifier: string }>;
-  const bridge = new Bridge({ store: new Store(':memory:'), chatwoot: cw.client, inboxes, senders: {}, publicUrl: PUBLIC_URL, app, fetchImpl: cw.fetchImpl, scope });
+  const desk = new KitaDeskClient('https://support.internal.kita.ai', 's', appFetch);
+  const bridge = new Bridge({ store: new Store(':memory:'), chatwoot: cw.client, inboxes, senders: {}, publicUrl: PUBLIC_URL, app, desk, fetchImpl: cw.fetchImpl, scope });
   const chatwootCalls = () => cw.calls.filter((c) => c.path.startsWith('/public')).length + appPosts.length;
   return { bridge, cw, appPosts, chatwootCalls };
 }
@@ -149,7 +150,7 @@ const PATHS: { name: string; key: string; msg: () => InboundMessage; echo?: bool
   { name: 'whatsapp smb_message_echo', key: 'whatsapp:+639998887777', msg: () => wa('wa_echo_text.json'), echo: true },
 ];
 const deliver = (bridge: Bridge, p: (typeof PATHS)[number]) =>
-  p.echo ? bridge.businessEcho(p.msg(), { ownerName: 'Carmel Limcaoco' }) : bridge.inbound(p.msg());
+  p.echo ? bridge.businessEcho(p.msg(), { ownerName: 'Carmel Limcaoco', ownerKey: 'whatsapp:111' }) : bridge.inbound(p.msg());
 
 for (const p of PATHS) {
   test(`scope/${p.name}: out-of-scope key dropped before any Chatwoot contact or conversation`, async () => {

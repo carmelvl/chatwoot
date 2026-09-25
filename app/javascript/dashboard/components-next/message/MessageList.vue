@@ -124,7 +124,10 @@ const shouldGroupWithNext = (index, searchList) => {
 
   const nextSenderId = next.senderId ?? next.sender?.id;
   const currentSenderId = current.senderId ?? current.sender?.id;
-  const hasSameSender = nextSenderId === currentSenderId;
+  const nextSenderType = next.senderType ?? next.sender?.type;
+  const currentSenderType = current.senderType ?? current.sender?.type;
+  const hasSameSender =
+    nextSenderId === currentSenderId && nextSenderType === currentSenderType;
 
   const nextMessageType = next.messageType;
   const currentMessageType = current.messageType;

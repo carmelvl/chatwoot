@@ -102,8 +102,15 @@ function world() {
     if (String(u).startsWith('https://graph.facebook.com/')) return Response.json({ url: 'https://lookaside.fbsbx.com/m/2', mime_type: 'application/pdf' });
     return cw.fetchImpl(u, init);
   }) as typeof fetch;
-  const bridge = new Bridge({ store, chatwoot: cw.client, inboxes, senders: {}, publicUrl: PUBLIC_URL, app, fetchImpl });
-  return { cw, store, appPosts, bridge, rheaApp, fetchImpl };
+  const deskPosts: any[] = [];
+  const deskFetch = (async (_u: any, init: any) => {
+    const body = init.body instanceof FormData ? { ...Object.fromEntries([...init.body.entries()].filter(([k]) => k !== 'attachments[]')), files: init.body.getAll('attachments[]').map((f: any) => f.name) } : JSON.parse(init.body);
+    deskPosts.push(body);
+    return Response.json({ id: ++id });
+  }) as typeof fetch;
+  const desk = new KitaDeskClient('https://support.internal.kita.ai', 'link-secret', deskFetch);
+  const bridge = new Bridge({ store, chatwoot: cw.client, inboxes, senders: {}, publicUrl: PUBLIC_URL, app, desk, fetchImpl });
+  return { cw, store, appPosts, deskPosts, bridge, rheaApp, fetchImpl };
 }
 
 const cfg = loadConfig();
@@ -135,22 +142,23 @@ test('e2e: customer message then phone-app echo land in the same conversation (i
   await postSigned('/whatsapp/webhook', raw('wa_echo_text.json'));
   await postSigned('/whatsapp/webhook', raw('wa_echo_text.json')); // Meta retry
   await settle();
-  const echoes = w.appPosts.filter((p) => !p.body.private);
-  assert.equal(echoes.length, 1);
-  assert.equal(echoes[0].conv, '100'); // same conversation as the customer's message
-  assert.equal(echoes[0].token, 'BRIDGE_TOKEN');
-  assert.equal(echoes[0].body.content, '**Carmel Limcaoco:** Yes Maria, approved today!');
-  assert.equal(echoes[0].body.message_type, 'outgoing');
-  assert.deepEqual(echoes[0].body.content_attributes, { external_source: 'whatsapp', kita_bridge_origin: true });
+  assert.equal(w.appPosts.filter((p) => !p.body.private).length, 0); // never the shared bridge user
+  assert.equal(w.deskPosts.length, 1);
+  const echo = w.deskPosts[0];
+  assert.equal(echo.conversation_id, 100); // same conversation as the customer's message
+  assert.equal(echo.content, 'Yes Maria, approved today!'); // no name prefix: authored by the owner
+  assert.equal(echo.name, 'Carmel Limcaoco');
+  assert.equal(echo.staff_key, 'whatsapp:111111111111111');
+  assert.deepEqual(echo.content_attributes, { external_source: 'whatsapp' });
 });
 
-test('e2e: echo to a new customer creates the conversation; owner token -> native attribution (no prefix); media attached', async () => {
+test('e2e: echo to a new customer creates the conversation, authored by the number\'s owner; media attached', async () => {
   await postSigned('/whatsapp/webhook', raw('wa_echo_document_and_revoke.json'));
   await settle();
   assert.ok(w.cw.calls.some((c) => c.path === '/public/api/v1/inboxes/IN_WA_RHEA/contacts' && c.body.identifier === 'whatsapp:+639991112222'));
-  const rhea = w.appPosts.find((p) => p.token === 'RHEA_TOKEN')!;
-  assert.equal(rhea.body.content, "Here's the offer");
-  assert.deepEqual(rhea.body.files, ['offer.pdf']);
+  const rhea = w.deskPosts.find((p) => p.name === 'Rhea Malhotra')!;
+  assert.equal(rhea.content, "Here's the offer");
+  assert.deepEqual(rhea.files, ['offer.pdf']);
 });
 
 test('mirror mode: an agent typing in the desk sends nothing and gets a private note (once); our own echoes never loop', async () => {
@@ -181,11 +189,12 @@ test('the desk never sends on WhatsApp: the mirror note says to reply in WhatsAp
 test('phone-app echo with the owner\'s agentEmail is authored by that desk agent (no prefix, no tokens in the bridge)', async () => {
   const deskCalls: any[] = [];
   const desk = new KitaDeskClient('https://support.internal.kita.ai', 'link-secret', (async (_u: any, init: any) => (deskCalls.push(JSON.parse(init.body)), Response.json({ id: 8100 }))) as typeof fetch);
+  process.env.EMAIL_DOMAIN_ALIASES = 'usekita.com=kita.ai';
   const cw = fakeChatwoot();
   const store = new Store(':memory:');
   const bridge = new Bridge({ store, chatwoot: cw.client, inboxes: {} as any, senders: {}, publicUrl: PUBLIC_URL, desk, fetchImpl: cw.fetchImpl });
   const echo = parseWhatsAppWebhook(fixture('wa_echo_text.json'), numbers).items.find((i) => i.kind === 'echo')!;
-  assert.equal(await bridge.businessEcho({ ...echo.message, attachments: [] }, { ownerName: 'Carmel Limcaoco', ownerEmail: 'carmel@kita.ai' }), 'staff_synced');
+  assert.equal(await bridge.businessEcho({ ...echo.message, attachments: [] }, { ownerName: 'Carmel Limcaoco', ownerEmail: 'carmel@kita.ai', ownerKey: 'whatsapp:111' }), 'staff_synced');
   assert.equal(deskCalls[0].email, 'carmel@kita.ai');
   assert.equal(deskCalls[0].content, 'Yes Maria, approved today!');
   assert.equal(deskCalls[0].content_attributes.external_source, 'whatsapp');

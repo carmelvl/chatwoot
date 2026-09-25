@@ -1,3 +1,4 @@
+import { normalizeEmail } from '../../email.ts';
 import { seal, unseal } from '../../crypto.ts';
 import { log } from '../../log.ts';
 import type { Store } from '../../store.ts';
@@ -123,8 +124,8 @@ export class GraphAuth {
   async completeConnect(code: string, expected = this.cfg.kitaUserUpn): Promise<{ userId: string; upn: string }> {
     await this.tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: this.cfg.redirectUri });
     const me: any = await this.graphJson('GET', '/me?$select=id,userPrincipalName,mail');
-    const ids = [me.userPrincipalName, me.mail].filter(Boolean).map((x: string) => x.toLowerCase());
-    if (!ids.includes(expected.toLowerCase())) {
+    const ids = [me.userPrincipalName, me.mail].filter(Boolean).map((x: string) => normalizeEmail(x));
+    if (!ids.includes(normalizeEmail(expected))) {
       this.store.deleteKv(this.refreshKey);
       this.access = undefined;
       throw new Error(`signed in as ${me.userPrincipalName}, expected ${expected}`);

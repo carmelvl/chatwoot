@@ -188,10 +188,20 @@ export class ChatwootAppClient {
 
 }
 
+/** Who a staff message is from: matched to a desk agent by email, else shown as themselves (Kita staff contact). */
+export interface StaffIdentity {
+  email?: string;
+  /** Stable platform id, e.g. "slack:U123" (the staff contact's identity when there's no desk agent). */
+  staffKey: string;
+  name: string;
+  avatarUrl?: string;
+}
+
 /**
- * Kita desk endpoint for staff who typed directly in Slack/Teams: the desk posts the message as the
- * agent whose email matches, so it's authored by them natively. The bridge never holds agent tokens.
- * Returns undefined when no desk agent has that email (the caller falls back to its own client).
+ * Kita desk endpoint for Kita teammates writing directly in Slack/Teams (or from their WhatsApp phone):
+ * the desk posts the message authored by the matching agent (email, with EMAIL_DOMAIN_ALIASES), or, with
+ * no desk account, by a Kita-staff contact with their own name and avatar. Never the shared bridge user,
+ * and the bridge never holds agent tokens.
  */
 export class KitaDeskClient {
   private url: string;
@@ -206,18 +216,17 @@ export class KitaDeskClient {
 
   async staffMessage(
     conversationId: number,
-    email: string,
+    who: StaffIdentity,
     m: { content: string; files?: { blob: Blob; name: string }[]; contentAttributes?: MessageAttributes },
-  ): Promise<{ id: number } | undefined> {
-    const fields = { conversation_id: conversationId, email, content: m.content, content_attributes: m.contentAttributes };
+  ): Promise<{ id: number }> {
+    const fields = {
+      conversation_id: conversationId, email: who.email, staff_key: who.staffKey, name: who.name, avatar_url: who.avatarUrl,
+      content: m.content, content_attributes: m.contentAttributes,
+    };
     const init: RequestInit = m.files?.length
       ? { method: 'POST', body: toForm(fields, m.files), headers: { 'x-kita-bridge-secret': this.secret } }
       : { method: 'POST', body: JSON.stringify(fields), headers: { 'content-type': 'application/json', 'x-kita-bridge-secret': this.secret } };
     const res = await this.fetchImpl(this.url, init);
-    if (res.status === 404) {
-      const j: any = await res.json().catch(() => ({}));
-      if (j?.error === 'no_agent') return undefined;
-    }
     if (!res.ok) throw new Error(`kita desk staff_messages -> ${res.status}`);
     const j: any = await res.json();
     return { id: Number(j.id) };

@@ -1,5 +1,6 @@
 import { hmacHex, safeEqual } from '../crypto.ts';
 import { seal, unseal } from '../crypto.ts';
+import { normalizeEmail } from '../email.ts';
 import { log } from '../log.ts';
 import type { Store } from '../store.ts';
 import type { InboundMessage, OutboundMessage, Sender, SendResult } from '../types.ts';
@@ -268,7 +269,7 @@ export class SlackUserOAuth {
     if (!j.ok || !user?.access_token) throw new Error(`slack oauth: ${j.error ?? 'no user token'}`);
     const info: any = await (await this.fetchImpl(`https://slack.com/api/users.info?user=${encodeURIComponent(user.id)}`, { headers: { authorization: `Bearer ${this.cfg.botToken}` } })).json();
     const slackEmail = String(info.user?.profile?.email ?? '').toLowerCase();
-    if (slackEmail !== email.toLowerCase()) throw new Error(`signed in to Slack as ${slackEmail || 'unknown'}, expected ${email}`);
+    if (normalizeEmail(slackEmail) !== normalizeEmail(email)) throw new Error(`signed in to Slack as ${slackEmail || 'unknown'}, expected ${email}`);
     this.store.putKv(`slack.agent.${agentId}.token`, seal(this.cfg.encryptionKey, user.access_token));
     this.store.putKv(`slack.agent.${agentId}.user_id`, user.id);
     return slackEmail;

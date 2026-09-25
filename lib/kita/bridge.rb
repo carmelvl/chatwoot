@@ -51,6 +51,19 @@ module Kita::Bridge
     attrs.compact_blank
   end
 
+  # Kita's old email domain maps to the current one (EMAIL_DOMAIN_ALIASES="usekita.com=kita.ai,..."),
+  # so a Slack/Teams account on suraaj@usekita.com matches the desk agent suraaj@kita.ai.
+  def normalize_email(email)
+    local, domain = email.to_s.strip.downcase.split('@', 2)
+    return local.to_s if domain.nil?
+
+    "#{local}@#{domain_aliases.fetch(domain, domain)}"
+  end
+
+  def domain_aliases
+    ENV.fetch('EMAIL_DOMAIN_ALIASES', 'usekita.com=kita.ai').split(',').to_h { |pair| pair.strip.downcase.split('=', 2) }
+  end
+
   def valid_secret?(given)
     given.present? && ActiveSupport::SecurityUtils.secure_compare(given, secret)
   end

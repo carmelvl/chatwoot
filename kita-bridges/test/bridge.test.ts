@@ -202,8 +202,8 @@ test('store survives restart (file-backed)', async () => {
 });
 
 test('composeInboundText', () => {
-  assert.equal(composeInboundText('hi', undefined, []), 'hi');
-  assert.equal(composeInboundText('', 'Ben', ['https://x']), '**Ben:** \n\nAttachments (not copied):\n- https://x');
+  assert.equal(composeInboundText('hi', []), 'hi');
+  assert.equal(composeInboundText('', ['https://x']), 'Attachments (not copied):\n- https://x');
 });
 
 test('every platform stamps channel_key on the conversation (Grip sync contract)', () => {

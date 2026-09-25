@@ -38,13 +38,31 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
     expect(response.body).not_to include('access_token')
   end
 
-  it 'returns no_agent when nobody in the Kita account has that email' do
+  it 'matches across Kita email domain aliases (usekita.com is kita.ai)' do
+    post '/api/v1/kita/staff_messages', params: params.merge(email: 'SAM.LEE@usekita.com'), headers: { 'X-Kita-Bridge-Secret' => secret }
+    expect(conversation.messages.outgoing.last.sender).to eq(agent)
+  end
+
+  it 'posts a teammate with no desk account as themselves (a Kita staff contact), never the bridge user' do
     create(:user, email: 'outsider@kita.ai')
+    staff = params.merge(email: 'outsider@kita.ai', staff_key: 'slack:U_SURAAJ', name: 'Suraaj Samanta')
     expect do
-      post '/api/v1/kita/staff_messages', params: params.merge(email: 'outsider@kita.ai'), headers: { 'X-Kita-Bridge-Secret' => secret }
-    end.not_to change(Message, :count)
-    expect(response).to have_http_status(:not_found)
-    expect(response.parsed_body).to eq('error' => 'no_agent')
+      post '/api/v1/kita/staff_messages', params: staff, headers: { 'X-Kita-Bridge-Secret' => secret }
+    end.to change(account.contacts, :count).by(1)
+
+    message = conversation.messages.outgoing.last
+    expect(response.parsed_body).to include('sender_type' => 'Contact')
+    expect(message.sender).to have_attributes(name: 'Suraaj Samanta', identifier: 'kita-staff:slack:U_SURAAJ')
+    expect(message.sender.custom_attributes).to eq('kita_staff' => true)
+    expect(message.content).to eq('On it')
+  end
+
+  it 'reuses the staff contact for the same teammate' do
+    staff = params.except(:email).merge(staff_key: 'slack:U_SURAAJ', name: 'Suraaj Samanta')
+    post '/api/v1/kita/staff_messages', params: staff, headers: { 'X-Kita-Bridge-Secret' => secret }
+    expect do
+      post '/api/v1/kita/staff_messages', params: staff, headers: { 'X-Kita-Bridge-Secret' => secret }
+    end.not_to change(Contact, :count)
   end
 
   it 'only reaches conversations in the Kita account' do

@@ -23,6 +23,7 @@ import {
 } from './constants';
 
 import MessageSenderAvatar from './MessageSenderAvatar.vue';
+import { getMessageOrientation, isKitaTeammate } from './helpers/messageSide';
 import { KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
 
 import TextBubble from './bubbles/Text/Index.vue';
@@ -131,7 +132,7 @@ const props = defineProps({
   },
   conversationId: { type: Number, required: true },
   createdAt: { type: Number, required: true }, // eslint-disable-line vue/no-unused-properties
-  currentUserId: { type: Number, required: true }, // eslint-disable-line vue/no-unused-properties
+  currentUserId: { type: Number, required: true },
   groupWithNext: { type: Boolean, default: false },
   groupWithPrevious: { type: Boolean, default: false },
   conversationChannel: { type: String, default: null },
@@ -165,9 +166,11 @@ const isCaptainMessage = computed(() => {
   return senderType === SENDER_TYPES.CAPTAIN_ASSISTANT;
 });
 
+const isTeammateMessage = computed(() => isKitaTeammate(props));
+
 /**
  * Computes the message variant based on props
- * @type {import('vue').ComputedRef<'user'|'agent'|'activity'|'private'|'bot'|'template'>}
+ * @type {import('vue').ComputedRef<'user'|'agent'|'activity'|'private'|'bot'|'template'|'teammate'>}
  */
 const variant = computed(() => {
   if (props.private) return MESSAGE_VARIANTS.PRIVATE;
@@ -191,6 +194,8 @@ const variant = computed(() => {
     return MESSAGE_VARIANTS.AGENT;
   }
 
+  if (isTeammateMessage.value) return MESSAGE_VARIANTS.TEAMMATE;
+
   const isBot =
     props.sender?.type === SENDER_TYPES.AGENT_BOT ||
     props.senderType === SENDER_TYPES.AGENT_BOT ||
@@ -209,49 +214,15 @@ const variant = computed(() => {
   return variants[props.messageType] || MESSAGE_VARIANTS.USER;
 });
 
-const isBotOrAgentMessage = computed(() => {
-  if (props.messageType === MESSAGE_TYPES.ACTIVITY) {
-    return false;
-  }
-  // if an outgoing message is still processing, then it's definitely a
-  // message sent by the current user
-  if (
-    props.status === MESSAGE_STATUS.PROGRESS &&
-    props.messageType === MESSAGE_TYPES.OUTGOING
-  ) {
-    return true;
-  }
-  const senderId = props.senderId ?? props.sender?.id;
-  const senderType = props.sender?.type ?? props.senderType;
-
-  if (!senderType || !senderId) {
-    return true;
-  }
-
-  if (
-    [SENDER_TYPES.AGENT_BOT, SENDER_TYPES.CAPTAIN_ASSISTANT].includes(
-      senderType
-    )
-  ) {
-    return true;
-  }
-
-  return senderType.toLowerCase() === SENDER_TYPES.USER.toLowerCase();
-});
-
 /**
- * Computes the message orientation based on sender type and message type
+ * Chat-app alignment: only the current user's own messages sit on the right
  * @returns {import('vue').ComputedRef<'left'|'right'|'center'>} The computed orientation
  */
-const orientation = computed(() => {
-  if (isBotOrAgentMessage.value) {
-    return ORIENTATION.RIGHT;
-  }
+const orientation = computed(() => getMessageOrientation(props));
 
-  if (props.messageType === MESSAGE_TYPES.ACTIVITY) return ORIENTATION.CENTER;
-
-  return ORIENTATION.LEFT;
-});
+const isBotOrAgentMessage = computed(
+  () => orientation.value === ORIENTATION.RIGHT
+);
 
 const flexOrientationClass = computed(() => {
   const map = {
@@ -280,15 +251,22 @@ const sourcePlatform = computed(() => {
     : null;
 });
 
+// Left-side messages carry avatar + name, except email bubbles (full width)
+const showLeftAvatar = computed(
+  () =>
+    orientation.value === ORIENTATION.LEFT &&
+    variant.value !== MESSAGE_VARIANTS.EMAIL
+);
+
 const showSenderName = computed(
   () =>
-    !!sourcePlatform.value &&
-    !props.groupWithPrevious &&
-    orientation.value !== ORIENTATION.CENTER
+    (showLeftAvatar.value ||
+      (!!sourcePlatform.value && orientation.value === ORIENTATION.RIGHT)) &&
+    !props.groupWithPrevious
 );
 
 const gridClass = computed(() => {
-  if (orientation.value === ORIENTATION.LEFT && sourcePlatform.value) {
+  if (showLeftAvatar.value) {
     return 'grid grid-cols-[24px_1fr]';
   }
   const map = {
@@ -300,7 +278,7 @@ const gridClass = computed(() => {
 });
 
 const gridTemplate = computed(() => {
-  if (orientation.value === ORIENTATION.LEFT && sourcePlatform.value) {
+  if (showLeftAvatar.value) {
     const nameRow = showSenderName.value ? '"spacer name"' : '';
     return `${nameRow} "avatar bubble" "spacer meta"`;
   }
@@ -327,7 +305,7 @@ const shouldGroupWithNext = computed(() => {
 
 const shouldShowAvatar = computed(() => {
   if (props.messageType === MESSAGE_TYPES.ACTIVITY) return false;
-  if (orientation.value === ORIENTATION.LEFT) return !!sourcePlatform.value;
+  if (orientation.value === ORIENTATION.LEFT) return showLeftAvatar.value;
 
   return true;
 });
@@ -623,13 +601,21 @@ provideMessageContext({
       >
         <MessageSenderAvatar v-bind="avatarInfo" :platform="sourcePlatform" />
       </div>
-      <span
+      <div
         v-if="showSenderName && avatarInfo.name"
-        class="[grid-area:name] mb-1 text-xs font-medium truncate text-n-slate-11"
-        :class="{ 'text-end': orientation === ORIENTATION.RIGHT }"
+        class="[grid-area:name] flex items-center gap-1 min-w-0 mb-1"
+        :class="{ 'justify-end': orientation === ORIENTATION.RIGHT }"
       >
-        {{ avatarInfo.name }}
-      </span>
+        <span class="text-xs font-medium truncate text-n-slate-11">
+          {{ avatarInfo.name }}
+        </span>
+        <span
+          v-if="isTeammateMessage"
+          class="px-1 text-xs font-medium rounded shrink-0 bg-n-blue-4 text-n-blue-11"
+        >
+          {{ t('CONVERSATION.KITA_TEAMMATE_TAG') }}
+        </span>
+      </div>
       <div
         class="[grid-area:bubble] flex min-w-0"
         :class="{

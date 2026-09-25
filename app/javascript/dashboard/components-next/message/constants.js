@@ -15,6 +15,7 @@ export const MESSAGE_VARIANTS = {
   TEMPLATE: 'template',
   EMAIL: 'email',
   UNSUPPORTED: 'unsupported',
+  TEAMMATE: 'teammate',
 };
 
 export const SENDER_TYPES = {

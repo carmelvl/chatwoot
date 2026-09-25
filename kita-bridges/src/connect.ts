@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { safeEqual } from './crypto.ts';
+import { normalizeEmail } from './email.ts';
 import { signedQuery, verifyConnectParams } from './links.ts';
 import type { SlackUserOAuth } from './platforms/slack.ts';
 import type { TeamsIntegration } from './platforms/teams/index.ts';
@@ -41,7 +42,7 @@ export class AgentConnect {
 
   status(agentId: number, email: string): ConnectStatus {
     const { slack, teams } = this.o;
-    const number = this.o.whatsappNumbers?.find((n) => n.agentEmail?.toLowerCase() === email.toLowerCase());
+    const number = this.o.whatsappNumbers?.find((n) => n.agentEmail && normalizeEmail(n.agentEmail) === normalizeEmail(email));
     return {
       slack: slack ? (slack.userToken(agentId) ? 'connected' : 'not_connected') : 'unavailable',
       teams: teams ? (teams.agentAuth(agentId).isConnected() ? 'connected' : 'not_connected') : 'unavailable',

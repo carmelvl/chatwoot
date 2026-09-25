@@ -46,7 +46,7 @@ async function processWhatsApp(d: AppDeps, body: unknown) {
       if (attachments.length < it.media.length) log.warn('whatsapp_media_unresolved', { missing: it.media.length - attachments.length });
       const msg = { ...it.message, attachments };
       if (it.kind === 'customer') await d.bridge.inbound(msg);
-      else await d.bridge.businessEcho(msg, { ownerName: it.number.ownerName, ownerEmail: it.number.agentEmail, ownerApp: d.whatsappOwnerApps?.get(it.number.phoneNumberId) });
+      else await d.bridge.businessEcho(msg, { ownerName: it.number.ownerName, ownerEmail: it.number.agentEmail, ownerKey: `whatsapp:${it.number.phoneNumberId}`, ownerApp: d.whatsappOwnerApps?.get(it.number.phoneNumberId) });
     } catch (e: any) {
       log.error('whatsapp_item_failed', { kind: it.kind, error: String(e?.message ?? e) });
     }

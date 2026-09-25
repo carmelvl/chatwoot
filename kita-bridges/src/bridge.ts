@@ -152,7 +152,7 @@ export class Bridge {
       await this.ensureContact(inbox, msg.platform, msg.userKey, { identifier: senderIdentifier, name: msg.userName || msg.userKey, avatarUrl: msg.userAvatarUrl });
     }
     const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
-    const content = composeInboundText(msg.text, undefined, failed.map((f) => f.url));
+    const content = composeInboundText(msg.text, failed.map((f) => f.url));
     const deskId = await chatwoot.createMessage(inbox, conv.sourceId, conv.conversationId, content, files, `${msg.platform}:${msg.eventId}`, {
       senderIdentifier,
       contentAttributes: this.attributes(msg),
@@ -164,56 +164,49 @@ export class Bridge {
 
   /**
    * A Kita team member wrote in Slack/Teams outside the desk: mirror it into the channel's
-   * conversation as an outgoing message authored by the matching desk agent (by email). With no
-   * matching agent it goes through the bridge's own desk user as "**Name (in Slack):** …".
-   * Either way it's marked kita_bridge_origin and its id pre-marked, so it is never sent back out.
+   * conversation as an outgoing message authored by them (the desk matches their email to an agent,
+   * or shows them as a Kita-staff contact with their own name and avatar). Never a name prefix, never
+   * the shared bridge user. Marked kita_bridge_origin and its id pre-marked, so it is never sent back out.
    */
   private async staffInbound(msg: InboundMessage): Promise<InboundResult> {
-    const { store, app, desk } = this.d;
+    const { store, desk } = this.d;
     if (this.isOurEcho(msg)) return 'duplicate';
-    if (!app && !desk) return 'ignored';
+    if (!desk) return 'ignored';
     // Kita may start the channel's conversation: its contact is still the channel ("#kita-tala").
     const { conv } = await this.ensureConversation(msg);
     const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
-    const failedUrls = failed.map((f) => f.url);
-    const contentAttributes = this.attributes(msg);
-    let created = msg.userEmail && desk ? await desk.staffMessage(conv.conversationId, msg.userEmail, { content: composeInboundText(msg.text, undefined, failedUrls), files, contentAttributes }) : undefined;
-    const asAgent = Boolean(created);
-    if (!created) {
-      if (!app) return 'ignored';
-      const content = composeInboundText(msg.text, `${msg.userName ?? msg.userKey} (in ${PLATFORM_NAME[msg.platform]})`, failedUrls);
-      created = await app.createMessage(conv.conversationId, { content, private: false, files, contentAttributes });
-    }
+    const who = { email: msg.userEmail, staffKey: `${msg.platform}:${msg.userKey}`, name: msg.userName || msg.userKey, avatarUrl: msg.userAvatarUrl };
+    const created = await desk.staffMessage(conv.conversationId, who, {
+      content: composeInboundText(msg.text, failed.map((f) => f.url)),
+      files,
+      contentAttributes: this.attributes(msg),
+    });
     store.markSeen(`out:${msg.platform}:${created.id}`);
     this.remember(msg, created.id);
-    log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId, as_agent: asAgent });
+    log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId });
     return 'staff_synced';
   }
 
   /**
    * A message the teammate sent from their own phone (WhatsApp Business app echo): mirror it as an
-   * outgoing message authored by that teammate, creating the conversation if they started it.
-   * Authored natively by the desk agent with `ownerEmail` (desk staff endpoint), else by the owner's
-   * own Chatwoot client, else "**Owner:** …" through the bridge's client.
+   * outgoing message authored by that teammate (desk agent by `ownerEmail`, else a Kita-staff contact
+   * named `ownerName`), creating the conversation if they started it. Without the desk endpoint, the
+   * owner's own Chatwoot client (`ownerApp`) is used; never the shared bridge user.
    */
-  async businessEcho(msg: InboundMessage, o: { ownerName: string; ownerEmail?: string; ownerApp?: ChatwootAppClient }): Promise<InboundResult> {
+  async businessEcho(msg: InboundMessage, o: { ownerName: string; ownerEmail?: string; ownerKey: string; ownerApp?: ChatwootAppClient }): Promise<InboundResult> {
     const { store, desk } = this.d;
-    const app = o.ownerApp ?? this.d.app;
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
-    if (!app && !(desk && o.ownerEmail)) return 'ignored';
+    if (!desk && !o.ownerApp) return 'ignored';
     if (this.outOfScope(msg)) return 'out_of_scope';
     if (!store.markSeen(seenKey)) return 'duplicate';
     try {
       const { conv } = await this.ensureConversation(msg);
       const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
-      const failedUrls = failed.map((f) => f.url);
+      const content = composeInboundText(msg.text, failed.map((f) => f.url));
       const contentAttributes = this.attributes(msg);
-      let created = desk && o.ownerEmail ? await desk.staffMessage(conv.conversationId, o.ownerEmail, { content: composeInboundText(msg.text, undefined, failedUrls), files, contentAttributes }) : undefined;
-      if (!created) {
-        if (!app) return 'ignored';
-        const content = composeInboundText(msg.text, o.ownerApp ? undefined : o.ownerName, failedUrls);
-        created = await app.createMessage(conv.conversationId, { content, private: false, files, contentAttributes });
-      }
+      const created = desk
+        ? await desk.staffMessage(conv.conversationId, { email: o.ownerEmail, staffKey: o.ownerKey, name: o.ownerName }, { content, files, contentAttributes })
+        : await o.ownerApp!.createMessage(conv.conversationId, { content, private: false, files, contentAttributes });
       store.markSeen(`out:${msg.platform}:${created.id}`);
       log.info('business_echo', { platform: msg.platform, conversation: conv.conversationId });
       return 'staff_synced';
@@ -320,9 +313,8 @@ function topLevelRef(ref: Record<string, unknown>): Record<string, unknown> {
   return rest;
 }
 
-export function composeInboundText(text: string, speaker: string | undefined, failedUrls: string[]): string {
+export function composeInboundText(text: string, failedUrls: string[]): string {
   let out = text ?? '';
-  if (speaker) out = `**${speaker}:** ${out}`;
   if (failedUrls.length) out += `${out ? '\n\n' : ''}Attachments (not copied):\n${failedUrls.map((u) => `- ${u}`).join('\n')}`;
   return out;
 }
