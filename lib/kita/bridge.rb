@@ -52,10 +52,9 @@ module Kita::Bridge
     internal_request(:post, '/internal/grip/link', body: { channel_key: channel_key, account_id: account_id }.to_json)
   end
 
-  def internal_request(method, path, **options)
-    response = HTTParty.public_send(method, "#{internal_url}#{path}", **options, timeout: LINK_TIMEOUT,
-                                                                                  headers: { 'Content-Type' => 'application/json',
-                                                                                             'X-Kita-Bridge-Secret' => secret })
+  def internal_request(method, path, **)
+    headers = { 'Content-Type' => 'application/json', 'X-Kita-Bridge-Secret' => secret }
+    response = HTTParty.public_send(method, "#{internal_url}#{path}", **, timeout: LINK_TIMEOUT, headers: headers)
     raise LinkError.new(response.code, response.parsed_response.is_a?(Hash) ? response.parsed_response['error'] : nil) unless response.success?
 
     response.parsed_response
