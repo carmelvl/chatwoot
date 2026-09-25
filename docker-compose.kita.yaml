@@ -56,7 +56,7 @@ services:
       - path: kita-bridges/.env
         required: false # bridge idles (all platforms disabled) until configured
     environment:
-      - CHATWOOT_BASE_URL=http://rails:3000
+      - CHATWOOT_BASE_URL=https://support.internal.kita.ai
       - BRIDGE_DB_PATH=/data/bridges.sqlite
     volumes:
       - bridges_data:/data
@@ -70,7 +70,7 @@ services:
       - path: kita-grip-sync/.env
         required: false # rejects every webhook until CHATWOOT_WEBHOOK_SECRET is configured
     environment:
-      - CHATWOOT_BASE_URL=http://rails:3000
+      - CHATWOOT_BASE_URL=https://support.internal.kita.ai
       - GRIP_SYNC_DB_PATH=/data/grip-sync.sqlite
     volumes:
       - grip_sync_data:/data
