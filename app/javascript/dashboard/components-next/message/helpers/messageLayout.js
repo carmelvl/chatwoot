@@ -45,7 +45,8 @@ export const groupsWithPrevious = (message, previous, currentUserId) => {
 
 /**
  * How a conversation's messages are laid out, from its Kita bridge platform:
- * Slack/Teams read as a flat channel (everyone on the left, no bubbles),
+ * Slack/Teams read as a flat channel (others flush on the left with avatar
+ * and name; your own in a green bubble on the right),
  * WhatsApp/Viber mirrors as phone chat bubbles, everything else as chat.
  */
 export const LAYOUT_STYLES = { CHAT: 'chat', FLAT: 'flat', MIRROR: 'mirror' };
@@ -61,13 +62,39 @@ export const layoutStyleFor = channel => {
  * - chat: left messages keep a fixed avatar column (the avatar only on the
  *   first message of a group); every group opens with a header line
  *   carrying the time.
- * - flat: like chat, but every message sits on the left with an avatar.
+ * - flat: like chat (others on the left with an avatar, yours on the right).
  * - mirror: no avatars or header; the group closes with a footer line
  *   ("Jun · 11:40 AM").
  * Grouped follow-ups have no header, so in chat and flat they carry a
  * compact meta of their own: delivery status always, time on hover.
  * Email and activity keep their own layout.
  */
+/**
+ * Bubble of a Kita layout message (Slack/Teams flat, WhatsApp/Viber mirror):
+ * yours are a signal-green bubble with white text on the right; Kita
+ * teammates a light-green bubble on the left; external people a neutral grey
+ * bubble on the left. null = Chatwoot's bubble (private notes, activity,
+ * email and classic chat).
+ */
+export const kitaBubbleClass = ({ style, orientation, variant }) => {
+  const own = [
+    MESSAGE_VARIANTS.PRIVATE,
+    MESSAGE_VARIANTS.ACTIVITY,
+    MESSAGE_VARIANTS.EMAIL,
+  ];
+  if (own.includes(variant)) return null;
+  if (![LAYOUT_STYLES.FLAT, LAYOUT_STYLES.MIRROR].includes(style)) return null;
+  const isRight = orientation === ORIENTATION.RIGHT;
+  if (isRight) {
+    return 'kita-bubble-own right-bubble !text-[0.9375rem] !leading-[1.375rem] px-3.5 py-2.5 rounded-[1.125rem] ltr:rounded-br-md rtl:rounded-bl-md bg-n-brand text-white [&_.prose]:!text-white [&_a]:!text-white';
+  }
+  const tone =
+    variant === MESSAGE_VARIANTS.TEAMMATE
+      ? 'kita-bubble-teammate bg-woot-50 dark:bg-woot-800/60'
+      : 'kita-bubble-external bg-n-slate-3';
+  return `left-bubble !text-[0.9375rem] !leading-[1.375rem] px-3.5 py-2.5 rounded-[1.125rem] ltr:rounded-bl-md rtl:rounded-br-md text-n-slate-12 ${tone}`;
+};
+
 export const getMessageLayout = ({
   orientation,
   variant,

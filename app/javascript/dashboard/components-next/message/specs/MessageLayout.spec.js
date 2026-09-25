@@ -146,16 +146,158 @@ describe('Message layout', () => {
     expect(column.classes()).toContain('items-end');
   });
 
-  it('lays a Slack message out flat, own message on the left as You', () => {
-    const wrapper = mountMessage({ ...ownProps, conversationChannel: 'slack' });
-    const avatarColumn = wrapper.find('[data-test="message-avatar-column"]');
+  it.each(['slack', 'teams', 'whatsapp', 'viber'])(
+    'puts your own %s message on the right in a signal-green bubble',
+    channel => {
+      const wrapper = mountMessage({
+        ...ownProps,
+        conversationChannel: channel,
+      });
+      expect(wrapper.find('[data-test="message-row"]').classes()).toContain(
+        'justify-end'
+      );
+      expect(wrapper.find('[data-test="message-avatar-column"]').exists()).toBe(
+        false
+      );
+      const bubble = wrapper.find('[data-bubble-name="text"]');
+      expect(bubble.classes()).toContain('bg-n-brand');
+      expect(bubble.classes()).toContain('text-white');
+    }
+  );
 
-    expect(avatarColumn.exists()).toBe(true);
-    const name = wrapper.find('[data-test="message-sender-name"]');
-    expect(name.text()).toBe('CONVERSATION.KITA_YOU');
+  it('signs your own Slack message "You · time" on the right', () => {
+    const wrapper = mountMessage({ ...ownProps, conversationChannel: 'slack' });
+    const header = wrapper.find('[data-test="message-header"]');
+    expect(header.classes()).toContain('justify-end');
+    expect(header.find('[data-test="message-sender-name"]').text()).toBe(
+      'CONVERSATION.KITA_YOU ·'
+    );
+    expect(header.find('[data-test="meta"]').exists()).toBe(true);
+  });
+
+  it('keeps others flush on the left in Slack, with avatar and name', () => {
+    const wrapper = mountMessage({
+      ...customerProps,
+      conversationChannel: 'slack',
+    });
+    expect(wrapper.find('[data-test="message-avatar-column"]').exists()).toBe(
+      true
+    );
+    expect(wrapper.find('[data-test="message-sender-name"]').text()).toBe(
+      'Maria Santos'
+    );
     expect(wrapper.find('[data-test="message-column"]').classes()).toContain(
       'flex-1'
     );
+    expect(wrapper.find('[data-bubble-name="text"]').classes()).not.toContain(
+      'bg-n-brand'
+    );
+  });
+
+  it('tags external people and Kita teammates, on the left in grey and light green', () => {
+    const external = mountMessage({
+      ...customerProps,
+      conversationChannel: 'slack',
+      sender: { ...customerProps.sender, name: 'Carmel' },
+    });
+    expect(external.find('[data-test="message-external-tag"]').text()).toBe(
+      'CONVERSATION.KITA_EXTERNAL_TAG'
+    );
+    expect(external.find('[data-test="message-teammate-tag"]').exists()).toBe(
+      false
+    );
+    expect(external.find('[data-bubble-name="text"]').classes()).toContain(
+      'kita-bubble-external'
+    );
+
+    const teammate = mountMessage({
+      ...ownProps,
+      senderId: 2,
+      sender: { id: 2, type: 'user', name: 'Rhea' },
+      conversationChannel: 'teams',
+    });
+    expect(teammate.find('[data-test="message-teammate-tag"]').exists()).toBe(
+      true
+    );
+    expect(teammate.find('[data-test="message-external-tag"]').exists()).toBe(
+      false
+    );
+    expect(teammate.find('[data-test="message-row"]').classes()).toContain(
+      'justify-start'
+    );
+    expect(teammate.find('[data-bubble-name="text"]').classes()).toContain(
+      'kita-bubble-teammate'
+    );
+  });
+
+  it('names an external sender in the mirror footer', () => {
+    const wrapper = mountMessage({
+      ...customerProps,
+      conversationChannel: 'whatsapp',
+    });
+    expect(wrapper.find('[data-test="message-footer"]').text()).toMatch(
+      /^Maria · CONVERSATION.KITA_EXTERNAL_TAG · /
+    );
+  });
+
+  it('shows a failed send as a full-width strip with Retry and Connect', async () => {
+    const wrapper = mountMessage({
+      ...ownProps,
+      conversationChannel: 'slack',
+      status: MESSAGE_STATUS.FAILED,
+      createdAt: Math.floor(Date.now() / 1000),
+      contentAttributes: { externalError: 'not_connected' },
+    });
+    const strip = wrapper.find('[data-test="message-strip"]');
+    expect(strip.exists()).toBe(true);
+    expect(strip.attributes('data-tone')).toBe('error');
+    // a sibling of the message row, spanning the pane
+    expect(strip.element.parentElement).toBe(wrapper.element);
+    expect(strip.classes()).toContain('w-full');
+    expect(strip.find('[data-test="message-strip-text"]').text()).toBe(
+      'CONVERSATION.KITA_STRIP.NOT_SENT'
+    );
+    expect(strip.find('[data-test="message-strip-connect"]').exists()).toBe(
+      true
+    );
+    await strip.find('[data-test="message-strip-retry"]').trigger('click');
+    expect(wrapper.emitted('retry')).toHaveLength(1);
+  });
+
+  it('renders the bridge "not sent" note as a strip, not a bubble', () => {
+    const wrapper = mountMessage({
+      ...ownProps,
+      private: true,
+      conversationChannel: 'slack',
+      content: 'Not sent — connect your Slack account first.',
+      contentAttributes: {
+        kitaNotice: 'not_sent',
+        kitaNoticeReason: 'not_connected',
+        externalSource: 'slack',
+      },
+    });
+    expect(wrapper.find('[data-test="message-row"]').exists()).toBe(false);
+    const strip = wrapper.find('[data-test="message-strip"]');
+    expect(strip.attributes('data-tone')).toBe('error');
+    expect(strip.find('[data-test="message-strip-connect"]').exists()).toBe(
+      true
+    );
+    expect(strip.find('[data-test="message-strip-retry"]').exists()).toBe(
+      false
+    );
+  });
+
+  it('renders the mirror reminder as a subtle strip', () => {
+    const wrapper = mountMessage({
+      ...ownProps,
+      private: true,
+      conversationChannel: 'whatsapp',
+      content:
+        'Reply in WhatsApp yourself — this inbox is a mirror. Nothing typed here is sent to the customer.',
+    });
+    expect(
+      wrapper.find('[data-test="message-strip"]').attributes('data-tone')
+    ).toBe('info');
   });
 
   it('closes a WhatsApp mirror group with a footer, not a header', () => {

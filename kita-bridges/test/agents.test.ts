@@ -155,7 +155,9 @@ test('refused not_connected -> nothing posted, 422-style result, private "Not se
   const note = posts.find((p) => p.body.private === true)!;
   assert.equal(note.path, '/api/v1/accounts/1/conversations/100/messages');
   assert.match(note.body.content, /^Not sent — connect your Slack account first \(Profile → Connect accounts\)\. https:\/\/support\.internal\.kita\.ai\/bridges\/connect\?a=3&e=carmel%40kita\.ai/);
-  assert.deepEqual(note.body.content_attributes, { kita_bridge_origin: true });
+  const { kita_connect_url: connectUrl, ...attrs } = note.body.content_attributes;
+  assert.deepEqual(attrs, { kita_bridge_origin: true, kita_notice: 'not_sent', kita_notice_reason: 'not_connected', external_source: 'slack' });
+  assert.match(connectUrl, /^https:\/\/support\.internal\.kita\.ai\/bridges\/connect\?a=3/);
   assert.equal(posts.filter((p) => !p.body.private).length, 0); // nothing public anywhere
   assert.equal(sender.sent.length, 1); // the sender was asked, and refused without posting
   // the note's own webhook can never go out

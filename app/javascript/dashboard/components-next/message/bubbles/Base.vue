@@ -11,7 +11,7 @@ import { useI18n } from 'vue-i18n';
 import MessageFormatter from 'shared/helpers/MessageFormatter.js';
 import { BUS_EVENTS } from 'shared/constants/busEvents';
 import { MESSAGE_VARIANTS, ORIENTATION, SENDER_TYPES } from '../constants';
-import { LAYOUT_STYLES } from '../helpers/messageLayout';
+import { kitaBubbleClass as kitaBubbleForMessage } from '../helpers/messageLayout';
 
 const props = defineProps({
   hideMeta: { type: Boolean, default: false },
@@ -78,17 +78,14 @@ const flexOrientationClass = computed(() => {
   return map[orientation.value];
 });
 
-// Kita layouts: Slack/Teams messages are plain text (private notes keep their
-// amber bubble); WhatsApp/Viber mirrors are phone bubbles, yours in green.
-const kitaBubbleClass = computed(() => {
-  if (variant.value === MESSAGE_VARIANTS.PRIVATE) return null;
-  if (variant.value === MESSAGE_VARIANTS.ACTIVITY) return null;
-  if (layoutStyle?.value === LAYOUT_STYLES.FLAT) return 'text-n-slate-12';
-  if (layoutStyle?.value !== LAYOUT_STYLES.MIRROR) return null;
-  return orientation.value === ORIENTATION.RIGHT
-    ? 'rounded-2xl bg-n-blue-9 text-white [&_.prose]:!text-white'
-    : 'rounded-2xl bg-n-slate-3 text-n-slate-12';
-});
+// Kita layouts (Slack/Teams flat, WhatsApp/Viber mirror): see kitaBubbleClass
+const kitaBubbleClass = computed(() =>
+  kitaBubbleForMessage({
+    style: layoutStyle?.value,
+    orientation: orientation.value,
+    variant: variant.value,
+  })
+);
 
 const messageClass = computed(() => {
   if (kitaBubbleClass.value) return [kitaBubbleClass.value];

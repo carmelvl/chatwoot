@@ -38,15 +38,17 @@ const onClick = event => {
 <template>
   <component
     :is="to ? 'a' : 'div'"
-    class="flex items-center gap-2 px-1.5 py-1 rounded-lg h-8 min-w-0"
+    class="flex items-center gap-2 px-3 rounded-lg h-9 min-w-0"
     role="button"
     draggable="false"
     :href="href"
     :title="label"
     :class="{
-      'text-n-slate-12 bg-n-alpha-2 font-medium': isActive && !hasActiveChild,
-      'text-n-slate-12 font-medium': hasActiveChild,
-      'text-n-slate-11 hover:bg-n-alpha-2': !isActive && !hasActiveChild,
+      // Kita forest sidebar (Paper S02/S03): white at 72%, active on white/10
+      'text-white bg-white/10': isActive && !hasActiveChild,
+      'text-white': hasActiveChild,
+      'text-white/70 hover:bg-white/5 hover:text-white':
+        !isActive && !hasActiveChild,
     }"
     @click.stop="onClick"
   >
@@ -60,18 +62,12 @@ const onClick = event => {
     <div
       class="flex items-center gap-1.5 flex-grow justify-between min-w-0 flex-1"
     >
-      <span
-        class="truncate"
-        :class="{
-          'text-body-main': !isActive,
-          'font-medium text-sm': isActive || hasActiveChild,
-        }"
-      >
+      <span class="text-sm truncate leading-[1.125rem]">
         {{ label }}
       </span>
       <span
         v-if="dynamicCount && !expandable"
-        class="inline-grid h-5 min-w-5 place-items-center rounded-full bg-n-slate-4 px-1 text-xxs font-medium leading-3 text-n-slate-12 dark:bg-n-slate-5 flex-shrink-0"
+        class="inline-grid h-[1.125rem] min-w-5 place-items-center rounded-full bg-white px-2 text-[0.6875rem] font-bold leading-[0.875rem] text-woot-800 flex-shrink-0"
       >
         {{ count }}
       </span>

@@ -1261,7 +1261,8 @@
     "REOPEN_WITH_TICKET": "Reopen thread and ticket",
     "OPEN_IN_GRIP": "Open in Grip",
     "TICKET_SYNC_ERROR": "The thread was updated, but its Grip ticket could not be. Try again or update it in Grip.",
-    "TICKET_WITH_ID": "Ticket {id}"
+    "TICKET_WITH_ID": "Ticket {id}",
+    "PRIORITY_TICKET": "{priority} ticket"
   },
   "KITA_COMPOSER": {
     "PLACEHOLDER": "Message {channel}…",

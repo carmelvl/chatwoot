@@ -366,6 +366,7 @@
     "MESSAGE_ERROR": "Unable to send this message, please try again later",
     "SENT_BY": "Sent by:",
     "KITA_TEAMMATE_TAG": "Kita",
+    "KITA_EXTERNAL_TAG": "External",
     "BOT": "Bot",
     "NATIVE_APP": "Native app",
     "NATIVE_APP_ADVISORY": "This message was sent from the native app. Reply from Kita Support to maintain the message window.",
@@ -430,7 +431,28 @@
       "GO_TO_CONVERSATION": "Go to conversation thread"
     },
     "KITA_YOU": "You",
-    "KITA_FROM_PHONE": "from your phone"
+    "KITA_FROM_PHONE": "from your phone",
+    "KITA_STRIP": {
+      "RETRY": "Retry",
+      "CONNECT": "Connect {platform}",
+      "NOT_SENT": "Not sent to {platform} — {reason}",
+      "NOT_SENT_GENERIC": "Not sent — {reason}",
+      "REASONS": {
+        "not_connected": "your {platform} account isn't connected yet.",
+        "not_member": "you're not in this {place} yet. Ask to be added, then send it again.",
+        "other": "{error}",
+        "unknown": "something went wrong. Try again."
+      },
+      "PLACES": {
+        "channel": "channel",
+        "chat": "channel or chat"
+      },
+      "MIRROR": "{platform} is a mirror — reply from your phone. Nothing typed here is sent to the customer."
+    },
+    "KITA_DAY": {
+      "TODAY": "Today",
+      "YESTERDAY": "Yesterday"
+    }
   },
   "EMAIL_TRANSCRIPT": {
     "TITLE": "Send conversation transcript",

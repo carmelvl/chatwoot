@@ -269,25 +269,27 @@ watch(filters, () => {
     class="relative flex flex-col h-full min-h-0 w-[360px] min-w-[360px] ltr:border-r rtl:border-l border-n-weak bg-n-surface-1"
     data-test-id="kita-inbox-list"
   >
-    <header class="px-5 pt-7">
-      <div class="flex items-baseline justify-between px-1">
-        <h1 class="m-0 text-2xl font-bold font-interDisplay text-n-slate-12">
+    <header class="px-6 pt-7 pb-4">
+      <div class="flex items-baseline justify-between">
+        <h1
+          class="m-0 text-[1.625rem] leading-8 tracking-[-0.02em] font-bold font-interDisplay text-n-slate-12"
+        >
           {{ t('KITA_INBOX.TITLE') }}
         </h1>
-        <span class="text-sm text-n-slate-11">{{ meta.count }}</span>
+        <span class="text-[0.8125rem] text-n-slate-11">{{ meta.count }}</span>
       </div>
       <nav
-        class="flex gap-5 px-1 mt-4 overflow-x-auto border-b no-scrollbar border-n-weak"
+        class="flex gap-5 mt-[1.125rem] overflow-x-auto border-b no-scrollbar border-n-weak"
       >
         <button
           v-for="tab in scopeTabs"
           :key="tab.key"
           type="button"
           data-test="kita-inbox-scope"
-          class="pb-2 -mb-px text-sm border-b-2 whitespace-nowrap"
+          class="pb-2.5 -mb-px text-[0.8125rem] leading-4 border-b-2 whitespace-nowrap"
           :class="
             tab.active
-              ? 'font-medium text-n-slate-12 border-n-slate-12'
+              ? 'font-semibold text-n-slate-12 border-n-slate-12'
               : 'text-n-slate-11 border-transparent hover:text-n-slate-12'
           "
           @click="setFilter(tab.patch)"
@@ -358,7 +360,10 @@ watch(filters, () => {
       </button>
     </div>
 
-    <div ref="listRef" class="flex-1 min-h-0 px-3 pb-4 overflow-y-auto">
+    <div
+      ref="listRef"
+      class="flex flex-col flex-1 min-h-0 gap-0.5 px-3 pb-4 overflow-y-auto"
+    >
       <p
         v-if="!isFetching && !rows.length"
         class="px-3 py-10 text-sm text-center text-n-slate-11"
@@ -378,7 +383,7 @@ watch(filters, () => {
         <button
           type="button"
           data-test="kita-inbox-section-title"
-          class="flex items-center w-full gap-1 px-3 pt-5 pb-1.5 m-0 text-[0.6875rem] font-medium tracking-[0.12em] uppercase text-n-slate-11"
+          class="flex items-center w-full gap-1 px-3 pt-5 pb-2 m-0 text-[0.6875rem] leading-[0.875rem] font-bold tracking-[0.12em] uppercase text-n-slate-11"
           :disabled="!section.collapsible"
           @click="toggleSection(section.key)"
         >

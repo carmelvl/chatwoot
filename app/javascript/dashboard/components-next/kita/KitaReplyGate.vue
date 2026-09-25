@@ -62,12 +62,14 @@ const description = computed(() =>
 
 <template>
   <div
-    class="flex items-center gap-3 px-5 py-4 mx-3 mb-3 rounded-xl bg-n-alpha-1 outline outline-1 outline-n-weak"
+    class="flex items-center gap-4 px-[1.125rem] py-4 rounded-xl bg-n-surface-2 outline outline-1 outline-n-weak"
     data-test-id="kita-reply-gate"
   >
-    <div class="flex flex-col flex-1 min-w-0 gap-0.5">
-      <span class="text-sm font-medium text-n-slate-12">{{ title }}</span>
-      <span class="text-sm text-n-slate-11">
+    <div class="flex flex-col flex-1 min-w-0 gap-[0.1875rem]">
+      <span class="text-sm leading-[1.125rem] font-semibold text-n-slate-12">
+        {{ title }}
+      </span>
+      <span class="text-[0.8125rem] leading-4 text-n-slate-11">
         {{ description }}
       </span>
     </div>

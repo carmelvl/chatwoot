@@ -26,6 +26,7 @@ import MessageSenderAvatar from './MessageSenderAvatar.vue';
 import MessageMeta from './MessageMeta.vue';
 import {
   getMessageOrientation,
+  isExternalSender,
   isKitaTeammate,
   isOwnMessage,
 } from './helpers/messageSide';
@@ -58,7 +59,14 @@ import VoiceCallBubble from './bubbles/VoiceCall.vue';
 import WhatsappFlowResponseBubble from './bubbles/WhatsappFlowResponse.vue';
 import WhatsappReferral from './bubbles/Text/WhatsappReferral.vue';
 
-import MessageError from './MessageError.vue';
+import MessageStrip from './MessageStrip.vue';
+import {
+  canRetryFailed,
+  failedSendReason,
+  kitaNotice,
+} from './helpers/kitaNotice';
+import { hasOneDayPassed } from 'shared/helpers/timeHelper';
+import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
 import KitaThreadFooter from 'next/kita/KitaThreadFooter.vue';
 import ContextMenu from 'dashboard/modules/conversations/components/MessageContextMenu.vue';
 import { useBranding } from 'shared/composables/useBranding';
@@ -179,6 +187,7 @@ const isCaptainMessage = computed(() => {
 });
 
 const isTeammateMessage = computed(() => isKitaTeammate(props));
+const isExternalMessage = computed(() => isExternalSender(props));
 
 /**
  * Computes the message variant based on props
@@ -237,9 +246,7 @@ const layoutStyle = computed(() =>
 );
 const isFlat = computed(() => layoutStyle.value === LAYOUT_STYLES.FLAT);
 
-const orientation = computed(() =>
-  getMessageOrientation({ ...props, flat: isFlat.value })
-);
+const orientation = computed(() => getMessageOrientation(props));
 
 const isOwn = computed(() => isOwnMessage(props));
 
@@ -301,7 +308,9 @@ const layout = computed(() =>
 
 const columnClass = computed(() => {
   if (variant.value === MESSAGE_VARIANTS.EMAIL) return 'w-full';
-  if (isFlat.value) return 'flex-1 items-start';
+  // Slack/Teams: others read flush across the pane, yours as a bubble
+  if (isFlat.value && orientation.value === ORIENTATION.LEFT)
+    return 'flex-1 items-start';
   return orientation.value === ORIENTATION.RIGHT
     ? 'max-w-[70%] items-end'
     : 'max-w-[70%] items-start';
@@ -566,7 +575,61 @@ const mirrorFooter = computed(() => {
     ].join(' · ');
   }
   const [first] = (avatarInfo.value.name || '').split(' ');
-  return [first, time].filter(Boolean).join(' · ');
+  const tag = isExternalMessage.value
+    ? t('CONVERSATION.KITA_EXTERNAL_TAG')
+    : isTeammateMessage.value && t('CONVERSATION.KITA_TEAMMATE_TAG');
+  return [first, tag, time].filter(Boolean).join(' · ');
+});
+
+// Full-width strips: a bridge notice (not sent / mirror) replaces the bubble;
+// a failed send adds one under the message
+const platformName = useKitaPlatformName();
+const notice = computed(() => kitaNotice(props));
+const noticePlatform = computed(
+  () => notice.value?.platform || props.conversationChannel
+);
+const notSentText = (platform, reason, error) => {
+  const name = platformName(platform);
+  const detail = reason
+    ? t(`CONVERSATION.KITA_STRIP.REASONS.${reason}`, {
+        platform: name,
+        place: t(
+          `CONVERSATION.KITA_STRIP.PLACES.${platform === 'teams' ? 'chat' : 'channel'}`
+        ),
+        error,
+      })
+    : t('CONVERSATION.KITA_STRIP.REASONS.unknown');
+  return name
+    ? t('CONVERSATION.KITA_STRIP.NOT_SENT', { platform: name, reason: detail })
+    : t('CONVERSATION.KITA_STRIP.NOT_SENT_GENERIC', { reason: detail });
+};
+const noticeStrip = computed(() => {
+  const value = notice.value;
+  if (!value) return null;
+  const name = platformName(noticePlatform.value);
+  if (value.kind === 'mirror') {
+    return {
+      tone: 'info',
+      text: t('CONVERSATION.KITA_STRIP.MIRROR', { platform: name }),
+    };
+  }
+  return {
+    tone: 'error',
+    text: notSentText(noticePlatform.value, value.reason || 'unknown'),
+    connectLabel: value.reason === 'not_connected' ? name : '',
+    connectUrl: value.connectUrl || '',
+  };
+});
+const errorStrip = computed(() => {
+  const error = props.contentAttributes?.externalError;
+  if (!error) return null;
+  const { reason, text } = failedSendReason(error);
+  const platform = sourcePlatform.value || props.conversationChannel;
+  return {
+    text: notSentText(platform, reason, text),
+    canRetry: canRetryFailed(props, hasOneDayPassed(props.createdAt)),
+    connectLabel: reason === 'not_connected' ? platformName(platform) : '',
+  };
 });
 
 provideMessageContext({
@@ -586,22 +649,31 @@ provideMessageContext({
   <div
     v-if="shouldRenderMessage"
     :id="`message${props.id}`"
-    class="flex w-full message-bubble-container"
+    class="flex flex-col w-full message-bubble-container"
     :data-message-id="props.id"
     :class="[
-      flexOrientationClass,
       {
         'group-with-next mb-1': shouldGroupWithNext,
-        'mb-4': !shouldGroupWithNext,
+        'mb-4': !shouldGroupWithNext && !isFlat,
+        // Slack/Teams groups breathe like a channel (Paper S03: 28px)
+        'mb-7': !shouldGroupWithNext && isFlat,
         'bg-n-alpha-1': showBackgroundHighlight,
-        'bg-n-blue-2 rounded-xl p-4': isOpenThreadRoot,
+        'bg-woot-25 dark:bg-n-alpha-2 rounded-xl px-4 py-3.5': isOpenThreadRoot,
       },
     ]"
     :data-thread-open="isOpenThreadRoot || undefined"
   >
-    <div v-if="variant === MESSAGE_VARIANTS.ACTIVITY">
-      <ActivityBubble :content="content" />
-    </div>
+    <MessageStrip
+      v-if="noticeStrip"
+      :tone="noticeStrip.tone"
+      :text="noticeStrip.text"
+      :connect-label="noticeStrip.connectLabel"
+      :connect-url="noticeStrip.connectUrl"
+    />
+    <ActivityBubble
+      v-else-if="variant === MESSAGE_VARIANTS.ACTIVITY"
+      :content="content"
+    />
     <div
       v-else
       data-test="message-row"
@@ -625,12 +697,13 @@ provideMessageContext({
       <div
         data-test="message-column"
         class="flex flex-col min-w-0"
-        :class="[columnClass, { 'gap-y-2': contentAttributes.externalError }]"
+        :class="columnClass"
       >
         <div
           v-if="layout.showHeader"
           data-test="message-header"
-          class="flex items-center min-w-0 gap-1.5 mb-1"
+          class="flex items-baseline min-w-0 gap-2 mb-1"
+          :class="{ 'justify-end': orientation === ORIENTATION.RIGHT }"
         >
           <template v-if="orientation === ORIENTATION.LEFT">
             <span
@@ -642,12 +715,28 @@ provideMessageContext({
             </span>
             <span
               v-if="isTeammateMessage"
-              class="text-xs font-medium rounded shrink-0 text-n-blue-11"
-              :class="{ 'px-1 bg-n-blue-4': !isFlat }"
+              data-test="message-teammate-tag"
+              class="text-xs font-medium rounded shrink-0 text-n-brand"
+              :class="{ 'px-1 bg-woot-50 dark:bg-woot-800/60': !isFlat }"
             >
               {{ t('CONVERSATION.KITA_TEAMMATE_TAG') }}
             </span>
+            <span
+              v-else-if="isExternalMessage"
+              data-test="message-external-tag"
+              class="text-xs font-medium rounded shrink-0 text-n-slate-11"
+              :class="{ 'px-1 bg-n-alpha-2': !isFlat }"
+            >
+              {{ t('CONVERSATION.KITA_EXTERNAL_TAG') }}
+            </span>
           </template>
+          <span
+            v-else-if="isFlat"
+            data-test="message-sender-name"
+            class="text-xs text-n-slate-11"
+          >
+            {{ t('CONVERSATION.KITA_YOU') }} ·
+          </span>
           <MessageMeta compact class="shrink-0 text-n-slate-11" />
         </div>
         <div
@@ -690,14 +779,15 @@ provideMessageContext({
         >
           {{ mirrorFooter }}
         </p>
-        <MessageError
-          v-if="contentAttributes.externalError"
-          :class="flexOrientationClass"
-          :error="contentAttributes.externalError"
-          @retry="emit('retry')"
-        />
       </div>
     </div>
+    <MessageStrip
+      v-if="errorStrip && !noticeStrip"
+      :text="errorStrip.text"
+      :can-retry="errorStrip.canRetry"
+      :connect-label="errorStrip.connectLabel"
+      @retry="emit('retry')"
+    />
     <div v-if="shouldShowContextMenu" class="context-menu-wrap">
       <ContextMenu
         v-if="isBubble"

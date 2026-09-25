@@ -30,10 +30,17 @@ const mountActivity = () => {
 describe('Activity', () => {
   it('renders activity content as plain text', () => {
     const wrapper = mountActivity();
-    const content = wrapper.find('span');
+    const content = wrapper.find('span[title]');
 
     expect(content.text()).toBe(maliciousContent);
     expect(content.find('img').exists()).toBe(false);
     expect(content.html()).toContain('&lt;img');
+  });
+
+  it('is a full-width divider line', () => {
+    const wrapper = mountActivity();
+    const line = wrapper.find('[data-bubble-name="activity"]');
+    expect(line.classes()).toContain('w-full');
+    expect(line.findAll('.h-px')).toHaveLength(2);
   });
 });

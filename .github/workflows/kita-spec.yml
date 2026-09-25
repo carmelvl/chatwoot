@@ -56,6 +56,11 @@ jobs:
           app/javascript/dashboard/routes/dashboard/customers/routes.js
           app/javascript/dashboard/routes/dashboard/dashboard.routes.js
           app/javascript/dashboard/components-next/sidebar/Sidebar.vue
+          app/javascript/dashboard/components-next/sidebar/SidebarGroupHeader.vue
+          app/javascript/dashboard/components-next/message/MessageStrip.vue
+          app/javascript/dashboard/components-next/message/helpers/*.js
+          app/javascript/dashboard/components-next/message/helpers/specs/*.js
+          app/javascript/dashboard/components-next/message/bubbles/Activity.vue
           app/javascript/dashboard/api/kitaThreads.js
           app/javascript/dashboard/composables/useKitaThreads.js
           app/javascript/dashboard/helper/kitaThreads.js

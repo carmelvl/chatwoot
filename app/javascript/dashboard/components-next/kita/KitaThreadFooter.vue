@@ -21,7 +21,9 @@ const open = () =>
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center max-w-full gap-3 text-sm">
+  <div
+    class="flex flex-wrap items-center max-w-full pt-1.5 gap-2.5 text-[0.8125rem]"
+  >
     <button
       type="button"
       class="flex items-center min-w-0 gap-3 text-n-slate-11 hover:underline"
@@ -29,7 +31,7 @@ const open = () =>
       @click="open"
     >
       <span v-if="summary.unread" class="rounded-full size-2 bg-n-brand" />
-      <span class="font-medium text-n-blue-11 shrink-0">
+      <span class="font-semibold text-n-brand shrink-0">
         {{
           t('KITA_THREADS.REPLY_COUNT', { count: summary.count }, summary.count)
         }}
@@ -42,6 +44,10 @@ const open = () =>
         }}
       </span>
     </button>
-    <KitaTicketChip v-if="summary.ticket" :ticket="summary.ticket" />
+    <KitaTicketChip
+      v-if="summary.ticket"
+      :ticket="summary.ticket"
+      :title="summary.title || ''"
+    />
   </div>
 </template>

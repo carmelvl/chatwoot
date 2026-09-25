@@ -126,6 +126,12 @@ export interface MessageAttributes {
   kita_backfill?: boolean;
   /** Unix seconds (fractions allowed) the message was really sent; honoured by the desk for kita_backfill messages. */
   external_created_at?: number;
+  /** A bridge notice the desk renders as a full-width strip: why a reply was not sent, or the mirror reminder. */
+  kita_notice?: 'not_sent' | 'mirror';
+  /** not_sent: not_connected | not_member */
+  kita_notice_reason?: string;
+  /** not_sent + not_connected: the agent's connect link */
+  kita_connect_url?: string;
 }
 
 /** Multipart body with Rails-style nested keys (content_attributes[external_thread][root]). */
