@@ -36,6 +36,7 @@ RSpec.describe 'Kita conversation threads', type: :request do
   it 'lists threads with replies, participants, unread and metadata, most recent activity first' do
     get base, headers: agent.create_new_auth_token, as: :json
 
+    expect(response.status).to eq(200), response.body
     rows = response.parsed_body['payload']
     expect(rows.pluck('root_message_id')).to eq([quiet_root.id, root.id])
     expect(rows.last).to include('title' => nil, 'status' => 'open', 'reply_count' => 2, 'unread' => true, 'ticket' => nil,
