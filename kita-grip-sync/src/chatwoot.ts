@@ -100,7 +100,7 @@ export class ChatwootApi {
   }
 }
 
-/** What the desk shows per thread. Grip has no SLA or display number yet, so neither is sent. */
+/** What the desk shows per thread. Grip's display id and SLA are sent once Grip returns them. */
 export interface DeskThread {
   conversation_id: number;
   root_message_id: number;
@@ -110,8 +110,12 @@ export interface DeskThread {
   ticket_priority?: string;
   /** open | resolved | dismissed (Grip's ticket words, not the sync's todo/done). */
   ticket_status?: string;
-  /** The account's DRI (Grip's default ticket assignee). */
-  ticket_owner?: string;
+  /** Grip's assignee (name, else email); before Grip sends one, the account's DRI. */
+  ticket_owner?: string | null;
+  /** Grip's display number, e.g. "KT-142" (when Grip sends it). */
+  ticket_display_id?: string | null;
+  /** ISO time the ticket's SLA is due (when Grip sends it). */
+  ticket_sla_due_at?: string | null;
 }
 
 /**

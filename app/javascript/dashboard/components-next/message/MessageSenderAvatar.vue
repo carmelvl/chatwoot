@@ -9,6 +9,7 @@ const props = defineProps({
   src: { type: String, default: '' },
   iconName: { type: String, default: null },
   platform: { type: String, default: null },
+  size: { type: Number, default: 32 },
 });
 
 const { t } = useI18n();
@@ -26,8 +27,14 @@ const platformLabel = computed(() => {
 </script>
 
 <template>
-  <div class="relative size-8 shrink-0">
-    <Avatar :name="name" :src="src" :icon-name="iconName" :size="32" />
+  <div class="relative shrink-0">
+    <Avatar
+      :name="name"
+      :src="src"
+      :icon-name="iconName"
+      :size="size"
+      rounded-full
+    />
     <span
       v-if="platform"
       :title="platformLabel"

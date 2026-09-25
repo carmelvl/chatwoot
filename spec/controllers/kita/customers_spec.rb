@@ -70,13 +70,15 @@ RSpec.describe 'Kita customers', type: :request do
     create(:message, conversation: conversations.last, account: account, inbox: inbox, message_type: :outgoing, private: true,
                      content: 'internal', created_at: Time.current)
     root = create(:message, conversation: conversations.first, account: account, inbox: inbox, message_type: :incoming)
+    sla_due_at = 108.minutes.from_now.change(usec: 0)
     Kita::MessageThread.create!(account: account, conversation: conversations.first, root_message: root, ticket_id: 'T-1',
-                                ticket_url: 'https://grip/t/1', ticket_priority: 'urgent', ticket_status: 'open')
+                                ticket_url: 'https://grip/t/1', ticket_priority: 'urgent', ticket_status: 'open',
+                                ticket_sla_due_at: sla_due_at)
 
     get path, headers: agent.create_new_auth_token, as: :json
 
     kredit = response.parsed_body['payload'].find { |row| row['id'] == '42' }
-    expect(kredit).to include('grip_account_id' => '42', 'urgent_ticket' => true)
+    expect(kredit).to include('grip_account_id' => '42', 'urgent_ticket' => true, 'urgent_sla_due_at' => sla_due_at.to_i)
     expect(kredit['conversations'].map { |c| c.slice('id', 'platform', 'label') }).to contain_exactly(
       { 'id' => conversations.first.display_id, 'platform' => 'slack', 'label' => '#kita-kredit' },
       { 'id' => conversations.last.display_id, 'platform' => 'whatsapp', 'label' => conversations.last.contact.name }

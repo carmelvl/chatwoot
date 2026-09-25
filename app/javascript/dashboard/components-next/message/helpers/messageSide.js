@@ -10,16 +10,19 @@ const senderTypeOf = ({ sender, senderType }) =>
 
 const senderIdOf = ({ sender, senderId }) => senderId ?? sender?.id;
 
-const isOwnMessage = message =>
+export const isOwnMessage = message =>
   senderTypeOf(message) === SENDER_TYPES.USER.toLowerCase() &&
   senderIdOf(message) === message.currentUserId;
 
 /**
  * Chat-app alignment: only the current user's own messages sit on the right.
  * Customers, other teammates, bots and sender-less messages sit on the left.
+ * With `flat` (Slack/Teams layout) every message sits on the left.
  */
 export const getMessageOrientation = message => {
   if (message.messageType === MESSAGE_TYPES.ACTIVITY) return ORIENTATION.CENTER;
+  // Slack/Teams read as a flat channel: everyone on the left, you included
+  if (message.flat) return ORIENTATION.LEFT;
   // an outgoing message still processing was sent by the current user
   if (
     message.status === MESSAGE_STATUS.PROGRESS &&

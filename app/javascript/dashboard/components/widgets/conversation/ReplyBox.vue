@@ -18,7 +18,10 @@ import MessageSignatureMissingAlert from './MessageSignatureMissingAlert.vue';
 import ReplyBoxBanner from './ReplyBoxBanner.vue';
 import KitaReplyGate from 'dashboard/components-next/kita/KitaReplyGate.vue';
 import { useKitaConnections } from 'dashboard/composables/useKitaConnections';
-import { kitaReplyBlock } from 'dashboard/helper/kitaConnect';
+import {
+  KITA_PERSONAL_PLATFORMS,
+  kitaReplyBlock,
+} from 'dashboard/helper/kitaConnect';
 import {
   defaultKitaChannelKey,
   isBridgeConversation,
@@ -301,6 +304,37 @@ export default {
     kitaReplyGated() {
       return !!this.kitaReplyBlockReason && !this.isOnPrivateNote;
     },
+    // Kita: where a public reply goes, for the "Sends to Slack · as you" hint
+    kitaSendsAs() {
+      if (this.isOnPrivateNote || this.kitaReplyGated) return null;
+      const selected = this.kitaSendableChannels.find(
+        channel => channel.key === this.selectedKitaChannelKey
+      );
+      const platform =
+        selected?.platform ?? this.currentChat?.custom_attributes?.channel;
+      if (!KITA_PERSONAL_PLATFORMS.includes(platform)) return null;
+      return {
+        platform,
+        channel:
+          selected?.label ??
+          this.currentChat?.custom_attributes?.channel_label ??
+          '',
+      };
+    },
+    kitaSendsToLabel() {
+      const names = {
+        slack: this.$t('KITA_CONNECT.PLATFORMS.SLACK'),
+        teams: this.$t('KITA_CONNECT.PLATFORMS.TEAMS'),
+      };
+      return this.$t('KITA_COMPOSER.SENDS_TO', {
+        platform: names[this.kitaSendsAs?.platform],
+      });
+    },
+    // Mirror gate: "Reply to Jun from WhatsApp Business on your phone"
+    kitaContactName() {
+      const name = this.currentChat?.meta?.sender?.name || '';
+      return name.split(' ')[0];
+    },
     isInstagramReplyRestricted() {
       return this.isMetaMessageSendingDisabled && this.isAnInstagramChannel;
     },
@@ -360,9 +394,16 @@ export default {
         }
         return this.$t('CONVERSATION.FOOTER.MESSAGING_RESTRICTED');
       }
-      return this.isPrivate
-        ? this.$t('CONVERSATION.FOOTER.PRIVATE_MSG_INPUT')
-        : this.$t('CONVERSATION.FOOTER.MSG_INPUT');
+      if (this.isPrivate) {
+        return this.$t('CONVERSATION.FOOTER.PRIVATE_MSG_INPUT');
+      }
+      // Kita: "Message #kita-tala…" in Slack/Teams conversations
+      if (this.kitaSendsAs) {
+        return this.$t('KITA_COMPOSER.PLACEHOLDER', {
+          channel: this.kitaSendsAs.channel,
+        });
+      }
+      return this.$t('CONVERSATION.FOOTER.MSG_INPUT');
     },
     isMessageLengthReachingThreshold() {
       return this.message.length > this.maxLength - 50;
@@ -1067,6 +1108,10 @@ export default {
       });
       this.hideContentTemplatesModal();
     },
+    // Kita: the gate's "Add private note" opens the private-note composer
+    addKitaPrivateNote() {
+      this.setReplyMode(REPLY_EDITOR_MODES.NOTE);
+    },
     setReplyMode(mode = REPLY_EDITOR_MODES.REPLY) {
       // Clear attachments when switching between private note and reply modes
       // This is to prevent from breaking the upload rules
@@ -1400,6 +1445,7 @@ export default {
   <ReplyBoxBanner :message="message" :is-on-private-note="isOnPrivateNote" />
   <div class="reply-box" :class="replyBoxClass">
     <ReplyTopPanel
+      v-if="!kitaReplyGated"
       :mode="replyType"
       :conversation-id="conversationId"
       :is-reply-restricted="!canSendPublicReply"
@@ -1424,29 +1470,34 @@ export default {
       @close="onSearchPopoverClose"
     />
     <div
-      v-if="isKitaBridge && !isOnPrivateNote && kitaSendableChannels.length"
+      v-if="kitaSendsAs"
       class="flex items-center gap-1 px-4 pt-2 text-xs text-n-slate-11"
       data-test-id="kita-channel-picker"
     >
-      <span>{{ $t('KITA_THREADS.REPLYING_IN') }}</span>
-      <select
-        :value="selectedKitaChannelKey"
-        class="!mb-0 !w-auto !h-auto !py-0.5 !ps-1 !pe-6 text-xs font-medium rounded-md border-0 bg-n-alpha-1 text-n-slate-12"
-        @change="kitaChannelKey = $event.target.value"
-      >
-        <option
-          v-for="channel in kitaSendableChannels"
-          :key="channel.key"
-          :value="channel.key"
+      <span>{{ kitaSendsToLabel }}</span>
+      <template v-if="kitaSendableChannels.length > 1">
+        <span class="ms-2">{{ $t('KITA_THREADS.REPLYING_IN') }}</span>
+        <select
+          :value="selectedKitaChannelKey"
+          class="!mb-0 !w-auto !h-auto !py-0.5 !ps-1 !pe-6 text-xs font-medium rounded-md border-0 bg-n-alpha-1 text-n-slate-12"
+          @change="kitaChannelKey = $event.target.value"
         >
-          {{ channel.label }}
-        </option>
-      </select>
+          <option
+            v-for="channel in kitaSendableChannels"
+            :key="channel.key"
+            :value="channel.key"
+          >
+            {{ channel.label }}
+          </option>
+        </select>
+      </template>
     </div>
     <KitaReplyGate
       v-if="kitaReplyGated"
       :platform="kitaComposerBlock.platform"
       :reason="kitaReplyBlockReason"
+      :contact-name="kitaContactName"
+      @add-private-note="addKitaPrivateNote"
     />
     <Transition
       v-else

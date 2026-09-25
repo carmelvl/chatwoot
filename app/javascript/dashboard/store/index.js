@@ -45,6 +45,7 @@ import reports from './modules/reports';
 import sla from './modules/sla';
 import slaReports from './modules/SLAReports';
 import sidebarSortPreferences from './modules/sidebarSortPreferences';
+import kitaCustomers from './modules/kitaCustomers';
 import summaryReports from './modules/summaryReports';
 import teamMembers from './modules/teamMembers';
 import teams from './modules/teams';
@@ -67,6 +68,7 @@ const plugins = [];
 
 export default createStore({
   modules: {
+    kitaCustomers,
     accounts,
     agentBots,
     agentCapacityPolicies,

@@ -145,4 +145,43 @@ describe('Message layout', () => {
     expect(header.find('[data-test="meta"]').exists()).toBe(true);
     expect(column.classes()).toContain('items-end');
   });
+
+  it('lays a Slack message out flat, own message on the left as You', () => {
+    const wrapper = mountMessage({ ...ownProps, conversationChannel: 'slack' });
+    const avatarColumn = wrapper.find('[data-test="message-avatar-column"]');
+
+    expect(avatarColumn.exists()).toBe(true);
+    const name = wrapper.find('[data-test="message-sender-name"]');
+    expect(name.text()).toBe('CONVERSATION.KITA_YOU');
+    expect(wrapper.find('[data-test="message-column"]').classes()).toContain(
+      'flex-1'
+    );
+  });
+
+  it('closes a WhatsApp mirror group with a footer, not a header', () => {
+    const wrapper = mountMessage({
+      ...customerProps,
+      conversationChannel: 'whatsapp',
+    });
+
+    expect(wrapper.find('[data-test="message-avatar-column"]').exists()).toBe(
+      false
+    );
+    expect(wrapper.find('[data-test="message-header"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="message-footer"]').text()).toMatch(
+      /^Maria · /
+    );
+  });
+
+  it('signs your own mirror message as sent from your phone', () => {
+    const wrapper = mountMessage({
+      ...ownProps,
+      conversationChannel: 'whatsapp',
+    });
+    const footer = wrapper.find('[data-test="message-footer"]').text();
+
+    expect(footer).toMatch(
+      /^CONVERSATION.KITA_YOU · CONVERSATION.KITA_FROM_PHONE · /
+    );
+  });
 });

@@ -37,6 +37,18 @@ export interface TicketRow {
   status: string; // todo | done | dismissed (what we last told Grip)
   notePosted: boolean;
   labelAdded: boolean;
+  /** What Grip last said about the ticket (optional fields; older Grips send none). Shown in the desk. */
+  grip?: GripTicketFields;
+}
+
+/** Ticket fields Grip returns on POST/PATCH /support/tickets, all optional. */
+export interface GripTicketFields {
+  display_id?: string | null;
+  priority?: string | null;
+  status?: string | null;
+  assignee_email?: string | null;
+  assignee_name?: string | null;
+  sla_due_at?: string | null;
 }
 
 export interface ThreadMessage {
@@ -156,6 +168,9 @@ export class Store {
         ALTER TABLE tickets_v2 RENAME TO tickets;
         COMMIT;`);
     }
+    // Grip's ticket fields (display id, SLA, assignee...), kept for the desk.
+    const tcols2 = (this.db.prepare('PRAGMA table_info(tickets)').all() as any[]).map((c) => c.name);
+    if (!tcols2.includes('grip')) this.db.exec("ALTER TABLE tickets ADD COLUMN grip TEXT NOT NULL DEFAULT '{}'");
     const dcols = (this.db.prepare('PRAGMA table_info(dismissals)').all() as any[]).map((c) => c.name);
     if (!dcols.includes('issue_key')) this.db.exec('ALTER TABLE dismissals ADD COLUMN issue_key TEXT');
   }
@@ -244,14 +259,15 @@ export class Store {
   private ticketRow(r: any): TicketRow {
     return {
       conversationId: Number(r.conversation_id), issueKey: r.issue_key ?? '', ticketId: r.ticket_id, ticketUrl: r.ticket_url, title: r.title, priority: r.priority,
-      summary: r.summary, status: r.status, notePosted: !!r.note_posted, labelAdded: !!r.label_added,
+      summary: r.summary, status: r.status, notePosted: !!r.note_posted, labelAdded: !!r.label_added, grip: JSON.parse(r.grip ?? '{}'),
     };
   }
 
   putTicket(t: TicketRow): void {
-    this.db.prepare(`INSERT OR REPLACE INTO tickets (conversation_id, issue_key, ticket_id, ticket_url, title, priority, summary, status, note_posted, label_added, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(t.conversationId, t.issueKey, t.ticketId, t.ticketUrl, t.title, t.priority, t.summary, t.status, t.notePosted ? 1 : 0, t.labelAdded ? 1 : 0, Date.now());
+    this.db.prepare(`INSERT OR REPLACE INTO tickets (conversation_id, issue_key, ticket_id, ticket_url, title, priority, summary, status, note_posted, label_added, grip, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(t.conversationId, t.issueKey, t.ticketId, t.ticketUrl, t.title, t.priority, t.summary, t.status, t.notePosted ? 1 : 0, t.labelAdded ? 1 : 0,
+        JSON.stringify(t.grip ?? {}), Date.now());
   }
 
   logDismissal(conversationId: number, t: TicketRow | undefined, thread: ThreadMessage[]): void {

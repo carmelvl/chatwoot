@@ -1,9 +1,8 @@
 <script setup>
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import Avatar from 'next/avatar/Avatar.vue';
 import KitaTicketChip from './KitaTicketChip.vue';
-import { dynamicTime } from 'shared/helpers/timeHelper';
+import { dynamicTime, shortTimestamp } from 'shared/helpers/timeHelper';
 import { threadFooterSummary } from 'dashboard/helper/kitaThreads';
 import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 
@@ -22,24 +21,14 @@ const open = () =>
 </script>
 
 <template>
-  <div class="flex items-center gap-2 max-w-full">
+  <div class="flex flex-wrap items-center max-w-full gap-3 text-sm">
     <button
       type="button"
-      class="flex items-center min-w-0 gap-2 px-2 py-1 text-xs rounded-md text-n-slate-11 bg-n-alpha-1 hover:bg-n-alpha-2"
+      class="flex items-center min-w-0 gap-3 text-n-slate-11 hover:underline"
       data-test-id="kita-thread-footer"
       @click="open"
     >
       <span v-if="summary.unread" class="rounded-full size-2 bg-n-brand" />
-      <span class="flex -space-x-1">
-        <Avatar
-          v-for="participant in summary.avatars"
-          :key="`${participant.type}-${participant.id}`"
-          :name="participant.name"
-          :src="participant.thumbnail"
-          :size="16"
-          rounded-full
-        />
-      </span>
       <span class="font-medium text-n-blue-11 shrink-0">
         {{
           t('KITA_THREADS.REPLY_COUNT', { count: summary.count }, summary.count)
@@ -48,12 +37,9 @@ const open = () =>
       <span v-if="summary.lastReplyAt" class="shrink-0">
         {{
           t('KITA_THREADS.LAST_REPLY', {
-            time: dynamicTime(summary.lastReplyAt),
+            time: shortTimestamp(dynamicTime(summary.lastReplyAt), true),
           })
         }}
-      </span>
-      <span v-if="summary.title" class="truncate text-n-slate-12">
-        {{ summary.title }}
       </span>
     </button>
     <KitaTicketChip v-if="summary.ticket" :ticket="summary.ticket" />

@@ -15,6 +15,20 @@ describe('messageSide', () => {
     expect(isKitaTeammate(message)).toBe(false);
   });
 
+  it('puts every message on the left in a flat (Slack/Teams) layout', () => {
+    const own = {
+      messageType: MESSAGE_TYPES.OUTGOING,
+      status: MESSAGE_STATUS.SENT,
+      sender: { id: 1, type: 'user' },
+      currentUserId,
+      flat: true,
+    };
+    expect(getMessageOrientation(own)).toBe(ORIENTATION.LEFT);
+    expect(
+      getMessageOrientation({ ...own, messageType: MESSAGE_TYPES.ACTIVITY })
+    ).toBe(ORIENTATION.CENTER);
+  });
+
   it('puts an in-progress outgoing message on the right', () => {
     const message = {
       messageType: MESSAGE_TYPES.OUTGOING,

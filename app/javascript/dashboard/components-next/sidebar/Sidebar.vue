@@ -21,7 +21,6 @@ import ChannelLeaf from './ChannelLeaf.vue';
 import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import EmojiIcon from 'next/emoji-icon-picker/EmojiIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
-import Logo from 'next/icon/Logo.vue';
 import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
 import {
   SIDEBAR_SORT_SECTIONS,
@@ -255,6 +254,26 @@ onMounted(() => {
   store.dispatch('customViews/get', 'conversation');
   store.dispatch('customViews/get', 'contact');
 });
+
+// Kita: my customers (DRI = me) for the Customers count and the MY CUSTOMERS list
+const myCustomers = useMapGetter('kitaCustomers/getMine');
+watch(
+  accountId,
+  id => {
+    if (id) store.dispatch('kitaCustomers/get', { mine: true }).catch(() => {});
+  },
+  { immediate: true }
+);
+const myCustomerItems = computed(() =>
+  myCustomers.value
+    .filter(customer => customer.name)
+    .map(customer => ({
+      name: `kita-customer-${customer.id}`,
+      label: customer.name,
+      to: accountScopedRoute('kita_customer', { customerId: customer.id }),
+      activeOn: [],
+    }))
+);
 
 watch([accountId, hasConversationUnreadCounts], fetchConversationUnreadCounts, {
   immediate: true,
@@ -511,7 +530,19 @@ const menuItems = computed(() => {
       label: t('SIDEBAR.CUSTOMERS'),
       icon: 'i-lucide-building-2',
       to: accountScopedRoute('kita_customers'),
-      activeOn: ['kita_customers'],
+      activeOn: [
+        'kita_customers',
+        'kita_customer',
+        'kita_customer_conversation',
+      ],
+      getterKeys: { count: 'kitaCustomers/getMineCount' },
+    },
+    {
+      name: 'Kita Mentions',
+      label: t('SIDEBAR.MENTIONS'),
+      icon: 'i-lucide-at-sign',
+      to: accountScopedRoute('conversation_mentions'),
+      activeOn: ['conversation_mentions', 'conversation_through_mentions'],
     },
     {
       name: 'Captain',
@@ -962,6 +993,17 @@ const menuItems = computed(() => {
     },
   ];
 });
+// Kita nav: Conversations, Customers, Mentions and Reports first; every other
+// upstream entry stays, in its original order, under "More".
+const PRIMARY_MENU = ['Conversation', 'Customers', 'Kita Mentions', 'Reports'];
+const primaryMenuItems = computed(() =>
+  PRIMARY_MENU.map(name =>
+    menuItems.value.find(item => item.name === name)
+  ).filter(Boolean)
+);
+const moreMenuItems = computed(() =>
+  menuItems.value.filter(item => !PRIMARY_MENU.includes(item.name))
+);
 </script>
 
 <template>
@@ -976,7 +1018,7 @@ const menuItems = computed(() => {
         ],
       },
     ]"
-    class="bg-n-background flex flex-col text-sm pb-px fixed top-0 ltr:left-0 rtl:right-0 h-full z-40 w-[200px] md:w-auto md:relative md:flex-shrink-0 md:ltr:translate-x-0 md:rtl:translate-x-0 ltr:border-r rtl:border-l border-n-weak"
+    class="dark bg-[#14402A] flex flex-col text-sm pb-px fixed top-0 ltr:left-0 rtl:right-0 h-full z-40 w-[200px] md:w-auto md:relative md:flex-shrink-0 md:ltr:translate-x-0 md:rtl:translate-x-0"
     :class="[
       {
         'shadow-lg md:shadow-none': isMobileSidebarOpen,
@@ -991,6 +1033,17 @@ const menuItems = computed(() => {
       class="grid"
       :class="isEffectivelyCollapsed ? 'mt-3 mb-6 gap-4' : 'mt-1 mb-4 gap-2'"
     >
+      <RouterLink
+        v-if="!isEffectivelyCollapsed"
+        :to="accountScopedRoute('kita_customers')"
+        class="px-3 pt-4 pb-2"
+      >
+        <img
+          src="/brand-assets/kita-logo-dark.svg"
+          :alt="t('SIDEBAR.CUSTOMERS')"
+          class="w-auto h-12"
+        />
+      </RouterLink>
       <div
         class="flex gap-2 items-center min-w-0"
         :class="{
@@ -1005,10 +1058,6 @@ const menuItems = computed(() => {
           />
         </template>
         <template v-else>
-          <div class="grid flex-shrink-0 place-content-center size-6">
-            <Logo class="size-4" />
-          </div>
-          <div class="flex-shrink-0 w-px h-3 bg-n-strong" />
           <SidebarAccountSwitcher
             class="flex-grow -mx-1 min-w-0"
             @show-create-account-modal="emit('showCreateAccountModal')"
@@ -1069,7 +1118,41 @@ const menuItems = computed(() => {
         :class="{ 'items-center': isEffectivelyCollapsed }"
       >
         <SidebarGroup
-          v-for="item in menuItems"
+          v-for="item in primaryMenuItems"
+          :key="item.name"
+          v-bind="item"
+        />
+      </ul>
+      <template v-if="myCustomerItems.length && !isEffectivelyCollapsed">
+        <p
+          class="px-2 pt-4 mb-0 text-xs font-medium tracking-widest uppercase text-n-slate-11"
+        >
+          {{ t('SIDEBAR.MY_CUSTOMERS') }}
+        </p>
+        <ul
+          data-test="kita-my-customers"
+          class="flex flex-col gap-1 m-0 list-none min-w-0"
+        >
+          <SidebarGroup
+            v-for="item in myCustomerItems"
+            :key="item.name"
+            v-bind="item"
+          />
+        </ul>
+      </template>
+      <p
+        v-if="!isEffectivelyCollapsed"
+        class="px-2 pt-4 mb-0 text-xs font-medium tracking-widest uppercase text-n-slate-11"
+      >
+        {{ t('SIDEBAR.MORE') }}
+      </p>
+      <ul
+        data-test="kita-more-menu"
+        class="flex flex-col gap-1 m-0 list-none min-w-0"
+        :class="{ 'items-center': isEffectivelyCollapsed }"
+      >
+        <SidebarGroup
+          v-for="item in moreMenuItems"
           :key="item.name"
           v-bind="item"
         />
@@ -1079,7 +1162,7 @@ const menuItems = computed(() => {
       class="flex relative flex-col flex-shrink-0 gap-1 justify-between items-center"
     >
       <div
-        class="pointer-events-none absolute inset-x-0 -top-[1.938rem] h-8 bg-gradient-to-t from-n-background to-transparent"
+        class="pointer-events-none absolute inset-x-0 -top-[1.938rem] h-8 bg-gradient-to-t from-[#14402A] to-transparent"
       />
       <SidebarChangelogCard
         v-if="

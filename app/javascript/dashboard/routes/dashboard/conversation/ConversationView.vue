@@ -16,6 +16,7 @@ import { emitter } from 'shared/helpers/mitt';
 import SidepanelSwitch from 'dashboard/components-next/Conversation/SidepanelSwitch.vue';
 import ConversationSidebar from 'dashboard/components/widgets/conversation/ConversationSidebar.vue';
 import KitaThreadPane from 'dashboard/components-next/kita/KitaThreadPane.vue';
+import KitaCustomersList from 'dashboard/components-next/kita/KitaCustomersList.vue';
 import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 
 export default {
@@ -26,6 +27,7 @@ export default {
     SidepanelSwitch,
     ConversationSidebar,
     KitaThreadPane,
+    KitaCustomersList,
   },
   beforeRouteLeave(to, from, next) {
     // Clear selected state if navigating away from a conversation to a route without a conversationId to prevent stale data issues
@@ -55,6 +57,12 @@ export default {
     conversationType: {
       type: String,
       default: '',
+    },
+    // Kita: set on the Customers routes ('' = no customer picked yet), where the
+    // customers list replaces the conversation list. null everywhere else.
+    customerId: {
+      type: String,
+      default: null,
     },
     foldersId: {
       type: [String, Number],
@@ -94,6 +102,11 @@ export default {
     showConversationList() {
       return this.isOnExpandedLayout ? !this.conversationId : true;
     },
+    kitaCustomer() {
+      return this.customerId
+        ? this.$store.getters['kitaCustomers/getCustomer'](this.customerId)
+        : null;
+    },
     showMessageView() {
       return this.conversationId ? true : !this.isOnExpandedLayout;
     },
@@ -117,6 +130,22 @@ export default {
     conversationId() {
       this.fetchConversationIfUnavailable();
       this.showThreadsTab = false;
+    },
+    // Kita: a customer opens on its most recent conversation
+    kitaCustomer: {
+      handler(customer) {
+        const [latest] = customer?.conversations || [];
+        if (this.conversationId || !latest) return;
+        this.$router.replace({
+          name: 'kita_customer_conversation',
+          params: {
+            accountId: this.accountId,
+            customerId: this.customerId,
+            conversation_id: latest.id,
+          },
+        });
+      },
+      immediate: true,
     },
     // Kita: the contact/copilot toggles bring the sidebar back over a thread
     'uiSettings.is_contact_sidebar_open': 'closeThreadPane',
@@ -149,6 +178,8 @@ export default {
     },
     initialize() {
       this.$store.dispatch('setActiveInbox', this.inboxId);
+      // The customers list doesn't load conversations like the chat list does
+      if (this.customerId) this.fetchConversationIfUnavailable();
       this.setActiveChat();
     },
     toggleConversationLayout() {
@@ -216,7 +247,9 @@ export default {
 
 <template>
   <section class="flex w-full h-full min-w-0">
+    <KitaCustomersList v-if="customerId !== null" :customer-id="customerId" />
     <ChatList
+      v-else
       :show-conversation-list="showConversationList"
       :conversation-inbox="inboxId"
       :label="label"
@@ -229,6 +262,7 @@ export default {
     <ConversationBox
       v-if="showMessageView"
       :inbox-id="inboxId"
+      :customer-id="customerId"
       :is-on-expanded-layout="isOnExpandedLayout"
     >
       <SidepanelSwitch v-if="currentChat.id" />

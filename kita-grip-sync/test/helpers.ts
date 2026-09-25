@@ -28,7 +28,7 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owner
   const labels = new Map<number, string[]>();
   let clock = Date.parse('2026-09-24T02:00:00Z');
   let noteId = 9000;
-  const grip: { inScope?: boolean; envelope?: boolean } = {}; // what POST /support/conversations answers for in_scope (unset = older Grip)
+  const grip: { inScope?: boolean; envelope?: boolean; ticketFields?: Record<string, unknown> } = {}; // what POST /support/conversations answers for in_scope (unset = older Grip)
   const statuses = new Map<number, string>();
   // Owner in the desk: Grip owner fields, Chatwoot agents/assignees/attributes/definitions.
   const owner: Record<string, unknown> = {};
@@ -59,14 +59,14 @@ export function world(opts: { debounceMs?: number; debounceMaxMs?: number; owner
         const k = `${body.chatwoot_conversation_id}:${body.issue_key ?? ''}`;
         const t = tickets.get(k) ?? { id: `t-${tickets.size + 1}`, status: 'todo' };
         tickets.set(k, { ...t, ...body });
-        return Response.json({ success: true, data: { ticket_id: t.id, ticket_url: `https://internal.kita.ai/tasks/${t.id}`, created: !tickets.has(k), dismissed: false, ...(body.issue_key ? { issue_key: body.issue_key } : {}) } });
+        return Response.json({ success: true, data: { ticket_id: t.id, ticket_url: `https://internal.kita.ai/tasks/${t.id}`, created: !tickets.has(k), dismissed: false, ...(body.issue_key ? { issue_key: body.issue_key } : {}), ...(grip.ticketFields ?? {}) } });
       }
       const m = p.match(/^\/api\/v1\/support\/tickets\/(\d+)$/);
       if (m && init.method === 'PATCH') {
         const hit = [...tickets.entries()].filter(([k]) => body.all ? k.startsWith(`${m[1]}:`) : k === `${m[1]}:${body.issue_key ?? ''}`);
         if (!hit.length) return new Response('{"success":false}', { status: 404 });
         for (const [, t] of hit) if (t.status !== 'dismissed') t.status = body.status;
-        return Response.json({ success: true, data: { updated: hit.length } });
+        return Response.json({ success: true, data: { updated: hit.length, ...(body.all ? {} : grip.ticketFields ?? {}) } });
       }
     }
     if (host === 'rails') {

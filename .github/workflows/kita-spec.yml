@@ -54,7 +54,6 @@ jobs:
           app/javascript/dashboard/api/kitaCustomers.js
           app/javascript/dashboard/components-next/kita/customersHelper.js
           app/javascript/dashboard/routes/dashboard/customers/routes.js
-          app/javascript/dashboard/routes/dashboard/customers/pages/CustomersIndex.vue
           app/javascript/dashboard/routes/dashboard/dashboard.routes.js
           app/javascript/dashboard/components-next/sidebar/Sidebar.vue
           app/javascript/dashboard/api/kitaThreads.js
@@ -69,7 +68,12 @@ jobs:
           app/javascript/dashboard/components-next/sidebar/SidebarProfileMenu.vue
           app/javascript/dashboard/routes/dashboard/Dashboard.vue
           app/javascript/shared/constants/busEvents.js
+          app/javascript/dashboard/composables/useKitaPlatformName.js
+          app/javascript/dashboard/store/modules/kitaCustomers.js
+          app/javascript/dashboard/store/index.js
+          app/javascript/dashboard/components-next/message/bubbles/Text/Index.vue
           && pnpm exec vitest run app/javascript/dashboard/helper/specs/kitaConnect.spec.js
+          app/javascript/dashboard/helper/specs/kitaThreads.spec.js
           app/javascript/dashboard/components-next/message app/javascript/dashboard/components-next/kita
           app/javascript/dashboard/components/widgets/conversation
       - name: Bridge tests

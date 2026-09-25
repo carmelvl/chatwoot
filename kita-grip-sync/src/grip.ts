@@ -1,5 +1,5 @@
 import { requestJson } from './http.ts';
-import type { Priority } from './store.ts';
+import type { GripTicketFields, Priority } from './store.ts';
 
 export interface TicketInput {
   chatwoot_conversation_id: number;
@@ -45,11 +45,12 @@ export class GripClient {
   }
 
   /** Upserts by (chatwoot_conversation_id, issue_key): one Grip ticket per thread. */
-  upsertTicket(body: TicketInput): Promise<{ ticket_id: string; ticket_url: string; created?: boolean; dismissed?: boolean; issue_key?: string }> {
+  /** Newer Grips also return the ticket's display id, priority, status, assignee and SLA due time (GripTicketFields). */
+  upsertTicket(body: TicketInput): Promise<{ ticket_id: string; ticket_url: string; created?: boolean; dismissed?: boolean; issue_key?: string } & GripTicketFields> {
     return this.call('POST', 'tickets', body);
   }
 
-  setTicketStatus(conversationId: number, body: TicketStatusInput): Promise<unknown> {
+  setTicketStatus(conversationId: number, body: TicketStatusInput): Promise<(GripTicketFields & Record<string, unknown>) | null> {
     return this.call('PATCH', `tickets/${conversationId}`, body);
   }
 }

@@ -1206,9 +1206,11 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_25_000000) do
     t.string "ticket_url"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "ticket_display_id"
     t.string "ticket_priority"
     t.string "ticket_status"
     t.string "ticket_owner"
+    t.datetime "ticket_sla_due_at"
     t.index ["account_id"], name: "index_kita_threads_on_account_id"
     t.index ["conversation_id"], name: "index_kita_threads_on_conversation_id"
     t.index ["root_message_id"], name: "index_kita_threads_on_root_message_id", unique: true

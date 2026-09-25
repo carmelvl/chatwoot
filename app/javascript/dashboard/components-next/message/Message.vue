@@ -24,8 +24,18 @@ import {
 
 import MessageSenderAvatar from './MessageSenderAvatar.vue';
 import MessageMeta from './MessageMeta.vue';
-import { getMessageOrientation, isKitaTeammate } from './helpers/messageSide';
-import { getMessageLayout } from './helpers/messageLayout';
+import {
+  getMessageOrientation,
+  isKitaTeammate,
+  isOwnMessage,
+} from './helpers/messageSide';
+import {
+  LAYOUT_STYLES,
+  getMessageLayout,
+  layoutStyleFor,
+} from './helpers/messageLayout';
+import { messageStamp } from 'shared/helpers/timeHelper';
+import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 import { KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
 
 import TextBubble from './bubbles/Text/Index.vue';
@@ -220,7 +230,27 @@ const variant = computed(() => {
  * Chat-app alignment: only the current user's own messages sit on the right
  * @returns {import('vue').ComputedRef<'left'|'right'|'center'>} The computed orientation
  */
-const orientation = computed(() => getMessageOrientation(props));
+const layoutStyle = computed(() =>
+  props.isEmailInbox
+    ? LAYOUT_STYLES.CHAT
+    : layoutStyleFor(props.conversationChannel)
+);
+const isFlat = computed(() => layoutStyle.value === LAYOUT_STYLES.FLAT);
+
+const orientation = computed(() =>
+  getMessageOrientation({ ...props, flat: isFlat.value })
+);
+
+const isOwn = computed(() => isOwnMessage(props));
+
+// A thread root is highlighted while its thread is open in the pane
+const { openThread } = useKitaThreads();
+const isOpenThreadRoot = computed(
+  () =>
+    !!props.kitaThread &&
+    openThread.value?.conversationId === props.conversationId &&
+    openThread.value?.rootId === props.id
+);
 
 const isBotOrAgentMessage = computed(
   () => orientation.value === ORIENTATION.RIGHT
@@ -253,25 +283,28 @@ const sourcePlatform = computed(() => {
     : null;
 });
 
+const shouldGroupWithNext = computed(() => {
+  if (props.status === MESSAGE_STATUS.FAILED) return false;
+
+  return props.groupWithNext;
+});
+
 const layout = computed(() =>
   getMessageLayout({
     orientation: orientation.value,
     variant: variant.value,
     groupWithPrevious: props.groupWithPrevious,
+    groupWithNext: shouldGroupWithNext.value,
+    style: layoutStyle.value,
   })
 );
 
 const columnClass = computed(() => {
   if (variant.value === MESSAGE_VARIANTS.EMAIL) return 'w-full';
+  if (isFlat.value) return 'flex-1 items-start';
   return orientation.value === ORIENTATION.RIGHT
     ? 'max-w-[70%] items-end'
     : 'max-w-[70%] items-start';
-});
-
-const shouldGroupWithNext = computed(() => {
-  if (props.status === MESSAGE_STATUS.FAILED) return false;
-
-  return props.groupWithNext;
 });
 
 const componentToRender = computed(() => {
@@ -516,6 +549,26 @@ const setupHighlightTimer = () => {
 
 onMounted(setupHighlightTimer);
 
+// Flat layout names you "You"; mirror footers read "Jun · 11:40 AM"
+const displayName = computed(() =>
+  isOwn.value && isFlat.value
+    ? t('CONVERSATION.KITA_YOU')
+    : avatarInfo.value.name
+);
+
+const mirrorFooter = computed(() => {
+  const time = messageStamp(props.createdAt);
+  if (orientation.value === ORIENTATION.RIGHT) {
+    return [
+      t('CONVERSATION.KITA_YOU'),
+      t('CONVERSATION.KITA_FROM_PHONE'),
+      time,
+    ].join(' · ');
+  }
+  const [first] = (avatarInfo.value.name || '').split(' ');
+  return [first, time].filter(Boolean).join(' · ');
+});
+
 provideMessageContext({
   ...toRefs(props),
   isPrivate: computed(() => props.private),
@@ -524,6 +577,7 @@ provideMessageContext({
   isBotOrAgentMessage,
   shouldGroupWithNext,
   timeInHeader: computed(() => layout.value.timeInHeader),
+  layoutStyle,
 });
 </script>
 
@@ -540,8 +594,10 @@ provideMessageContext({
         'group-with-next mb-1': shouldGroupWithNext,
         'mb-4': !shouldGroupWithNext,
         'bg-n-alpha-1': showBackgroundHighlight,
+        'bg-n-blue-2 rounded-xl p-4': isOpenThreadRoot,
       },
     ]"
+    :data-thread-open="isOpenThreadRoot || undefined"
   >
     <div v-if="variant === MESSAGE_VARIANTS.ACTIVITY">
       <ActivityBubble :content="content" />
@@ -555,10 +611,15 @@ provideMessageContext({
       <div
         v-if="layout.avatarColumn"
         data-test="message-avatar-column"
-        class="w-8 shrink-0"
+        class="shrink-0"
+        :class="isFlat ? 'w-9 me-1' : 'w-8'"
       >
         <div v-if="layout.showAvatar" v-tooltip.left-end="avatarTooltip">
-          <MessageSenderAvatar v-bind="avatarInfo" :platform="sourcePlatform" />
+          <MessageSenderAvatar
+            v-bind="avatarInfo"
+            :platform="isFlat ? null : sourcePlatform"
+            :size="isFlat ? 36 : 32"
+          />
         </div>
       </div>
       <div
@@ -573,14 +634,16 @@ provideMessageContext({
         >
           <template v-if="orientation === ORIENTATION.LEFT">
             <span
-              v-if="avatarInfo.name"
+              v-if="displayName"
+              data-test="message-sender-name"
               class="text-sm font-semibold truncate text-n-slate-12"
             >
-              {{ avatarInfo.name }}
+              {{ displayName }}
             </span>
             <span
               v-if="isTeammateMessage"
-              class="px-1 text-xs font-medium rounded shrink-0 bg-n-blue-4 text-n-blue-11"
+              class="text-xs font-medium rounded shrink-0 text-n-blue-11"
+              :class="{ 'px-1 bg-n-blue-4': !isFlat }"
             >
               {{ t('CONVERSATION.KITA_TEAMMATE_TAG') }}
             </span>
@@ -620,6 +683,13 @@ provideMessageContext({
             :conversation-id="conversationId"
           />
         </div>
+        <p
+          v-if="layout.showFooter"
+          data-test="message-footer"
+          class="px-1 mt-1 mb-0 text-xs text-n-slate-11"
+        >
+          {{ mirrorFooter }}
+        </p>
         <MessageError
           v-if="contentAttributes.externalError"
           :class="flexOrientationClass"

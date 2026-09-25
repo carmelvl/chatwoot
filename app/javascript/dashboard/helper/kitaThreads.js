@@ -93,3 +93,55 @@ export const threadMessages = (messages, rootId) =>
         message.id === rootId || message.contentAttributes?.inReplyTo === rootId
     )
     .sort((a, b) => a.createdAt - b.createdAt);
+
+// Grip ticket statuses that are finished
+const CLOSED_TICKET_STATUSES = ['resolved', 'dismissed'];
+
+export const isOpenTicket = ticket =>
+  !!ticket && !CLOSED_TICKET_STATUSES.includes(ticket.status);
+
+/** Threads with a ticket (the Tickets tab), open ones first, API order kept. */
+export const ticketThreads = threads => {
+  const withTicket = threads.filter(thread => thread.ticket);
+  return [
+    ...withTicket.filter(thread => isOpenTicket(thread.ticket)),
+    ...withTicket.filter(thread => !isOpenTicket(thread.ticket)),
+  ];
+};
+
+export const openTicketCount = threads =>
+  threads.filter(thread => isOpenTicket(thread.ticket)).length;
+
+/** Urgent and high tickets are flagged red in the desk. */
+export const isPressingTicket = ticket =>
+  ['urgent', 'high'].includes(ticket?.priority);
+
+// SLA shows red when this close to due (or past it)
+export const SLA_WARNING_MINUTES = 2 * 60;
+
+/** "1h 48m", "48m", "2d 3h" for a number of minutes. */
+export const slaDuration = minutes => {
+  const days = Math.floor(minutes / (24 * 60));
+  const hours = Math.floor((minutes % (24 * 60)) / 60);
+  const mins = minutes % 60;
+  if (days) return hours ? `${days}d ${hours}h` : `${days}d`;
+  if (hours) return mins ? `${hours}h ${mins}m` : `${hours}h`;
+  return `${mins}m`;
+};
+
+/**
+ * Time left on a ticket's SLA.
+ * @param {number|null} dueAt - SLA due time (unix seconds); null when Grip sent none
+ * @param {number} [now=Date.now()] - Current time in ms
+ * @returns {{duration: string, breached: boolean, pressing: boolean}|null}
+ */
+export const slaStatus = (dueAt, now = Date.now()) => {
+  if (!dueAt) return null;
+  const minutes = Math.floor((dueAt * 1000 - now) / 60000);
+  const breached = minutes < 0;
+  return {
+    duration: breached ? '' : slaDuration(minutes),
+    breached,
+    pressing: breached || minutes <= SLA_WARNING_MINUTES,
+  };
+};

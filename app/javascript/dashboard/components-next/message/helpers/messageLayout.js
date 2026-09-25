@@ -44,16 +44,36 @@ export const groupsWithPrevious = (message, previous, currentUserId) => {
 };
 
 /**
- * Chat layout of one message. Left messages keep a fixed avatar column (the
- * avatar itself only on the first message of a group); every group opens
- * with a header line carrying the time. Email and activity keep their own
- * layout. Grouped follow-ups have no header, so they carry a compact meta
- * of their own: delivery status always, time on hover.
+ * How a conversation's messages are laid out, from its Kita bridge platform:
+ * Slack/Teams read as a flat channel (everyone on the left, no bubbles),
+ * WhatsApp/Viber mirrors as phone chat bubbles, everything else as chat.
+ */
+export const LAYOUT_STYLES = { CHAT: 'chat', FLAT: 'flat', MIRROR: 'mirror' };
+
+export const layoutStyleFor = channel => {
+  if (['slack', 'teams'].includes(channel)) return LAYOUT_STYLES.FLAT;
+  if (['whatsapp', 'viber'].includes(channel)) return LAYOUT_STYLES.MIRROR;
+  return LAYOUT_STYLES.CHAT;
+};
+
+/**
+ * Layout of one message.
+ * - chat: left messages keep a fixed avatar column (the avatar only on the
+ *   first message of a group); every group opens with a header line
+ *   carrying the time.
+ * - flat: like chat, but every message sits on the left with an avatar.
+ * - mirror: no avatars or header; the group closes with a footer line
+ *   ("Jun · 11:40 AM").
+ * Grouped follow-ups have no header, so in chat and flat they carry a
+ * compact meta of their own: delivery status always, time on hover.
+ * Email and activity keep their own layout.
  */
 export const getMessageLayout = ({
   orientation,
   variant,
   groupWithPrevious,
+  groupWithNext = false,
+  style = LAYOUT_STYLES.CHAT,
 }) => {
   if (
     orientation === ORIENTATION.CENTER ||
@@ -65,6 +85,18 @@ export const getMessageLayout = ({
       showHeader: false,
       timeInHeader: false,
       followUpMeta: false,
+      showFooter: false,
+    };
+  }
+
+  if (style === LAYOUT_STYLES.MIRROR) {
+    return {
+      avatarColumn: false,
+      showAvatar: false,
+      showHeader: false,
+      timeInHeader: true,
+      followUpMeta: false,
+      showFooter: !groupWithNext,
     };
   }
 
@@ -74,7 +106,7 @@ export const getMessageLayout = ({
     showAvatar: isLeft && !groupWithPrevious,
     showHeader: !groupWithPrevious,
     timeInHeader: true,
-    // grouped follow-ups keep their own status ticks, with the time on hover
     followUpMeta: !!groupWithPrevious,
+    showFooter: false,
   };
 };

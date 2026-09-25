@@ -6,6 +6,7 @@ import EmptyState from './EmptyState/EmptyState.vue';
 import MessagesView from './MessagesView.vue';
 import KitaThreadsTabs from 'dashboard/components-next/kita/KitaThreadsTabs.vue';
 import KitaThreadsList from 'dashboard/components-next/kita/KitaThreadsList.vue';
+import KitaCustomerHeader from 'dashboard/components-next/kita/KitaCustomerHeader.vue';
 import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 import { isBridgeConversation } from 'dashboard/helper/kitaThreads';
 
@@ -17,8 +18,14 @@ export default {
     MessagesView,
     KitaThreadsTabs,
     KitaThreadsList,
+    KitaCustomerHeader,
   },
   props: {
+    // Kita: the Customers workspace swaps the conversation header for the customer header
+    customerId: {
+      type: String,
+      default: null,
+    },
     inboxId: {
       type: [Number, String],
       default: '',
@@ -66,8 +73,11 @@ export default {
     isKitaBridge() {
       return !!this.currentChat.id && isBridgeConversation(this.currentChat);
     },
+    isCustomerView() {
+      return !!this.customerId && !!this.currentChat.id;
+    },
     showKitaThreads() {
-      return this.isKitaBridge && this.showThreadsTab;
+      return (this.isKitaBridge || this.isCustomerView) && this.showThreadsTab;
     },
     showContactPanel() {
       return this.isContactPanelOpen && this.currentChat.id;
@@ -115,8 +125,13 @@ export default {
       'border-l rtl:border-l-0 rtl:border-r border-n-weak': !isOnExpandedLayout,
     }"
   >
+    <KitaCustomerHeader
+      v-if="isCustomerView"
+      :customer-id="customerId"
+      :conversation-id="currentChat.id"
+    />
     <ConversationHeader
-      v-if="currentChat.id"
+      v-else-if="currentChat.id"
       :chat="currentChat"
       :show-back-button="isOnExpandedLayout && !isInboxView"
       :class="{
@@ -124,7 +139,7 @@ export default {
       }"
     />
     <KitaThreadsTabs
-      v-if="isKitaBridge && !activeIndex"
+      v-if="isKitaBridge && !isCustomerView && !activeIndex"
       :conversation-id="currentChat.id"
     />
     <woot-tabs
@@ -146,6 +161,7 @@ export default {
       <KitaThreadsList
         v-if="showKitaThreads"
         :conversation-id="currentChat.id"
+        :tickets-only="isCustomerView"
       />
       <MessagesView
         v-if="currentChat.id"

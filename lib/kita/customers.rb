@@ -6,7 +6,7 @@
 # Row shape: {id, name, dri_name, dri_email, platforms[], open_count, waiting_on_us, last_activity_at,
 #   grip_account_id, conversations[{id, platform, label, status, unread_count, last_activity_at}] (most recent first),
 #   last_message {content, sender_name, platform, message_type, created_at}|nil (latest public message),
-#   urgent_ticket (an open urgent Grip ticket on one of its threads)};
+#   urgent_ticket (an open urgent Grip ticket on one of its threads), urgent_sla_due_at (its soonest SLA, unix s)|nil};
 # the source can later become Grip's full customer list without changing it.
 class Kita::Customers
   UNLINKED_ID = 'unlinked'.freeze
@@ -45,18 +45,20 @@ class Kita::Customers
     ids = conversations.map(&:id)
     @latest = latest_messages(ids)
     @unread = unread_counts(ids)
-    @urgent = urgent_conversation_ids(ids)
+    @urgent = urgent_tickets(ids)
     by_key = conversations.group_by { |conversation| customer_key(conversation) }
     rows.each { |row| row.merge!(details((by_key[row[:id]] || []).sort_by { |c| -c.last_activity_at.to_i })) }
   end
 
   def details(list)
     message = list.filter_map { |c| @latest[c.id] }.max_by(&:created_at)
+    urgent = list.select { |c| @urgent.key?(c.id) }
     {
       grip_account_id: list.first&.custom_attributes&.dig('grip_account_id'),
       conversations: list.map { |c| conversation_row(c, @unread[c.id]) },
       last_message: message && message_row(message),
-      urgent_ticket: list.any? { |c| @urgent.include?(c.id) }
+      urgent_ticket: urgent.any?,
+      urgent_sla_due_at: urgent.filter_map { |c| @urgent[c.id] }.min&.to_i
     }
   end
 
@@ -108,10 +110,11 @@ class Kita::Customers
            .group(:conversation_id).count
   end
 
-  def urgent_conversation_ids(ids)
+  # conversation id => soonest SLA due time of its open urgent tickets (nil when Grip sent none)
+  def urgent_tickets(ids)
     ::Kita::MessageThread.where(conversation_id: ids, ticket_priority: 'urgent').where.not(ticket_id: nil)
                          .where('ticket_status IS NULL OR ticket_status NOT IN (?)', %w[resolved dismissed])
-                         .distinct.pluck(:conversation_id).to_set
+                         .group(:conversation_id).minimum(:ticket_sla_due_at)
   end
 
   def columns

@@ -10,6 +10,7 @@ RSpec.describe 'Kita conversation threads', type: :request do
   let(:base) { "/api/v1/accounts/#{account.id}/kita/conversations/#{conversation.display_id}/threads" }
   let(:slack) { { external_source: 'slack', external_channel: '#kita-tala' } }
   let!(:root) { create(:message, account: account, inbox: inbox, conversation: conversation, sender: customer, content_attributes: slack) }
+  let(:sla_due_at) { 2.hours.from_now.change(usec: 0) }
   let!(:quiet_root) { create(:message, account: account, inbox: inbox, conversation: conversation, sender: customer) }
 
   before do
@@ -19,7 +20,8 @@ RSpec.describe 'Kita conversation threads', type: :request do
     create(:message, account: account, inbox: inbox, conversation: conversation, sender: teammate, message_type: :outgoing,
                      created_at: 1.hour.ago, content_attributes: { in_reply_to: root.id })
     Kita::MessageThread.create!(account: account, conversation: conversation, root_message: quiet_root, title: 'Billing', ticket_id: 'T-9',
-                                ticket_url: 'https://grip/t/9', ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel')
+                                ticket_url: 'https://grip/t/9', ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel',
+                                ticket_display_id: 'KT-9', ticket_sla_due_at: sla_due_at)
   end
 
   it 'requires a signed-in agent' do
@@ -45,8 +47,8 @@ RSpec.describe 'Kita conversation threads', type: :request do
       [{ 'id' => customer.id, 'type' => 'Contact', 'name' => 'Ana Cruz' }, { 'id' => teammate.id, 'type' => 'User', 'name' => 'Sam Lee' }]
     )
     expect(rows.first).to include('title' => 'Billing', 'reply_count' => 0, 'last_reply_at' => nil, 'participants' => [], 'unread' => false,
-                                  'ticket' => { 'id' => 'T-9', 'url' => 'https://grip/t/9', 'priority' => 'urgent', 'status' => 'open',
-                                                'owner' => 'Carmel' })
+                                  'ticket' => { 'id' => 'T-9', 'url' => 'https://grip/t/9', 'display_id' => 'KT-9', 'priority' => 'urgent',
+                                                'status' => 'open', 'owner' => 'Carmel', 'sla_due_at' => sla_due_at.to_i })
   end
 
   it 'marks a thread read for the current agent only, until someone else replies' do

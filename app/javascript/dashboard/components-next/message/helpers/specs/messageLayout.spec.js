@@ -1,7 +1,9 @@
 import {
   GROUP_WINDOW_SECONDS,
+  LAYOUT_STYLES,
   getMessageLayout,
   groupsWithPrevious,
+  layoutStyleFor,
 } from '../messageLayout';
 import {
   MESSAGE_STATUS,
@@ -97,6 +99,7 @@ describe('getMessageLayout', () => {
       showHeader: true,
       timeInHeader: true,
       followUpMeta: false,
+      showFooter: false,
     });
   });
 
@@ -112,6 +115,7 @@ describe('getMessageLayout', () => {
       showHeader: false,
       timeInHeader: true,
       followUpMeta: true,
+      showFooter: false,
     });
   });
 
@@ -133,6 +137,54 @@ describe('getMessageLayout', () => {
     ].forEach(input => {
       const layout = getMessageLayout({ ...input, groupWithPrevious: false });
       expect(layout).toMatchObject({ showHeader: false, timeInHeader: false });
+    });
+  });
+});
+
+describe('layout styles', () => {
+  it('picks the style from the Kita bridge platform', () => {
+    expect(layoutStyleFor('slack')).toBe(LAYOUT_STYLES.FLAT);
+    expect(layoutStyleFor('teams')).toBe(LAYOUT_STYLES.FLAT);
+    expect(layoutStyleFor('whatsapp')).toBe(LAYOUT_STYLES.MIRROR);
+    expect(layoutStyleFor('viber')).toBe(LAYOUT_STYLES.MIRROR);
+    expect(layoutStyleFor(null)).toBe(LAYOUT_STYLES.CHAT);
+  });
+
+  it('closes a mirror group with a footer instead of a header or avatar', () => {
+    const base = {
+      orientation: ORIENTATION.LEFT,
+      variant: MESSAGE_VARIANTS.USER,
+      style: LAYOUT_STYLES.MIRROR,
+    };
+    const first = getMessageLayout({
+      ...base,
+      groupWithPrevious: false,
+      groupWithNext: true,
+    });
+    const last = getMessageLayout({
+      ...base,
+      groupWithPrevious: true,
+      groupWithNext: false,
+    });
+    expect(first).toMatchObject({
+      avatarColumn: false,
+      showHeader: false,
+      showFooter: false,
+    });
+    expect(last).toMatchObject({ showFooter: true, followUpMeta: false });
+  });
+
+  it('gives a flat own message an avatar column and header like everyone', () => {
+    const layout = getMessageLayout({
+      orientation: ORIENTATION.LEFT,
+      variant: MESSAGE_VARIANTS.AGENT,
+      groupWithPrevious: false,
+      style: LAYOUT_STYLES.FLAT,
+    });
+    expect(layout).toMatchObject({
+      avatarColumn: true,
+      showAvatar: true,
+      showHeader: true,
     });
   });
 });

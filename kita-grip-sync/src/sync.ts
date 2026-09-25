@@ -5,7 +5,7 @@ import type { GripClient, TicketStatusInput } from './grip.ts';
 import { backoffMs, isRetryable } from './http.ts';
 import { log } from './log.ts';
 import { gripOwner, type Owners } from './owner.ts';
-import type { ConversationState, Job, Priority, Store, ThreadState, TicketRow } from './store.ts';
+import type { ConversationState, GripTicketFields, Job, Priority, Store, ThreadState, TicketRow } from './store.ts';
 
 export const MAX_ATTEMPTS = 10;
 const RANK: Record<Priority, number> = { low: 0, medium: 1, high: 2, urgent: 3 };
@@ -237,12 +237,13 @@ export class Sync {
           if (!store.tickets(id).length) return; // Grip answers 404 when nothing matches
           await this.d.grip.setTicketStatus(id, { status: p.status, all: true });
           // Dismissed stays dismissed (Grip does the same).
-          for (const t of store.tickets(id)) if (t.status !== 'dismissed') store.putTicket({ ...t, status: p.status });
+          for (const t of store.tickets(id))
+            if (t.status !== 'dismissed') store.putTicket({ ...t, status: p.status, grip: { ...t.grip, status: DESK_STATUS[p.status] } });
         } else {
           const t = store.getTicket(id, p.issue_key ?? '');
           if (!t) return;
-          await this.d.grip.setTicketStatus(id, t.issueKey ? { status: p.status, issue_key: t.issueKey } : { status: p.status });
-          store.putTicket({ ...t, status: p.status });
+          const r = await this.d.grip.setTicketStatus(id, t.issueKey ? { status: p.status, issue_key: t.issueKey } : { status: p.status });
+          store.putTicket({ ...t, status: p.status, grip: gripFields(r, { ...t.grip, status: DESK_STATUS[p.status] }) });
         }
         log.info('ticket_status', { conversation: id, status: p.status, all: !!p.all, issue_key: p.issue_key ?? null });
         this.repostTickets(id);
@@ -318,9 +319,10 @@ export class Sync {
     const r = await grip!.upsertTicket({ chatwoot_conversation_id: id, issue_key: key, title: ticketTitle,
       body: ticketBody(summary, threadTitle, s.channelLabel, url), priority, chatwoot_url: url });
     const row: TicketRow = t
-      ? { ...t, title: ticketTitle, summary, priority, ticketId: r.ticket_id ?? t.ticketId, ticketUrl: r.ticket_url ?? t.ticketUrl }
+      ? { ...t, title: ticketTitle, summary, priority, ticketId: r.ticket_id ?? t.ticketId, ticketUrl: r.ticket_url ?? t.ticketUrl,
+          grip: gripFields(r, t.grip) }
       : { conversationId: id, issueKey: key, ticketId: r.ticket_id, ticketUrl: r.ticket_url, title: ticketTitle, summary, priority,
-          status: r.dismissed ? 'dismissed' : 'todo', notePosted: false, labelAdded: false };
+          status: r.dismissed ? 'dismissed' : 'todo', notePosted: false, labelAdded: false, grip: gripFields(r) };
     store.putTicket(row);
     log.info(!t ? 'ticket_created' : fresh ? 'ticket_new_issue' : 'ticket_updated', { conversation: id, thread: root, ticket: row.ticketId, priority, reopened: reopen });
     this.enqueueThreadPost(id, root, now); // the desk shows the ticket on the thread (no-op when nothing it shows changed)
@@ -378,14 +380,21 @@ export class Sync {
     if (latest.title !== th.title || (now ? JSON.stringify(now) : null) !== signature) this.enqueueThreadPost(id, root, this.now());
   }
 
-  /** The thread's ticket as the desk shows it: link, priority, Grip status word and the DRI as owner. */
+  /**
+   * The thread's ticket as the desk shows it. Grip's own fields win when it sent them (display id, SLA, assignee);
+   * otherwise priority and status are what this service last set, and the owner is the account's DRI.
+   */
   private deskTicket(id: number, root: number) {
     const t = this.d.store.getTicket(id, String(root));
     if (!t) return null;
-    const grip = this.d.store.getOwner(id)?.grip;
-    const owner = grip?.dri_name || grip?.dri_email;
-    return { ticket_id: t.ticketId, ticket_url: t.ticketUrl, ticket_priority: t.priority, ticket_status: DESK_STATUS[t.status] ?? 'open',
-      ...(owner ? { ticket_owner: owner } : {}) };
+    const g = t.grip ?? {};
+    const dri = this.d.store.getOwner(id)?.grip;
+    const owner = g.assignee_name || g.assignee_email || dri?.dri_name || dri?.dri_email;
+    return {
+      ticket_id: t.ticketId, ticket_url: t.ticketUrl, ticket_priority: g.priority || t.priority, ticket_status: g.status || DESK_STATUS[t.status] || 'open',
+      // Always sent (null when unknown), so a cleared SLA or owner clears in the desk too
+      ticket_owner: owner || null, ticket_display_id: g.display_id || null, ticket_sla_due_at: g.sla_due_at || null,
+    };
   }
 
   /**
@@ -398,6 +407,14 @@ export class Sync {
     this.enqueueThreadStatus(id, key, status, this.now());
     return true;
   }
+}
+
+/** Grip's optional ticket fields from a POST/PATCH response, over what we had. Absent fields keep their last value. */
+function gripFields(r: any, prev: GripTicketFields = {}): GripTicketFields {
+  const out: GripTicketFields = { ...prev };
+  for (const k of ['display_id', 'priority', 'status', 'assignee_email', 'assignee_name', 'sla_due_at'] as const)
+    if (r && r[k] !== undefined) out[k] = r[k];
+  return out;
 }
 
 /** Sync status words -> Grip's ticket words, which the desk shows. */

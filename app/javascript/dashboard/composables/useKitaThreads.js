@@ -29,10 +29,24 @@ const closeThreadPane = () => {
   openThread.value = null;
 };
 
+/**
+ * Resolves or reopens a thread, and its Grip ticket through grip-sync.
+ * @returns {Promise<boolean|null>} Whether the ticket moved too (null: no ticket)
+ */
 const setThreadStatus = async (conversationId, rootId, status) => {
-  await KitaThreadsAPI.updateStatus(conversationId, rootId, status);
+  const { data } = await KitaThreadsAPI.updateStatus(
+    conversationId,
+    rootId,
+    status
+  );
   const thread = findThread(conversationId, rootId);
-  if (thread) thread.status = status;
+  if (thread) {
+    thread.status = status;
+    if (thread.ticket && data.ticket_synced) {
+      thread.ticket.status = status === 'resolved' ? 'resolved' : 'open';
+    }
+  }
+  return data.ticket_synced ?? null;
 };
 
 /**

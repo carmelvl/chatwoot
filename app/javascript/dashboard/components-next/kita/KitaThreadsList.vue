@@ -4,12 +4,15 @@ import { useI18n } from 'vue-i18n';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 import { KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
-import { threadTitle } from 'dashboard/helper/kitaThreads';
+import { threadTitle, ticketThreads } from 'dashboard/helper/kitaThreads';
+import KitaTicketChip from './KitaTicketChip.vue';
 import { dynamicTime } from 'shared/helpers/timeHelper';
 import PlatformLogo from './PlatformLogo.vue';
 
 const props = defineProps({
   conversationId: { type: Number, required: true },
+  // The customer workspace's Tickets tab: only threads with a Grip ticket
+  ticketsOnly: { type: Boolean, default: false },
 });
 
 const { t } = useI18n();
@@ -19,7 +22,8 @@ const { threadsByConversation, openThreadPane } = useKitaThreads();
 // The API returns threads sorted by last activity, newest first
 const threads = computed(() => {
   const loaded = currentChat.value?.messages || [];
-  return (threadsByConversation[props.conversationId] || []).map(thread => ({
+  const all = threadsByConversation[props.conversationId] || [];
+  return (props.ticketsOnly ? ticketThreads(all) : all).map(thread => ({
     ...thread,
     displayTitle: threadTitle(
       thread,
@@ -46,7 +50,7 @@ const threads = computed(() => {
 <template>
   <div class="flex-1 min-h-0 overflow-y-auto bg-n-surface-1">
     <p v-if="!threads.length" class="p-6 text-sm text-center text-n-slate-11">
-      {{ t('KITA_THREADS.EMPTY') }}
+      {{ ticketsOnly ? t('KITA_THREADS.NO_TICKETS') : t('KITA_THREADS.EMPTY') }}
     </p>
     <button
       v-for="thread in threads"
@@ -75,6 +79,11 @@ const threads = computed(() => {
           {{ thread.meta }}
         </span>
       </span>
+      <KitaTicketChip
+        v-if="thread.ticket"
+        :ticket="thread.ticket"
+        :as-link="false"
+      />
       <span
         class="px-1.5 py-0.5 text-xs rounded-md shrink-0"
         :class="

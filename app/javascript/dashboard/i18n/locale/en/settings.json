@@ -422,7 +422,9 @@
     "DOCS": "Read docs",
     "SECURITY": "Security",
     "CAPTAIN_AI": "Captain",
-    "CONVERSATION_WORKFLOW": "Conversation Workflow"
+    "CONVERSATION_WORKFLOW": "Conversation Workflow",
+    "MORE": "More",
+    "MENTIONS": "Mentions"
   },
   "DATA_IMPORTS": {
     "HEADER": "Data",
@@ -1152,7 +1154,12 @@
       "UNAVAILABLE": "{platform} replies aren't available yet",
       "DESCRIPTION": "Replies are only ever sent from your own account. Private notes still work.",
       "MIRROR": "Reply in {platform} yourself — this inbox is a mirror",
-      "MIRROR_DESCRIPTION": "Nothing typed here is sent to the customer. Private notes still work."
+      "MIRROR_DESCRIPTION": "Nothing typed here is sent to the customer. Private notes still work.",
+      "MIRROR_ON_PHONE": "Reply to {name} from {app} on your phone",
+      "MIRROR_EXPLAINER": "This chat is a mirror. What you send from your phone shows up here as you.",
+      "WHATSAPP_APP": "WhatsApp Business",
+      "VIBER_APP": "Viber",
+      "ADD_PRIVATE_NOTE": "Add private note"
     }
   },
   "KITA_CUSTOMERS": {
@@ -1173,11 +1180,28 @@
     "LOADING": "Loading...",
     "EMPTY": "No customers yet",
     "NO_CONVERSATIONS": "No conversations for this customer",
-    "FETCH_ERROR": "Could not load customers"
+    "FETCH_ERROR": "Could not load customers",
+    "MINE_TAB": "Mine",
+    "ALL_TAB": "All",
+    "SECTIONS": {
+      "NEEDS_REPLY": "Needs reply",
+      "ACTIVE": "Active"
+    },
+    "URGENT_TICKET": "Urgent ticket",
+    "OWNED_BY": "Owned by {name}",
+    "CHANNEL_COUNT": "{count} channel | {count} channels",
+    "OPEN_IN_GRIP": "Open in Grip",
+    "TICKETS_TAB": "Tickets",
+    "TICKETS_OPEN": "{count} open",
+    "SELECT": "Pick a customer to see their conversations",
+    "YOU": "You",
+    "UNREAD": "{count} unread",
+    "URGENT_SLA": "SLA {time}",
+    "URGENT_SLA_BREACHED": "SLA breached"
   },
   "KITA_THREADS": {
     "REPLY_COUNT": "{count} reply | {count} replies",
-    "LAST_REPLY": "last reply {time}",
+    "LAST_REPLY": "Last reply {time}",
     "TICKET": "Ticket",
     "TAB_MESSAGES": "Messages",
     "TAB_THREADS": "Threads",
@@ -1193,6 +1217,41 @@
     "SEND_ERROR": "Could not send the reply",
     "STATUS_ERROR": "Could not update the thread",
     "REPLYING_IN": "Replying in",
-    "NOT_LOADED": "Older messages of this thread aren't loaded yet. Scroll up in the conversation to load them."
+    "NOT_LOADED": "Older messages of this thread aren't loaded yet. Scroll up in the conversation to load them.",
+    "THREAD_IN": "Thread in {channel}",
+    "REPLIES_DIVIDER": "{count} reply | {count} replies",
+    "TICKET_CARD": {
+      "TITLE": "Ticket",
+      "STATUS": "Status",
+      "OWNER": "Owner",
+      "SLA": "SLA"
+    },
+    "TICKET_STATUS": {
+      "open": "Open",
+      "in_progress": "In progress",
+      "waiting_on_customer": "Waiting on customer",
+      "resolved": "Resolved",
+      "dismissed": "Dismissed"
+    },
+    "PRIORITY": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "urgent": "Urgent"
+    },
+    "RESOLVE_WITH_TICKET": "Resolve thread and ticket",
+    "REOPEN_WITH_TICKET": "Reopen thread and ticket",
+    "OPEN_IN_GRIP": "Open in Grip",
+    "TICKET_SYNC_ERROR": "The thread was updated, but its Grip ticket could not be. Try again or update it in Grip.",
+    "NO_TICKETS": "No tickets on this conversation yet",
+    "TICKET_WITH_ID": "Ticket {id}",
+    "SLA": {
+      "LEFT": "{time} left",
+      "BREACHED": "Breached"
+    }
+  },
+  "KITA_COMPOSER": {
+    "PLACEHOLDER": "Message {channel}…",
+    "SENDS_TO": "Sends to {platform} · as you"
   }
 }

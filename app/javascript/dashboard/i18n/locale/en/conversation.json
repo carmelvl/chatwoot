@@ -428,7 +428,9 @@
       "UNMUTE": "Unmute mic",
       "VIEW_CHAT_HISTORY": "View chat history",
       "GO_TO_CONVERSATION": "Go to conversation thread"
-    }
+    },
+    "KITA_YOU": "You",
+    "KITA_FROM_PHONE": "from your phone"
   },
   "EMAIL_TRANSCRIPT": {
     "TITLE": "Send conversation transcript",

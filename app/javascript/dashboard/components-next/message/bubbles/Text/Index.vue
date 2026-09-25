@@ -5,12 +5,25 @@ import FormattedContent from './FormattedContent.vue';
 import AttachmentChips from 'next/message/chips/AttachmentChips.vue';
 import TranslationToggle from 'dashboard/components-next/message/TranslationToggle.vue';
 import { MESSAGE_TYPES } from '../../constants';
+import { LAYOUT_STYLES } from '../../helpers/messageLayout';
 import { MESSAGE_STATUS } from 'shared/constants/messages';
 import { useMessageContext } from '../../provider.js';
 import { useTranslations } from 'dashboard/composables/useTranslations';
 
-const { content, attachments, contentAttributes, messageType, status } =
-  useMessageContext();
+const {
+  content,
+  attachments,
+  contentAttributes,
+  messageType,
+  status,
+  layoutStyle,
+  isPrivate,
+} = useMessageContext();
+
+// Slack/Teams layout: public text sits flush, like a channel message
+const isPlain = computed(
+  () => layoutStyle?.value === LAYOUT_STYLES.FLAT && !isPrivate.value
+);
 
 const { hasTranslations, translationContent } =
   useTranslations(contentAttributes);
@@ -49,7 +62,7 @@ const handleSeeOriginal = () => {
 </script>
 
 <template>
-  <BaseBubble class="px-4 py-3" data-bubble-name="text">
+  <BaseBubble :class="isPlain ? 'py-0.5' : 'px-4 py-3'" data-bubble-name="text">
     <div class="gap-3 flex flex-col">
       <span v-if="isEmpty" class="text-n-slate-11">
         {{ $t('CONVERSATION.NO_CONTENT') }}

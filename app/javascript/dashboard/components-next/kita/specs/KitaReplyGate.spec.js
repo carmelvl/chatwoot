@@ -18,6 +18,9 @@ const mountGate = props =>
     global: { plugins: [i18n], stubs: { PlatformLogo: true } },
   });
 
+const connect = '[data-test-id="kita-connect"]';
+const addNote = '[data-test-id="kita-add-private-note"]';
+
 describe('KitaReplyGate', () => {
   it('asks to connect Slack and opens /kita/connect', async () => {
     const wrapper = mountGate({ platform: 'slack', reason: 'not_connected' });
@@ -25,7 +28,7 @@ describe('KitaReplyGate', () => {
       'Connect your Slack account to reply here'
     );
     expect(wrapper.text()).toContain('Private notes still work.');
-    await wrapper.find('button').trigger('click');
+    await wrapper.find(connect).trigger('click');
     expect(openKitaConnect).toHaveBeenCalled();
   });
 
@@ -41,14 +44,28 @@ describe('KitaReplyGate', () => {
     expect(wrapper.text()).toContain(
       "Microsoft Teams replies aren't available yet"
     );
-    expect(wrapper.find('button').exists()).toBe(false);
+    expect(wrapper.find(connect).exists()).toBe(false);
   });
 
-  it('shows the mirror notice for WhatsApp and Viber, with no Connect button', () => {
+  it('shows the mirror bar naming the contact and the phone app', () => {
+    const wrapper = mountGate({
+      platform: 'whatsapp',
+      reason: 'mirror',
+      contactName: 'Jun',
+    });
+    expect(wrapper.text()).toContain(
+      'Reply to Jun from WhatsApp Business on your phone'
+    );
+    expect(wrapper.text()).toContain('This chat is a mirror.');
+    expect(wrapper.find(connect).exists()).toBe(false);
+  });
+
+  it('opens a private note from every gate', async () => {
     const wrapper = mountGate({ platform: 'viber', reason: 'mirror' });
     expect(wrapper.text()).toContain(
       'Reply in Viber yourself — this inbox is a mirror'
     );
-    expect(wrapper.find('button').exists()).toBe(false);
+    await wrapper.find(addNote).trigger('click');
+    expect(wrapper.emitted('addPrivateNote')).toHaveLength(1);
   });
 });
