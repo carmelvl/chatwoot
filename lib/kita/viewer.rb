@@ -25,9 +25,18 @@ class Kita::Viewer
     email.present? && ::Kita::Bridge.normalize_email(email) == ::Kita::Bridge.normalize_email(user.email)
   end
 
-  # Conversations I own: I'm the customer's DRI (account_owner_email) or the conversation is assigned to me.
+  # Conversations that are mine: I'm the customer's DRI (account_owner_email), the conversation is assigned to me,
+  # I own one of its open Grip tickets, or I was mentioned in it.
   def mine(scope)
-    scope.where("conversations.assignee_id = :id OR LOWER(conversations.custom_attributes->>'account_owner_email') IN (:emails)",
-                id: user.id, emails: emails)
+    tickets = ::Kita::MessageThread.where(::Kita::Customers::OPEN_TICKET).where('LOWER(kita_threads.ticket_owner) IN (?)', names_and_emails)
+    scope.where(assignee_id: user.id)
+         .or(scope.where("LOWER(conversations.custom_attributes->>'account_owner_email') IN (?)", emails))
+         .or(scope.where(id: tickets.select(:conversation_id)))
+         .or(scope.where(id: account.mentions.where(user: user).select(:conversation_id)))
+  end
+
+  # How grip-sync may name me as a ticket owner
+  def names_and_emails
+    [user.name.to_s.downcase, *emails].compact_blank
   end
 end

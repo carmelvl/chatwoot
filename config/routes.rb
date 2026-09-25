@@ -301,8 +301,10 @@ Rails.application.routes.draw do
           namespace :kita do
             resources :customers, only: [:index, :show], constraints: { id: %r{[^/]+} } do
               post :my_view, on: :collection
+              get :lookup, on: :collection
             end
             resources :inbox, only: [:index]
+            resources :account_actions, only: [:create]
             resources :tickets, only: [:index]
             resources :contacts, only: [:index]
             resources :channel_links, only: [:create] do

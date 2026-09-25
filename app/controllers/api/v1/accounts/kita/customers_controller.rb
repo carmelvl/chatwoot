@@ -1,22 +1,27 @@
-# Kita: the Customers directory (conversations grouped by Grip account, plus unlinked channels), one customer
+# Kita: the Customers directory (accounts by name, plus unlinked channels; channels marked "Not a customer" left out), one customer
 # (the header of the conversation view) and the "My customers" saved view.
 class Api::V1::Accounts::Kita::CustomersController < Api::V1::Accounts::BaseController
   MY_VIEW_NAME = 'My customers'.freeze
 
   def index
-    rows = ::Kita::Customers.new(viewer.conversations).rows.reject { |row| row[:kind] == 'conversation' }
-    # Unlinked channels are nobody's yet, so they show under Mine too (to be linked)
-    rows = rows.select { |row| row[:unlinked] || viewer.me?(row[:dri_email]) } if ActiveModel::Type::Boolean.new.cast(params[:mine])
-    render json: { payload: rows }
+    conversations = viewer.conversations.where.not(::Kita::Customers::NOT_CUSTOMER)
+    rows = ::Kita::Customers.new(conversations).rows(sort: :name).reject { |row| row[:kind] == 'conversation' }
+    # Mine: the customers I'm the DRI of. Unlinked channels are nobody's, so never mine.
+    rows = rows.select { |row| row[:kind] == 'customer' && viewer.me?(row[:dri_email]) } if ActiveModel::Type::Boolean.new.cast(params[:mine])
+    medians = ::Kita::Customers.first_response_medians(conversations)
+    render json: { payload: rows.map { |row| row.merge(first_response_median: medians[row[:id]]) } }
   end
 
-  # id: a Grip account id/name, "unlinked-<display id>" or "conversation-<display id>" (any Inbox row id)
+  # Any row by its id: a Grip account id (or name), "unlinked-<platform>:<channel>" or "conversation-<display id>"
   def show
-    scope = viewer.conversations.where("#{::Kita::Customers::ROW_KEY} = ?", params[:id])
-    row = ::Kita::Customers.new(scope).rows.first
-    return head :not_found if row.nil?
+    render_row(viewer.conversations.where("#{::Kita::Customers::ROW_KEY} = ?", params[:id]))
+  end
 
-    render json: row
+  # The row a conversation belongs to (the conversation view opened from a classic or notification link)
+  def lookup
+    conversation = viewer.conversations.find_by!(display_id: params.require(:conversation_id))
+    key = ::Kita::Customers.row_ids(Conversation.where(id: conversation.id))[conversation.id]
+    render_row(viewer.conversations.where("#{::Kita::Customers::ROW_KEY} = ?", key))
   end
 
   # A per-user conversation view: account_owner_email is me (any aliased Kita domain).
@@ -28,6 +33,13 @@ class Api::V1::Accounts::Kita::CustomersController < Api::V1::Accounts::BaseCont
   end
 
   private
+
+  def render_row(scope)
+    row = ::Kita::Customers.new(scope).rows.first
+    return head :not_found if row.nil?
+
+    render json: row
+  end
 
   # Chatwoot filters only custom attributes that have a definition (grip-sync normally creates it).
   def ensure_owner_email_attribute

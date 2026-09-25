@@ -35,8 +35,14 @@ RSpec.describe 'Kita tickets', type: :request do
     ticket(ticket_priority: 'high', ticket_owner: 'Rhea')
     ticket(ticket_priority: 'high', ticket_status: 'resolved')
 
-    get path, params: { mine: true }, headers: agent.create_new_auth_token
+    get path, params: { scope: 'mine' }, headers: agent.create_new_auth_token
     expect(response.parsed_body['payload'].pluck('owner')).to eq(['suraaj@usekita.com'])
+    get path, params: { scope: 'unowned', status: 'all' }, headers: agent.create_new_auth_token
+    expect(response.parsed_body['payload'].pluck('owner')).to eq([nil])
+    get path, params: { customer_id: '7', platform: 'slack' }, headers: agent.create_new_auth_token
+    expect(response.parsed_body['payload'].size).to eq(2)
+    get path, params: { platform: 'teams' }, headers: agent.create_new_auth_token
+    expect(response.parsed_body['payload']).to be_empty
     get path, params: { priority: 'high', status: 'all' }, headers: agent.create_new_auth_token
     expect(response.parsed_body['payload'].size).to eq(2)
     get path, params: { status: 'nope' }, headers: agent.create_new_auth_token

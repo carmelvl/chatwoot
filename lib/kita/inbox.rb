@@ -1,19 +1,27 @@
-# Kita: the Inbox, the desk's one list. Rows are Kita::Customers rows (one per customer, unlinked channel or
-# other conversation) built from the conversations that match the filters, ordered and paginated by row.
+# Kita: the Inbox, the desk's one work list. Rows are Kita::Customers rows (one per customer, unlinked channel or
+# other conversation). Filters apply to conversations before grouping, so a customer is listed when any of its
+# conversations matches; the row then shows only those conversations.
+#
+# Rows are ordered by section (needs reply, active, unlinked, snoozed, resolved), then within a section:
+# needs reply = open urgent/high tickets pinned first, then the longest wait; the others most recent first. A sort
+# param replaces the order within sections.
 #
 # Filters (all optional):
-#   mine        - I'm the DRI or the conversation is assigned to me
-#   status      - needs_reply (default: open and the latest public message is the customer's), open, pending,
-#                 snoozed, resolved or all
-#   platform    - slack, teams, whatsapp, viber (bridge conversations on that platform)
-#   labels[]    - any of these labels; team_id; inbox_id
-#   conversation_type - mention, participating or unattended (the classic Mentions/Participating/Unattended views)
-#   filters     - a Chatwoot advanced-filter / saved-view payload as JSON ([{attribute_key, filter_operator, values, query_operator}])
-#   sort        - latest (default), oldest, created_desc, created_asc, priority
+#   scope       - mine (default: I'm the DRI, the assignee, the owner of an open ticket, or I was mentioned),
+#                 unassigned (no DRI, or waiting on us with no assignee) or all
+#   view_id     - one of my saved views (Chatwoot custom filter of type conversation)
+#   filters     - a Chatwoot advanced-filter payload as JSON ([{attribute_key, filter_operator, values, query_operator}])
+#   status      - open (default), snoozed, resolved, all, or other (channels marked "Not a customer", hidden elsewhere)
+#   platform    - slack, teams, whatsapp, viber
+#   dri         - the DRI's email; labels[]; team_id; inbox_id; stage
+#   ticket_priority, ticket_status - the conversation has a Grip ticket with this priority/status (open = not closed)
+#   conversation_type - mention, participating or unattended (the classic views)
+#   sort        - latest, oldest, created_desc, created_asc, priority
 #   page        - 1-based, PER_PAGE rows a page
 class Kita::Inbox
   PER_PAGE = 25
-  STATUSES = %w[needs_reply open pending snoozed resolved all].freeze
+  SCOPES = %w[mine unassigned all].freeze
+  STATUSES = %w[open snoozed resolved all other].freeze
   PLATFORMS = %w[slack teams whatsapp viber].freeze
   PRIORITY_RANK = "MAX(CASE conversations.priority WHEN #{Conversation.priorities[:urgent]} THEN 4 " \
                   "WHEN #{Conversation.priorities[:high]} THEN 3 WHEN #{Conversation.priorities[:medium]} THEN 2 " \
@@ -25,6 +33,12 @@ class Kita::Inbox
     'created_asc' => 'MIN(conversations.created_at) ASC',
     'priority' => "#{PRIORITY_RANK} DESC, MAX(conversations.last_activity_at) DESC"
   }.freeze
+  # Within a section: for needs reply, pressing tickets first then the longest wait; otherwise most recent
+  SECTION_ORDER = <<~SQL.squish.freeze
+    BOOL_OR(conversations.pressing AND conversations.needs_reply) DESC,
+    MIN(COALESCE(conversations.waiting_since, conversations.last_activity_at)) FILTER (WHERE conversations.needs_reply) ASC NULLS LAST,
+    MAX(conversations.last_activity_at) DESC
+  SQL
 
   class InvalidFilter < StandardError; end
 
@@ -45,13 +59,11 @@ class Kita::Inbox
   # The conversations matching every filter, as a plain relation (no joins or preloads) for grouping.
   def conversations
     @conversations ||= begin
-      scope = base
-      scope = @viewer.mine(scope) if ActiveModel::Type::Boolean.new.cast(@params[:mine])
+      scope = filter_scope(base)
       scope = filter_status(scope)
       scope = filter_platforms(scope)
-      scope = scope.where(team_id: @params[:team_id]) if @params[:team_id].present?
-      scope = scope.where(inbox_id: @params[:inbox_id]) if @params[:inbox_id].present?
-      scope = scope.tagged_with(Array(@params[:labels]), any: true) if @params[:labels].present?
+      scope = filter_attributes(scope)
+      scope = filter_tickets(scope)
       scope = filter_conversation_type(scope)
       @viewer.account.conversations.where(id: scope.unscope(:order, :includes, :preload).select(:id))
     end
@@ -60,20 +72,24 @@ class Kita::Inbox
   private
 
   def ordered_keys
-    sort = SORTS.fetch(@params[:sort].presence || 'latest') { raise InvalidFilter, "Invalid sort: #{@params[:sort]}" }
-    conversations.reorder(nil).group(Arel.sql(::Kita::Customers::ROW_KEY)).order(Arel.sql(sort))
-                 .pluck(Arel.sql(::Kita::Customers::ROW_KEY))
+    within = @params[:sort].present? ? SORTS.fetch(@params[:sort]) { raise InvalidFilter, "Invalid sort: #{@params[:sort]}" } : SECTION_ORDER
+    ::Kita::Customers.keyed(conversations).group('conversations.row_key')
+                     .order(Arel.sql("#{::Kita::Customers::SECTION_RANK}, #{within}")).pluck('conversations.row_key')
   end
 
   # A saved view or advanced filter runs through Chatwoot's own filter service (same permissions and operators).
   def base
-    return @viewer.conversations if @params[:filters].blank?
+    payload = advanced_filters
+    return @viewer.conversations if payload.blank?
 
-    ::Kita::FilteredConversations.new({ payload: advanced_filters }.with_indifferent_access, @viewer.user, @viewer.account).relation
+    ::Kita::FilteredConversations.new({ payload: payload }.with_indifferent_access, @viewer.user, @viewer.account).relation
                                  .where(inbox_id: @viewer.user.assigned_inboxes.select(:id))
   end
 
   def advanced_filters
+    return saved_view_filters if @params[:view_id].present?
+    return if @params[:filters].blank?
+
     filters = JSON.parse(@params[:filters])
     raise InvalidFilter, 'filters must be a list' unless filters.is_a?(Array)
 
@@ -82,16 +98,31 @@ class Kita::Inbox
     raise InvalidFilter, 'filters must be JSON'
   end
 
-  def filter_status(scope)
-    status = @params[:status].presence || 'needs_reply'
-    raise InvalidFilter, "Invalid status: #{status}" unless STATUSES.include?(status)
+  def saved_view_filters
+    view = @viewer.account.custom_filters.conversation.find_by(id: @params[:view_id], user: @viewer.user)
+    raise InvalidFilter, "Unknown view: #{@params[:view_id]}" if view.nil?
 
-    case status
+    view.query['payload']
+  end
+
+  def filter_scope(scope)
+    case @params[:scope].presence || 'mine'
+    when 'mine' then @viewer.mine(scope)
+    when 'unassigned'
+      scope.where("COALESCE(conversations.custom_attributes->>'account_owner_email', '') = '' " \
+                  "OR (conversations.assignee_id IS NULL AND #{::Kita::Customers::NEEDS_REPLY})")
     when 'all' then scope
-    when 'needs_reply'
-      scope.where(status: :open).where("#{::Kita::Customers::LAST_PUBLIC_MESSAGE_TYPE} = ?", Message.message_types[:incoming])
-    else scope.where(status: status)
+    else raise InvalidFilter, "Invalid scope: #{@params[:scope]}"
     end
+  end
+
+  def filter_status(scope)
+    status = @params[:status].presence || 'open'
+    raise InvalidFilter, "Invalid status: #{status}" unless STATUSES.include?(status)
+    return scope.where(::Kita::Customers::NOT_CUSTOMER) if status == 'other'
+
+    scope = scope.where.not(::Kita::Customers::NOT_CUSTOMER)
+    status == 'all' ? scope : scope.where(status: status)
   end
 
   def filter_platforms(scope)
@@ -100,6 +131,29 @@ class Kita::Inbox
     raise InvalidFilter, "Invalid platform: #{platforms.join(', ')}" unless (platforms - PLATFORMS).empty?
 
     scope.where("conversations.custom_attributes->>'channel' IN (?)", platforms)
+  end
+
+  def filter_attributes(scope)
+    scope = scope.where(team_id: @params[:team_id]) if @params[:team_id].present?
+    scope = scope.where(inbox_id: @params[:inbox_id]) if @params[:inbox_id].present?
+    scope = scope.tagged_with(Array(@params[:labels]), any: true) if @params[:labels].present?
+    scope = scope.where("conversations.custom_attributes->>'grip_stage' = ?", @params[:stage]) if @params[:stage].present?
+    return scope if @params[:dri].blank?
+
+    scope.where("LOWER(conversations.custom_attributes->>'account_owner_email') = ?", @params[:dri].to_s.downcase)
+  end
+
+  def filter_tickets(scope)
+    return scope if @params[:ticket_priority].blank? && @params[:ticket_status].blank?
+
+    tickets = ::Kita::MessageThread.where.not(ticket_id: nil)
+    tickets = tickets.where(ticket_priority: @params[:ticket_priority]) if @params[:ticket_priority].present?
+    case @params[:ticket_status].presence
+    when nil then nil
+    when 'open' then tickets = tickets.where(::Kita::Customers::OPEN_TICKET)
+    else tickets = tickets.where(ticket_status: @params[:ticket_status])
+    end
+    scope.where(id: tickets.select(:conversation_id))
   end
 
   def filter_conversation_type(scope)
