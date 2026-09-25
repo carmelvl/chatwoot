@@ -27,9 +27,9 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
   it 'posts as the matching desk agent, marked so the bridge never sends it back out' do
     expect do
       post '/api/v1/kita/staff_messages', params: params, headers: { 'X-Kita-Bridge-Secret' => secret }
-    end.to change(conversation.messages, :count).by(1)
+    end.to change(conversation.messages.outgoing, :count).by(1)
 
-    message = conversation.messages.last
+    message = conversation.messages.outgoing.last
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body).to eq('id' => message.id, 'sender_id' => agent.id)
     expect(message.sender).to eq(agent)
