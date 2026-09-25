@@ -10,7 +10,7 @@ import { raw, world } from './helpers.ts';
 const SECRET = 'cw-account-webhook-secret';
 const w = world();
 let kicks = 0;
-const server = createServer(createHandler({ webhookSecret: SECRET, sync: w.sync, kick: () => kicks++ }));
+const server = createServer(createHandler({ webhookSecret: SECRET, deskSecret: 'bridge-secret', sync: w.sync, kick: () => kicks++ }));
 await new Promise<void>((r) => server.listen(0, r));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/grip-sync`;
 after(() => server.close());
@@ -57,4 +57,14 @@ test('http: duplicate delivery id acknowledged as duplicate; bad JSON 400; unkno
   assert.equal(hz.status, 200);
   // also reachable without the /grip-sync prefix (Caddy handle_path strips it)
   assert.equal((await fetch(base.replace('/grip-sync', '/healthz'))).status, 200);
+});
+
+test('desk ticket status: bridge secret required; unknown thread 404; bad body 422', async () => {
+  const call = (body: unknown, secret?: string) =>
+    fetch(`${base}/kita/tickets/status`, { method: 'POST', body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json', ...(secret ? { 'x-kita-bridge-secret': secret } : {}) } });
+  assert.equal((await call({ conversation_id: 42, root_message_id: 5001, status: 'done' })).status, 401);
+  assert.equal((await call({ conversation_id: 42, root_message_id: 5001, status: 'done' }, 'wrong-secret!')).status, 401);
+  assert.equal((await call({ conversation_id: 42, root_message_id: 5001, status: 'closed' }, 'bridge-secret')).status, 422);
+  assert.equal((await call({ conversation_id: 42, root_message_id: 999, status: 'done' }, 'bridge-secret')).status, 404);
 });

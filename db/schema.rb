@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_09_24_000000) do
+ActiveRecord::Schema[7.1].define(version: 2026_09_25_000000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1206,6 +1206,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_24_000000) do
     t.string "ticket_url"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "ticket_priority"
+    t.string "ticket_status"
+    t.string "ticket_owner"
     t.index ["account_id"], name: "index_kita_threads_on_account_id"
     t.index ["conversation_id"], name: "index_kita_threads_on_conversation_id"
     t.index ["root_message_id"], name: "index_kita_threads_on_root_message_id", unique: true

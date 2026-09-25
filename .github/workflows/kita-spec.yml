@@ -74,6 +74,8 @@ jobs:
           app/javascript/dashboard/components/widgets/conversation
       - name: Bridge tests
         run: cd kita-bridges && npm test
+      - name: Grip sync tests
+        run: cd kita-grip-sync && npm test
       - uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
@@ -91,4 +93,5 @@ jobs:
           bundle exec rubocop app/controllers/devise_overrides/omniauth_callbacks_controller.rb spec/controllers/kita
           lib/kita app/controllers/kita app/controllers/api/v1/kita app/controllers/concerns/kita app/controllers/api/v1/accounts/kita
           app/models/kita db/migrate/20260924000000_create_kita_threads.rb
+          db/migrate/20260925000000_add_ticket_fields_to_kita_threads.rb
           app/controllers/public/api/v1/inboxes/messages_controller.rb

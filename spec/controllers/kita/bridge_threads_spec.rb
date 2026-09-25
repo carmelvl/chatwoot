@@ -29,6 +29,14 @@ RSpec.describe 'Kita bridge thread metadata', type: :request do
                                       status: 'open')
   end
 
+  it 'stores the ticket priority, status and owner grip-sync sends' do
+    post path, params: { conversation_id: conversation.display_id, root_message_id: root.id, ticket_id: 'T-42', ticket_url: 'https://grip/t/42',
+                         ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel' }, headers: headers
+
+    expect(Kita::MessageThread.find_by!(root_message_id: root.id))
+      .to have_attributes(ticket_priority: 'urgent', ticket_status: 'open', ticket_owner: 'Carmel')
+  end
+
   it 'rejects a root message from another conversation' do
     other = create(:message, account: account, conversation: create(:conversation, account: account))
     post path, params: { conversation_id: conversation.display_id, root_message_id: other.id, title: 'x' }, headers: headers

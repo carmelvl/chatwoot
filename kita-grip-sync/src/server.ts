@@ -34,7 +34,7 @@ const sync = new Sync({
 });
 
 const tick = () => void sync.runDue().catch((e) => log.error('runner_failed', { error: String(e?.message ?? e) }));
-const server = createServer(createHandler({ webhookSecret: cfg.webhookSecret, sync, kick: tick, health: () => caps }));
+const server = createServer(createHandler({ webhookSecret: cfg.webhookSecret, deskSecret: cfg.bridgeLinkSecret, sync, kick: tick, health: () => caps }));
 
 setInterval(tick, 1000).unref();
 setInterval(() => store.pruneSeen(), 6 * 3600 * 1000).unref();

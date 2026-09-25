@@ -524,8 +524,8 @@ test('per-thread tickets: two threads in one conversation get their own classifi
   const desk = w.of('rails', 'POST', '/api/v1/kita/threads');
   assert.ok(desk.length >= 2);
   assert.ok(desk.every((c) => c.headers['x-kita-bridge-secret'] === 'bridge-secret'));
-  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1' });
-  assert.deepEqual(w.threads.get('42:5500'), { conversation_id: 42, root_message_id: 5500, title: 'Batch 14 scores missing', ticket_id: 't-2', ticket_url: 'https://internal.kita.ai/tasks/t-2' });
+  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1', ticket_priority: 'high', ticket_status: 'open' });
+  assert.deepEqual(w.threads.get('42:5500'), { conversation_id: 42, root_message_id: 5500, title: 'Batch 14 scores missing', ticket_id: 't-2', ticket_url: 'https://internal.kita.ai/tasks/t-2', ticket_priority: 'medium', ticket_status: 'open' });
 
   // One private note per ticket, naming its thread; the `ticket` label once.
   const notes = w.of('rails', 'POST', /\/messages$/);
@@ -540,6 +540,30 @@ test('per-thread tickets: two threads in one conversation get their own classifi
   assert.deepEqual(w.of('grip', 'PATCH').map((p) => [p.path, p.body]), [['/api/v1/support/tickets/42', { status: 'done', all: true }]]);
   assert.deepEqual([w.tickets.get('42:5001').status, w.tickets.get('42:5500').status], ['done', 'done']);
   assert.deepEqual(w.store.tickets(42).map((t) => t.status), ['done', 'done']);
+  // The desk shows both tickets resolved.
+  assert.deepEqual([w.threads.get('42:5001').ticket_status, w.threads.get('42:5500').ticket_status], ['resolved', 'resolved']);
+});
+
+test('desk ticket status: a thread resolved in the desk moves only its Grip ticket; the DRI is the ticket owner', async () => {
+  const w = world({ owners: true });
+  w.owner.dri_email = 'carmel@kita.ai';
+  w.owner.dri_name = 'Carmel Limcaoco';
+  w.classifications.push(ISSUE);
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.equal(w.threads.get('42:5001').ticket_owner, 'Carmel Limcaoco');
+
+  assert.equal(w.sync.setThreadTicketStatus(42, 5001, 'done'), true);
+  assert.equal(w.sync.setThreadTicketStatus(42, 7777, 'done'), false, 'no ticket on that thread');
+  await w.drain();
+  assert.deepEqual(w.of('grip', 'PATCH').map((p) => p.body), [{ status: 'done', issue_key: '5001' }]);
+  assert.equal(w.store.getTicket(42, '5001')!.status, 'done');
+  assert.equal(w.threads.get('42:5001').ticket_status, 'resolved');
+
+  w.sync.setThreadTicketStatus(42, 5001, 'todo');
+  await w.drain();
+  assert.equal(w.threads.get('42:5001').ticket_status, 'open');
 });
 
 test('thread titles: a non-issue thread still gets a title (no ticket fields); re-posted only when the title changes', async () => {
@@ -564,7 +588,7 @@ test('thread titles: a non-issue thread still gets a title (no ticket fields); r
   w.advance(60 * SEC);
   await w.drain();
   assert.equal(w.of('rails', 'POST', '/api/v1/kita/threads').length, 2, 'title + ticket posted together');
-  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1' });
+  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1', ticket_priority: 'high', ticket_status: 'open' });
 });
 
 test('store: an old one-ticket-per-conversation database migrates in place (ticket kept as the legacy "" issue key)', async () => {

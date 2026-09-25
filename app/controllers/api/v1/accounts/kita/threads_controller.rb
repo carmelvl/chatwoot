@@ -14,7 +14,7 @@ class Api::V1::Accounts::Kita::ThreadsController < Api::V1::Accounts::BaseContro
 
     thread = ::Kita::MessageThread.find_or_initialize_by(root_message_id: @root_message.id)
     thread.update!(account: Current.account, conversation: @conversation, status: status)
-    render json: { root_message_id: @root_message.id, status: thread.status }
+    render json: { root_message_id: @root_message.id, status: thread.status, ticket_synced: sync_ticket(thread) }
   end
 
   def read
@@ -24,6 +24,20 @@ class Api::V1::Accounts::Kita::ThreadsController < Api::V1::Accounts::BaseContro
   end
 
   private
+
+  # Resolving (or reopening) a thread moves its Grip ticket too, through kita-grip-sync. The thread status
+  # is the desk's own, so it is kept even when grip-sync can't be reached; the client is told.
+  def sync_ticket(thread)
+    return nil if thread.ticket_id.blank?
+
+    ticket_status = thread.resolved? ? 'resolved' : 'open'
+    ::Kita::GripSync.set_ticket_status(@conversation, thread.root_message_id, ticket_status)
+    thread.update!(ticket_status: ticket_status)
+    true
+  rescue StandardError => e
+    Rails.logger.warn("kita grip-sync ticket status failed: #{e.message}")
+    false
+  end
 
   def fetch_conversation
     accessible = Current.account.conversations.where(inbox_id: Current.user.assigned_inboxes.select(:id))

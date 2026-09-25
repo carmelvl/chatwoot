@@ -138,13 +138,18 @@ export class Sync {
   }
 
   /** One thread's ticket: PATCH {status, issue_key}. */
-  private enqueueThreadStatus(id: number, issueKey: string, status: 'todo', now: number) {
+  private enqueueThreadStatus(id: number, issueKey: string, status: 'todo' | 'done', now: number) {
     this.d.store.enqueue(`ticket_status:${id}:${issueKey}`, 'ticket_status', id, { runAt: now, payload: { status, issue_key: issueKey }, mode: 'replace', now });
   }
 
   /** Post the thread's title / ticket link to the desk (skipped when nothing changed since the last post). */
   private enqueueThreadPost(id: number, root: number, now: number) {
     if (this.d.desk) this.d.store.enqueue(`thread:${id}:${root}`, 'thread', id, { runAt: now, payload: { root }, mode: 'coalesce', now });
+  }
+
+  /** Re-post every per-thread ticket to the desk; each post is a no-op unless what the desk shows changed. */
+  private repostTickets(id: number) {
+    for (const t of this.d.store.tickets(id)) if (/^\d+$/.test(t.issueKey)) this.enqueueThreadPost(id, Number(t.issueKey), this.now());
   }
 
   private eligible(s: ConversationState) {
@@ -215,6 +220,7 @@ export class Sync {
         if (owner) {
           const prev = store.getOwner(id);
           store.putOwner({ conversationId: id, attrs: {}, assignedAgentId: null, keptManualFor: null, ...prev, grip: owner });
+          this.repostTickets(id); // the desk shows the DRI as ticket owner
           store.enqueue(`owner:${id}`, 'owner', id, { runAt: this.now(), mode: 'coalesce', now: this.now() });
         }
         return;
@@ -239,6 +245,7 @@ export class Sync {
           store.putTicket({ ...t, status: p.status });
         }
         log.info('ticket_status', { conversation: id, status: p.status, all: !!p.all, issue_key: p.issue_key ?? null });
+        this.repostTickets(id);
         return;
       }
       case 'out_of_scope': {
@@ -316,7 +323,7 @@ export class Sync {
           status: r.dismissed ? 'dismissed' : 'todo', notePosted: false, labelAdded: false };
     store.putTicket(row);
     log.info(!t ? 'ticket_created' : fresh ? 'ticket_new_issue' : 'ticket_updated', { conversation: id, thread: root, ticket: row.ticketId, priority, reopened: reopen });
-    if (!t || t.ticketUrl !== row.ticketUrl) this.enqueueThreadPost(id, root, now); // the desk shows the ticket link on the thread
+    this.enqueueThreadPost(id, root, now); // the desk shows the ticket on the thread (no-op when nothing it shows changed)
     // not-a-ticket landed while the ticket request was in flight: dismiss what we just created.
     if (store.getConversation(id)?.dismissed) {
       this.enqueueStatusAll(id, 'dismissed', now);
@@ -353,24 +360,48 @@ export class Sync {
     }
   }
 
-  /** POST /api/v1/kita/threads with the thread's latest title and (once it exists) its ticket link. No-op when unchanged. */
+  /** POST /api/v1/kita/threads with the thread's latest title and (once it exists) its ticket. No-op when unchanged. */
   private async postThread(id: number, root: number): Promise<void> {
     const { store, desk } = this.d;
     const th = store.getThread(id, root);
     if (!th || !desk) return;
-    const t = store.getTicket(id, String(root));
-    const ticketUrl = t?.ticketUrl ?? null;
-    if (!th.title && !t) return;
-    if (th.title === th.postedTitle && ticketUrl === th.postedTicketUrl) return;
-    await desk.postThread({ conversation_id: id, root_message_id: root, ...(th.title ? { title: th.title } : {}),
-      ...(t ? { ticket_id: t.ticketId, ticket_url: t.ticketUrl } : {}) });
+    const ticket = this.deskTicket(id, root);
+    const signature = ticket ? JSON.stringify(ticket) : null;
+    if (!th.title && !ticket) return;
+    if (th.title === th.postedTitle && signature === th.postedTicketUrl) return;
+    await desk.postThread({ conversation_id: id, root_message_id: root, ...(th.title ? { title: th.title } : {}), ...(ticket ?? {}) });
     const latest = store.getThread(id, root)!;
-    store.putThread({ ...latest, postedTitle: th.title, postedTicketUrl: ticketUrl });
-    log.info('thread_posted', { conversation: id, thread: root, title: th.title, ticket: t?.ticketId ?? null });
+    store.putThread({ ...latest, postedTitle: th.title, postedTicketUrl: signature });
+    log.info('thread_posted', { conversation: id, thread: root, title: th.title, ticket: ticket?.ticket_id ?? null });
     // Title or ticket changed while we were posting: post again.
-    if (latest.title !== th.title || (store.getTicket(id, String(root))?.ticketUrl ?? null) !== ticketUrl) this.enqueueThreadPost(id, root, this.now());
+    const now = this.deskTicket(id, root);
+    if (latest.title !== th.title || (now ? JSON.stringify(now) : null) !== signature) this.enqueueThreadPost(id, root, this.now());
+  }
+
+  /** The thread's ticket as the desk shows it: link, priority, Grip status word and the DRI as owner. */
+  private deskTicket(id: number, root: number) {
+    const t = this.d.store.getTicket(id, String(root));
+    if (!t) return null;
+    const grip = this.d.store.getOwner(id)?.grip;
+    const owner = grip?.dri_name || grip?.dri_email;
+    return { ticket_id: t.ticketId, ticket_url: t.ticketUrl, ticket_priority: t.priority, ticket_status: DESK_STATUS[t.status] ?? 'open',
+      ...(owner ? { ticket_owner: owner } : {}) };
+  }
+
+  /**
+   * The desk resolved or reopened a thread (POST /kita/tickets/status): move that thread's Grip ticket.
+   * False when the thread has no ticket here.
+   */
+  setThreadTicketStatus(id: number, root: number, status: 'done' | 'todo'): boolean {
+    const key = String(root);
+    if (!this.d.store.getTicket(id, key)) return false;
+    this.enqueueThreadStatus(id, key, status, this.now());
+    return true;
   }
 }
+
+/** Sync status words -> Grip's ticket words, which the desk shows. */
+const DESK_STATUS: Record<string, string> = { todo: 'open', done: 'resolved', dismissed: 'dismissed' };
 
 function newThread(conversationId: number, rootId: number): ThreadState {
   return { conversationId, rootId, lastCustomerMessageId: 0, classifiedUpto: 0, title: null, postedTitle: null, postedTicketUrl: null };

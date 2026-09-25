@@ -59,6 +59,33 @@ RSpec.describe 'Kita customers', type: :request do
     expect(kredit).to include('name' => 'Kredit', 'platforms' => %w[slack whatsapp], 'open_count' => 2)
   end
 
+  it 'lists each customer with its per-platform conversations, latest public message and urgent tickets' do
+    conversations = %w[slack whatsapp].map do |platform|
+      conversation_for({ 'grip_account' => 'Kredit', 'grip_account_id' => '42', 'channel' => platform,
+                         'channel_label' => platform == 'slack' ? '#kita-kredit' : nil }.compact)
+    end
+    maria = create(:contact, account: account, name: 'Maria Reyes')
+    create(:message, conversation: conversations.first, account: account, inbox: inbox, message_type: :incoming, sender: maria,
+                     content: 'Batch 14 came back empty', created_at: 1.minute.ago)
+    create(:message, conversation: conversations.last, account: account, inbox: inbox, message_type: :outgoing, private: true,
+                     content: 'internal', created_at: Time.current)
+    root = create(:message, conversation: conversations.first, account: account, inbox: inbox, message_type: :incoming)
+    Kita::MessageThread.create!(account: account, conversation: conversations.first, root_message: root, ticket_id: 'T-1',
+                                ticket_url: 'https://grip/t/1', ticket_priority: 'urgent', ticket_status: 'open')
+
+    get path, headers: agent.create_new_auth_token, as: :json
+
+    kredit = response.parsed_body['payload'].find { |row| row['id'] == '42' }
+    expect(kredit).to include('grip_account_id' => '42', 'urgent_ticket' => true)
+    expect(kredit['conversations'].map { |c| c.slice('id', 'platform', 'label') }).to contain_exactly(
+      { 'id' => conversations.first.display_id, 'platform' => 'slack', 'label' => '#kita-kredit' },
+      { 'id' => conversations.last.display_id, 'platform' => 'whatsapp', 'label' => conversations.last.contact.name }
+    )
+    expect(kredit['conversations'].find { |c| c['platform'] == 'slack' }['unread_count']).to eq(1)
+    expect(kredit['last_message']).to include('content' => root.content, 'platform' => 'slack', 'message_type' => 'incoming')
+    expect(response.parsed_body['payload'].find { |row| row['id'] == 'Tala' }['urgent_ticket']).to be(false)
+  end
+
   it 'filters to my customers, matching the DRI email across Kita domain aliases' do
     get path, params: { mine: true }, headers: agent.create_new_auth_token, as: :json
     expect(response.parsed_body['payload'].pluck('id')).to eq(['Tala'])
