@@ -65,7 +65,7 @@ export default {
     const { uiSettings, updateUISettings, isOnExpandedLayout } =
       useUISettings();
     const { accountId } = useAccount();
-    const { openThread, showThreadsTab } = useKitaThreads();
+    const { openThread, showThreadsTab, closeThreadPane } = useKitaThreads();
     provide(
       CONTACT_CONVERSATION_NAVIGATION,
       useContactConversationNavigation()
@@ -78,6 +78,7 @@ export default {
       accountId,
       openThread,
       showThreadsTab,
+      closeThreadPane,
     };
   },
   data() {
@@ -117,6 +118,9 @@ export default {
       this.fetchConversationIfUnavailable();
       this.showThreadsTab = false;
     },
+    // Kita: the contact/copilot toggles bring the sidebar back over a thread
+    'uiSettings.is_contact_sidebar_open': 'closeThreadPane',
+    'uiSettings.is_copilot_panel_open': 'closeThreadPane',
   },
 
   created() {

@@ -66,8 +66,9 @@ const mountMessage = props =>
           template: '<span data-test="avatar">{{ name }}</span>',
         },
         MessageMeta: {
-          props: { compact: Boolean },
-          template: '<time data-test="meta" :data-compact="compact" />',
+          props: { compact: Boolean, hoverTime: Boolean },
+          template:
+            '<time data-test="meta" :data-compact="compact" :data-hover-time="hoverTime" />',
         },
         FormattedContent: {
           props: ['content'],
@@ -113,6 +114,24 @@ describe('Message layout', () => {
     expect(avatarColumn.exists()).toBe(true);
     expect(wrapper.find('[data-test="avatar"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="message-header"]').exists()).toBe(false);
+  });
+
+  it('gives a grouped follow-up its own meta with the time on hover', () => {
+    const wrapper = mountMessage({ ...ownProps, groupWithPrevious: true });
+    const bubble = wrapper.find('[data-test="message-bubble"]');
+    const meta = bubble.find('[data-test="message-follow-up-meta"]');
+
+    const row = wrapper.find('[data-test="message-row"]');
+    expect(row.classes()).toContain('group/message');
+    expect(meta.exists()).toBe(true);
+    expect(meta.attributes('data-hover-time')).toBe('true');
+    expect(meta.classes()).toContain('order-first');
+  });
+
+  it('puts no follow-up meta on the first message of a group', () => {
+    const wrapper = mountMessage(customerProps);
+    const meta = wrapper.find('[data-test="message-follow-up-meta"]');
+    expect(meta.exists()).toBe(false);
   });
 
   it('gives an own message no avatar, only the time above the bubble', () => {

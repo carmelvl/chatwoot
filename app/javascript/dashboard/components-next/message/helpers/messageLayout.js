@@ -31,6 +31,8 @@ export const groupsWithPrevious = (message, previous, currentUserId) => {
   if (types.includes(MESSAGE_TYPES.ACTIVITY)) return false;
   if (types.every(type => type === MESSAGE_TYPES.TEMPLATE)) return false;
   if (message.messageType !== previous.messageType) return false;
+  // a private note never joins a public reply's group (or vice versa)
+  if (!!message.private !== !!previous.private) return false;
   if (senderKey(message) !== senderKey(previous)) return false;
 
   const side = getMessageOrientation({ ...message, currentUserId });
@@ -45,7 +47,8 @@ export const groupsWithPrevious = (message, previous, currentUserId) => {
  * Chat layout of one message. Left messages keep a fixed avatar column (the
  * avatar itself only on the first message of a group); every group opens
  * with a header line carrying the time. Email and activity keep their own
- * layout.
+ * layout. Grouped follow-ups have no header, so they carry a compact meta
+ * of their own: delivery status always, time on hover.
  */
 export const getMessageLayout = ({
   orientation,
@@ -61,6 +64,7 @@ export const getMessageLayout = ({
       showAvatar: false,
       showHeader: false,
       timeInHeader: false,
+      followUpMeta: false,
     };
   }
 
@@ -70,5 +74,7 @@ export const getMessageLayout = ({
     showAvatar: isLeft && !groupWithPrevious,
     showHeader: !groupWithPrevious,
     timeInHeader: true,
+    // grouped follow-ups keep their own status ticks, with the time on hover
+    followUpMeta: !!groupWithPrevious,
   };
 };

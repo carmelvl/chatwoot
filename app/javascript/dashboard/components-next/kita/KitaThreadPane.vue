@@ -4,7 +4,10 @@ import { useI18n } from 'vue-i18n';
 import { useStore } from 'vuex';
 import { useAlert } from 'dashboard/composables';
 import { useMapGetter } from 'dashboard/composables/store';
-import { useCamelCase } from 'dashboard/composables/useTransformKeys';
+import {
+  useCamelCase,
+  useSnakeCase,
+} from 'dashboard/composables/useTransformKeys';
 import { useKitaConnections } from 'dashboard/composables/useKitaConnections';
 import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 import { kitaReplyBlock, KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
@@ -78,6 +81,10 @@ const toggleStatus = async () => {
     useAlert(t('KITA_THREADS.STATUS_ERROR'));
   }
 };
+
+// Failed thread replies retry the same way as in the main stream
+const retryMessage = message =>
+  store.dispatch('sendMessageWithData', useSnakeCase(message));
 
 const reply = ref('');
 const sendReply = async () => {
@@ -155,6 +162,7 @@ const sendReply = async () => {
         v-bind="message"
         :current-user-id="currentUserId"
         :conversation-channel="platform"
+        @retry="retryMessage(message)"
       />
     </ul>
     <KitaReplyGate

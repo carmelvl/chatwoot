@@ -549,7 +549,7 @@ provideMessageContext({
     <div
       v-else
       data-test="message-row"
-      class="flex w-full min-w-0 gap-2"
+      class="flex w-full min-w-0 gap-2 group/message"
       :class="flexOrientationClass"
     >
       <div
@@ -592,6 +592,7 @@ provideMessageContext({
           class="flex max-w-full min-w-0"
           :class="{
             'justify-end': orientation === ORIENTATION.RIGHT,
+            'gap-1.5': layout.followUpMeta && !kitaThread,
             'w-full': variant === MESSAGE_VARIANTS.EMAIL,
             'flex-col items-start gap-2': shouldShowWhatsappReferral,
             'flex-col gap-1': kitaThread,
@@ -605,6 +606,14 @@ provideMessageContext({
             :referral="contentAttributes.referral"
           />
           <Component :is="componentToRender" />
+          <MessageMeta
+            v-if="layout.followUpMeta"
+            compact
+            hover-time
+            data-test="message-follow-up-meta"
+            class="self-end shrink-0 whitespace-nowrap text-n-slate-11"
+            :class="{ 'order-first': orientation === ORIENTATION.RIGHT }"
+          />
           <KitaThreadFooter
             v-if="kitaThread"
             :thread="kitaThread"

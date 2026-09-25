@@ -68,6 +68,15 @@ describe('groupsWithPrevious', () => {
     expect(groupsWithPrevious(activity, previous, currentUserId)).toBe(false);
   });
 
+  it('never groups a private note with a public reply', () => {
+    const previous = message(me, 1000);
+    const note = message(me, 1010, { private: true });
+    expect(groupsWithPrevious(note, previous, currentUserId)).toBe(false);
+    expect(groupsWithPrevious(previous, note, currentUserId)).toBe(false);
+    const nextNote = message(me, 1020, { private: true });
+    expect(groupsWithPrevious(nextNote, note, currentUserId)).toBe(true);
+  });
+
   it('groups own consecutive messages on the right', () => {
     const previous = message(me, 1000);
     const current = message(me, 1060);
@@ -87,6 +96,7 @@ describe('getMessageLayout', () => {
       showAvatar: true,
       showHeader: true,
       timeInHeader: true,
+      followUpMeta: false,
     });
   });
 
@@ -101,6 +111,7 @@ describe('getMessageLayout', () => {
       showAvatar: false,
       showHeader: false,
       timeInHeader: true,
+      followUpMeta: true,
     });
   });
 

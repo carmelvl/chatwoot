@@ -13,6 +13,8 @@ import { MESSAGE_STATUS, MESSAGE_TYPES } from './constants';
 // Compact meta sits in the message header: time only, full date on hover
 const props = defineProps({
   compact: { type: Boolean, default: false },
+  // Grouped follow-ups: time only on hover of the message row
+  hoverTime: { type: Boolean, default: false },
 });
 
 const exactTimestamp = useExactTimestamp();
@@ -145,7 +147,11 @@ const statusToShow = computed(() => {
 
 <template>
   <div class="text-xs flex items-center gap-1.5">
-    <div class="inline">
+    <div
+      class="inline"
+      :class="{ 'invisible group-hover/message:visible': hoverTime }"
+      data-test="meta-time"
+    >
       <time
         v-tooltip.top="{
           content: exactTime,
