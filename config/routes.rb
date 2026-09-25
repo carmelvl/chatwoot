@@ -310,6 +310,9 @@ Rails.application.routes.draw do
             resources :channel_links, only: [:create] do
               get :accounts, on: :collection
             end
+            resources :whatsapp_groups, only: [:index, :create] do
+              get :pair_link, on: :collection
+            end
             resources :conversations, only: [] do
               resources :threads, only: [:index, :update] do
                 post :read, on: :member

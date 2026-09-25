@@ -3,6 +3,7 @@ import { redirectListToInbox } from '../../../helper/kitaRedirects';
 import ConversationView from '../conversation/ConversationView.vue';
 import CustomersPage from './CustomersPage.vue';
 import CustomerProfile from './CustomerProfile.vue';
+import WhatsAppGroupsPage from './WhatsAppGroupsPage.vue';
 
 const meta = {
   permissions: [
@@ -60,6 +61,13 @@ export const routes = [
     component: CustomersPage,
     beforeEnter: redirectListToInbox,
     meta,
+  },
+  {
+    // Before :customerId so it is not read as a customer id
+    path: frontendURL('accounts/:accountId/customers/whatsapp-groups'),
+    name: 'kita_whatsapp_groups',
+    component: WhatsAppGroupsPage,
+    meta: { permissions: ['administrator'] },
   },
   {
     path: frontendURL('accounts/:accountId/customers/:customerId'),

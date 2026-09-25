@@ -73,6 +73,7 @@ jobs:
           app/javascript/dashboard/store/index.js
           app/javascript/dashboard/components-next/message/bubbles/Text/Index.vue
           app/javascript/dashboard/api/kitaChannelLinks.js
+          app/javascript/dashboard/api/kitaWhatsappGroups.js
           app/javascript/dashboard/helper/kitaInbox.js
           app/javascript/dashboard/helper/specs/kitaInbox.spec.js
           app/javascript/dashboard/helper/kitaRedirects.js
@@ -105,6 +106,8 @@ jobs:
         run: cd kita-bridges && npm test
       - name: Grip sync tests
         run: cd kita-grip-sync && npm test
+      - name: WhatsApp groups tests
+        run: cd kita-wa-groups && npm ci && npm test
       - uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true

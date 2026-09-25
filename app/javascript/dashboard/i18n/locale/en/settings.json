@@ -1421,5 +1421,29 @@
     "EMPTY": "No tickets match these filters.",
     "EMPTY_CUSTOMER": "No tickets for this customer yet.",
     "FETCH_ERROR": "Could not load tickets"
+  },
+  "KITA_WA_GROUPS": {
+    "TITLE": "WhatsApp groups",
+    "DESCRIPTION": "Group chats the dedicated Kita WhatsApp number is in are mirrored here under the right customer. People keep replying from their own phones.",
+    "CONNECTED_AS": "Connected as {number}",
+    "NOT_PAIRED": "No number paired yet.",
+    "PAIR": "Pair number",
+    "RISK": "This uses an unofficial linked-device connection. Only pair the dedicated Kita number, never a personal or main business number.",
+    "ADD_LABEL": "Add group by invite link",
+    "ADD_PLACEHOLDER": "https://chat.whatsapp.com/…",
+    "ADD": "Join group",
+    "JOINED": "Joined {subject}",
+    "ALREADY_JOINED": "Already in {subject}",
+    "JOINED_GROUPS": "Joined groups ({count})",
+    "EMPTY": "No groups yet.",
+    "MEMBERS": "{count} members",
+    "ERRORS": {
+      "UNAVAILABLE": "The WhatsApp groups service is not reachable.",
+      "INVALID_LINK": "That is not a WhatsApp group invite link.",
+      "REVOKED": "That invite link is invalid or has been reset.",
+      "RATE_LIMITED": "Too many groups joined in the last hour. Try again later.",
+      "NOT_CONNECTED": "Pair the number first.",
+      "JOIN_FAILED": "Could not join the group."
+    }
   }
 }

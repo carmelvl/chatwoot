@@ -97,11 +97,21 @@ const startLink = async customer => {
             {{ t('KITA_CUSTOMERS.DESCRIPTION') }}
           </p>
         </div>
-        <Input
-          v-model="search"
-          class="w-64"
-          :placeholder="t('KITA_CUSTOMERS.SEARCH')"
-        />
+        <div class="flex items-center gap-3">
+          <router-link
+            v-if="isAdmin"
+            :to="{ name: 'kita_whatsapp_groups', params: { accountId } }"
+            class="text-sm font-medium text-n-slate-12 hover:underline whitespace-nowrap"
+            data-test-id="kita-wa-groups-link"
+          >
+            {{ t('KITA_WA_GROUPS.TITLE') }}
+          </router-link>
+          <Input
+            v-model="search"
+            class="w-64"
+            :placeholder="t('KITA_CUSTOMERS.SEARCH')"
+          />
+        </div>
       </div>
       <div
         v-if="unlinkedCount"
