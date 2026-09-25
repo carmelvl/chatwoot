@@ -26,12 +26,13 @@ const platformLabel = computed(() => {
 </script>
 
 <template>
-  <div class="relative size-6 shrink-0">
-    <Avatar :name="name" :src="src" :icon-name="iconName" :size="24" />
+  <div class="relative size-8 shrink-0">
+    <Avatar :name="name" :src="src" :icon-name="iconName" :size="32" />
     <span
       v-if="platform"
       :title="platformLabel"
-      class="absolute -bottom-1 ltr:-right-1 rtl:-left-1 flex items-center justify-center size-3.5 rounded-full bg-white ring-2 ring-n-solid-1"
+      data-test="platform-badge"
+      class="absolute -bottom-0.5 -end-0.5 flex items-center justify-center size-3.5 rounded-full bg-white ring-2 ring-white"
     >
       <PlatformLogo :platform="platform" class="size-2.5" />
     </span>
