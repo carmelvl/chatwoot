@@ -24,6 +24,8 @@ export interface BridgeDeps {
   scope?: ScopeCheck;
   /** Resolves a human channel label the message itself doesn't carry (Teams: Graph). Optional. */
   labeler?: (platform: Platform, replyRef: Record<string, unknown>) => Promise<string | undefined>;
+  /** WhatsApp groups (kita-wa-groups) with WA_GROUPS_SEND=on: replies post as the Kita number. Absent = mirror. */
+  groupSender?: Sender;
 }
 
 export type InboundResult = 'duplicate' | 'created' | 'appended' | 'staff_synced' | 'ignored' | 'out_of_scope';
@@ -469,12 +471,13 @@ export class Bridge {
     if (!channel) return `skip:${reason}`;
     const platform = channel.platform;
     const seenKey = `out:${decision.message.messageId}`;
-    if (MIRROR_PLATFORMS.includes(platform)) {
+    const groupSender = channel.channelKey.startsWith('whatsapp-group:') ? this.d.groupSender : undefined;
+    if (MIRROR_PLATFORMS.includes(platform) && !groupSender) {
       if (!store.markSeen(seenKey)) return 'skip:duplicate';
       await this.d.app?.createMessage(conv.conversationId, { content: MIRROR_NOTE[platform as 'whatsapp' | 'viber'], private: true });
       return 'skip:mirror';
     }
-    const sender = this.d.senders[platform];
+    const sender = groupSender ?? this.d.senders[platform];
     if (!sender) return 'skip:platform_disabled';
     if (!store.markSeen(seenKey)) return 'skip:duplicate';
     let refused: RefusalReason | undefined;

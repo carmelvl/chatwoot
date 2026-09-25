@@ -14,6 +14,7 @@ import type { Store } from './store.ts';
 import type { Platform } from './types.ts';
 import { safeEqual } from './crypto.ts';
 import { GripError, type GripLinks } from './griplinks.ts';
+import { parseInternalInbound } from './wagroups.ts';
 
 const MAX_BODY = 5 * 1024 * 1024;
 
@@ -39,6 +40,7 @@ export interface AppDeps {
  *   POST /internal/link-refresh                      refresh Grip scope + merge linked channels now
  *   GET  /internal/grip/accounts?search=             Grip accounts for the "Link to customer" picker
  *   POST /internal/grip/link {channel_key, account_id} link the channel in Grip, then refresh
+ *   POST /internal/inbound {platform, channel_key, ...} a normalised message from kita-wa-groups -> bridge.inbound
  */
 async function internal(d: AppDeps, req: IncomingMessage, res: ServerResponse, path: string, url: URL) {
   if (!d.cfg.linkSecret || !safeEqual(h(req, 'x-kita-bridge-secret') ?? '', d.cfg.linkSecret)) return send(res, 401);
@@ -47,6 +49,11 @@ async function internal(d: AppDeps, req: IncomingMessage, res: ServerResponse, p
       if (!d.linkRefresh) return send(res, 404);
       await d.linkRefresh();
       return send(res, 200);
+    }
+    if (req.method === 'POST' && path === '/internal/inbound') {
+      const msg = parseInternalInbound(JSON.parse(await readBody(req)));
+      // Synchronous: the sender keeps its media until the bridge has downloaded it.
+      return msg ? send(res, 200, { result: await d.bridge.inbound(msg) }) : send(res, 422);
     }
     if (!d.gripLinks?.enabled) return send(res, 404, { error: 'grip_not_configured' });
     if (req.method === 'GET' && path === '/internal/grip/accounts')

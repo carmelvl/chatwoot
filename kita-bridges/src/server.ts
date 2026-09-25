@@ -16,6 +16,7 @@ import { teamsLabel } from './platforms/teams/labels.ts';
 import { Store } from './store.ts';
 import { parseTeamSyncMode, rosterSource, SlackMembership, TeamSync, TeamsMembership } from './teamsync.ts';
 import type { Platform, Sender } from './types.ts';
+import { waGroupSenderFromEnv } from './wagroups.ts';
 
 const cfg = loadConfig();
 const enabled = enabledPlatforms(cfg);
@@ -57,7 +58,9 @@ const desk = cfg.linkSecret ? new KitaDeskClient(cfg.chatwootBaseUrl, cfg.linkSe
 const labeler = teams
   ? (platform: Platform, ref: Record<string, unknown>) => (platform === 'teams' ? teamsLabel(teams.graph, ref, cfg.teams.kitaUserUpn) : Promise.resolve(undefined))
   : undefined;
-bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope, labeler });
+// WhatsApp groups (kita-wa-groups): mirror-only unless WA_GROUPS_SEND=on.
+const groupSender = waGroupSenderFromEnv(cfg.linkSecret);
+bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope, labeler, groupSender });
 // Desk "Link to customer": Grip link, then refresh scope (which runs linkChannels) right away.
 const linkRefresh = async () => {
   if (!(await scope.refresh())) await bridge!.linkChannels();
