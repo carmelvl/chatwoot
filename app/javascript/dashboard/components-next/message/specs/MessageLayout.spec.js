@@ -51,6 +51,12 @@ const mountMessage = props =>
   mount(Message, {
     props,
     global: {
+      mocks: {
+        $store: {
+          getters: new Proxy({}, { get: () => () => ({}) }),
+          dispatch: vi.fn(),
+        },
+      },
       directives: { tooltip: {}, dompurifyHtml: {} },
       stubs: {
         MessageSenderAvatar: {
