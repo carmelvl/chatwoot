@@ -14,7 +14,8 @@ class KitaChannelLinksAPI extends ApiClient {
   link(conversationId, accountId) {
     return axios.post(this.url, {
       conversation_id: conversationId,
-      account_id: accountId,
+      // account_id would clash with the desk account in the URL
+      grip_account_id: accountId,
     });
   }
 }

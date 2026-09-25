@@ -14,7 +14,7 @@ class Api::V1::Accounts::Kita::ChannelLinksController < Api::V1::Accounts::BaseC
     channel_key = conversation.custom_attributes&.dig('channel_key')
     return render_could_not_create_error('This conversation has no channel to link') if channel_key.blank?
 
-    ::Kita::Bridge.link_channel(channel_key, params.require(:account_id).to_s)
+    ::Kita::Bridge.link_channel(channel_key, params.require(:grip_account_id).to_s)
     head :ok
   rescue ::Kita::Bridge::LinkError => e
     render json: { error: e.message }, status: e.status == 404 ? :not_found : :bad_gateway

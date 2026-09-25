@@ -31,7 +31,7 @@ RSpec.describe 'Kita channel links', type: :request do
            .with(body: { channel_key: 'teams:19:abc', account_id: 'acc-1' }.to_json, headers: { 'X-Kita-Bridge-Secret' => 'link-secret' })
            .to_return(status: 200, body: { linked: true }.to_json, headers: { 'Content-Type' => 'application/json' })
 
-    post base, params: { conversation_id: conversation.display_id, account_id: 'acc-1' }, headers: admin.create_new_auth_token, as: :json
+    post base, params: { conversation_id: conversation.display_id, grip_account_id: 'acc-1' }, headers: admin.create_new_auth_token, as: :json
 
     expect(response).to have_http_status(:ok), response.body
     expect(stub).to have_been_requested
@@ -41,7 +41,7 @@ RSpec.describe 'Kita channel links', type: :request do
     stub_request(:post, 'http://bridges.test/internal/grip/link')
       .to_return(status: 404, body: { error: 'channel is not in Grip’s unlinked list' }.to_json, headers: { 'Content-Type' => 'application/json' })
 
-    post base, params: { conversation_id: conversation.display_id, account_id: 'acc-1' }, headers: admin.create_new_auth_token, as: :json
+    post base, params: { conversation_id: conversation.display_id, grip_account_id: 'acc-1' }, headers: admin.create_new_auth_token, as: :json
 
     expect(response).to have_http_status(:not_found)
     expect(response.parsed_body['error']).to include('unlinked list')
