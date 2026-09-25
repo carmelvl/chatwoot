@@ -33,7 +33,7 @@ RSpec.describe 'Kita channel links', type: :request do
 
     post base, params: { conversation_id: conversation.display_id, account_id: 'acc-1' }, headers: admin.create_new_auth_token, as: :json
 
-    expect(response).to have_http_status(:ok)
+    expect(response).to have_http_status(:ok), response.body
     expect(stub).to have_been_requested
   end
 
