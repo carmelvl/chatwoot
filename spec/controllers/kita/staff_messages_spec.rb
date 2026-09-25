@@ -32,7 +32,7 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
     end.to change(conversation.messages.outgoing, :count).by(1)
 
     message = conversation.messages.outgoing.last
-    expect(response.parsed_body).to eq('id' => message.id, 'sender_id' => agent.id)
+    expect(response.parsed_body).to eq('id' => message.id, 'sender_type' => 'User', 'sender_id' => agent.id)
     expect(message).to have_attributes(sender: agent, private: false, content: 'On it')
     expect(message.content_attributes).to include('kita_bridge_origin' => true, 'external_source' => 'slack')
     expect(response.body).not_to include('access_token')

@@ -324,6 +324,8 @@
     "MENTIONED_CONVERSATIONS": "Mentions",
     "PARTICIPATING_CONVERSATIONS": "Participating",
     "UNATTENDED_CONVERSATIONS": "Unattended",
+    "CUSTOMERS": "Customers",
+    "MY_CUSTOMERS": "My customers",
     "REPORTS": "Reports",
     "SETTINGS": "Settings",
     "CONTACTS": "Contacts",
@@ -1152,5 +1154,25 @@
       "MIRROR": "Reply in {platform} yourself — this inbox is a mirror",
       "MIRROR_DESCRIPTION": "Nothing typed here is sent to the customer. Private notes still work."
     }
+  },
+  "KITA_CUSTOMERS": {
+    "TITLE": "Customers",
+    "FILTER": {
+      "ALL": "All customers",
+      "MINE": "My customers"
+    },
+    "COLUMNS": {
+      "CUSTOMER": "Customer",
+      "DRI": "DRI",
+      "CHANNELS": "Channels",
+      "OPEN": "Open conversations",
+      "LAST_ACTIVITY": "Last activity"
+    },
+    "UNLINKED": "Unlinked",
+    "WAITING_ON_US": "Waiting on us",
+    "LOADING": "Loading...",
+    "EMPTY": "No customers yet",
+    "NO_CONVERSATIONS": "No conversations for this customer",
+    "FETCH_ERROR": "Could not load customers"
   }
 }

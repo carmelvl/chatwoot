@@ -416,6 +416,12 @@ const menuItems = computed(() => {
           to: accountScopedRoute('conversation_unattended'),
         },
         {
+          name: 'My customers',
+          label: t('SIDEBAR.MY_CUSTOMERS'),
+          icon: 'i-lucide-user-round-search',
+          to: accountScopedRoute('kita_my_customers'),
+        },
+        {
           name: 'Folders',
           label: t('SIDEBAR.CUSTOM_VIEWS_FOLDER'),
           icon: 'i-lucide-folder',
@@ -499,6 +505,13 @@ const menuItems = computed(() => {
           })),
         },
       ],
+    },
+    {
+      name: 'Customers',
+      label: t('SIDEBAR.CUSTOMERS'),
+      icon: 'i-lucide-building-2',
+      to: accountScopedRoute('kita_customers'),
+      activeOn: ['kita_customers'],
     },
     {
       name: 'Captain',
