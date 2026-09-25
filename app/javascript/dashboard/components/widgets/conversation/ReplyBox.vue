@@ -398,7 +398,7 @@ export default {
         return this.$t('CONVERSATION.FOOTER.PRIVATE_MSG_INPUT');
       }
       // Kita: "Message #kita-tala…" in Slack/Teams conversations
-      if (this.kitaSendsAs) {
+      if (this.kitaSendsAs?.channel) {
         return this.$t('KITA_COMPOSER.PLACEHOLDER', {
           channel: this.kitaSendsAs.channel,
         });

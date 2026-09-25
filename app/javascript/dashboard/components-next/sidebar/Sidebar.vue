@@ -255,6 +255,9 @@ onMounted(() => {
   store.dispatch('customViews/get', 'contact');
 });
 
+// Served from public/ (a static src would be bundled as an import)
+const KITA_LOGO_DARK = '/brand-assets/kita-logo-dark.svg';
+
 // Kita: my customers (DRI = me) for the Customers count and the MY CUSTOMERS list
 const myCustomers = useMapGetter('kitaCustomers/getMine');
 watch(
@@ -1039,7 +1042,7 @@ const moreMenuItems = computed(() =>
         class="px-3 pt-4 pb-2"
       >
         <img
-          src="/brand-assets/kita-logo-dark.svg"
+          :src="KITA_LOGO_DARK"
           :alt="t('SIDEBAR.CUSTOMERS')"
           class="w-auto h-12"
         />
