@@ -217,6 +217,7 @@ const reply = {
     { url: 'https://b/media/t1/steps.png', sourceUrl: 'https://cw/steps.png', name: 'steps.png', fileType: 'image' },
     { url: 'https://b/media/t2/guide.pdf', sourceUrl: 'https://cw/guide.pdf', name: 'guide.pdf', fileType: 'file' },
   ],
+  agent: { id: 3, name: 'Carmel Limcaoco', firstName: 'Carmel' },
 };
 
 test('message transforms: escaped HTML with inline hostedContents; card fallback has no agent names', () => {
@@ -238,11 +239,11 @@ test('message transforms: escaped HTML with inline hostedContents; card fallback
 
 const imageFetch = (async (url: any) => (String(url).startsWith('https://cw/') ? new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } }) : new Response('x', { status: 404 }))) as typeof fetch;
 
-test('sender: plain HTML reply into the channel thread as the Kita user; returns echo id for loop prevention', async () => {
+test('sender: plain HTML reply into the channel thread as the agent; returns echo id for loop prevention', async () => {
   const { calls, graph } = fakeGraph({
     'POST /teams/T/channels/19:c@thread.tacv2/messages/1/replies': () => ({ id: '555' }),
   });
-  const r = await new TeamsSender(graph, 'auto', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: '19:c@thread.tacv2', rootId: '1' }, reply);
+  const r = await new TeamsSender(graph, 'auto', imageFetch, () => graph).send({ kind: 'channel', teamId: 'T', channelId: '19:c@thread.tacv2', rootId: '1' }, reply);
   assert.deepEqual(r, { echoes: ['19:c@thread.tacv2:555'] });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].body.hostedContents[0].contentBytes, Buffer.from([1, 2, 3]).toString('base64'));
@@ -251,19 +252,19 @@ test('sender: plain HTML reply into the channel thread as the Kita user; returns
 test('sender: Adaptive Card fallback only when a channel rejects the HTML post; never for chats or auth errors', async () => {
   let attempt = 0;
   const ch = fakeGraph({ 'POST /teams/T/channels/C/messages/1/replies': (b) => (++attempt === 1 ? graphErr(403, 'Forbidden') : (assert.ok(b.attachments), { id: '9' })) });
-  assert.deepEqual(await new TeamsSender(ch.graph, 'auto', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply), { echoes: ['C:9'] });
+  assert.deepEqual(await new TeamsSender(ch.graph, 'auto', imageFetch, () => ch.graph).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply), { echoes: ['C:9'] });
   assert.equal(ch.calls[1].body.attachments[0].contentType, 'application/vnd.microsoft.card.adaptive');
 
   const chat = fakeGraph({ 'POST /chats/X/messages': () => graphErr(403, 'Forbidden') });
-  await assert.rejects(new TeamsSender(chat.graph, 'auto', imageFetch).send({ kind: 'chat', chatId: 'X' }, reply), GraphError);
+  assert.deepEqual(await new TeamsSender(chat.graph, 'auto', imageFetch, () => chat.graph).send({ kind: 'chat', chatId: 'X' }, reply), { refused: 'not_member' });
   assert.equal(chat.calls.length, 1);
 
   const auth = fakeGraph({ 'POST /teams/T/channels/C/messages/1/replies': () => graphErr(401, 'InvalidAuthenticationToken') });
-  await assert.rejects(new TeamsSender(auth.graph, 'auto', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply));
+  await assert.rejects(new TeamsSender(auth.graph, 'auto', imageFetch, () => auth.graph).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply));
   assert.equal(auth.calls.length, 1);
 
   const forced = fakeGraph({ 'POST /teams/T/channels/C/messages/1/replies': () => ({ id: '1' }) });
-  await new TeamsSender(forced.graph, 'card', imageFetch).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply);
+  await new TeamsSender(forced.graph, 'card', imageFetch, () => forced.graph).send({ kind: 'channel', teamId: 'T', channelId: 'C', rootId: '1' }, reply);
   assert.ok(forced.calls[0].body.attachments);
 });
 

@@ -148,7 +148,7 @@ export async function downloadAttachments(atts: InboundAttachment[], fetchImpl: 
 /**
  * Chatwoot Application API (agent-level token) for what the public inbox API can't do:
  * private notes to agents, outgoing messages for staff who typed directly in Slack/Teams,
- * and agent avatars. Everything it writes carries content_attributes.kita_bridge_origin, which
+ * Everything it writes carries content_attributes.kita_bridge_origin, which
  * toOutbound() refuses to send, so nothing it creates can bounce back out.
  */
 export class ChatwootAppClient {
@@ -156,7 +156,6 @@ export class ChatwootAppClient {
   private token: string;
   private accountId: string;
   private fetchImpl: typeof fetch;
-  private agents?: { at: number; byId: Map<number, string | undefined> };
 
   constructor(baseUrl: string, token: string, accountId: string, fetchImpl: typeof fetch = fetch) {
     this.base = `${baseUrl}/api/v1/accounts/${accountId}`;
@@ -187,16 +186,6 @@ export class ChatwootAppClient {
     return Array.isArray(list) ? list : [];
   }
 
-  /** Agent avatar (thumbnail) by Chatwoot user id; cached for an hour. */
-  async avatarUrl(agentId: number): Promise<string | undefined> {
-    if (!this.agents || Date.now() - this.agents.at > 3600_000) {
-      const res = await this.fetchImpl(`${this.base}/agents`, { headers: { 'api-access-token': this.token } });
-      if (!res.ok) return undefined;
-      const list: any[] = await res.json();
-      this.agents = { at: Date.now(), byId: new Map(list.map((a) => [Number(a.id), a.thumbnail || undefined])) };
-    }
-    return this.agents.byId.get(agentId);
-  }
 }
 
 /**

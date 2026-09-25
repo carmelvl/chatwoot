@@ -225,7 +225,8 @@ export function createHandler(d: AppDeps) {
           return send(res, 401);
         // Synchronous on purpose: a non-2xx makes Chatwoot mark the agent's message as failed in the UI.
         const result = await bridge.outbound(platform, JSON.parse(raw));
-        return send(res, 200, { ok: true, result });
+        // Refused (agent not connected / not a member): nothing was posted; 422 marks the message failed.
+        return send(res, result.startsWith('refused:') ? 422 : 200, { ok: !result.startsWith('refused:'), result });
       }
 
       return send(res, 404);

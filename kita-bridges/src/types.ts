@@ -54,17 +54,16 @@ export interface AgentIdentity {
   name: string;
   firstName: string;
   email?: string;
-  /** Customer-safe avatar URL (bridge media proxy), filled in when known. */
-  avatarUrl?: string;
 }
 
-export type FallbackReason = 'not_connected' | 'not_member';
+/** Why an agent reply was NOT sent: nothing is ever posted from a shared identity instead. */
+export type RefusalReason = 'not_connected' | 'not_member';
 
 export interface SendResult {
   /** Inbound event ids of what was posted, so the platform echo is recognised as ours. */
   echoes?: string[];
-  /** Set when the reply went out from the shared Kita identity instead of the agent's own account. */
-  fallback?: FallbackReason;
+  /** Set when nothing was posted because the agent can't post as themselves (no shared-identity fallback). */
+  refused?: RefusalReason;
 }
 
 export interface OutboundAttachment {

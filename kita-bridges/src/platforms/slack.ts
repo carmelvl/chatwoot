@@ -108,19 +108,13 @@ export interface SlackProfile {
   avatarUrl?: string;
 }
 
-export interface SlackIdentity {
-  name: string;
-  iconUrl?: string;
-}
 
-/** Text part of a reply. `who` set = bot post with a custom name/icon; unset = the agent's own user token. */
-export function buildSlackPost(replyRef: Record<string, unknown>, msg: OutboundMessage, who?: SlackIdentity) {
+/** Text part of a reply, posted with the agent's own user token. */
+export function buildSlackPost(replyRef: Record<string, unknown>, msg: OutboundMessage) {
   return {
     channel: replyRef.channel as string,
     ...(replyRef.threadTs ? { thread_ts: replyRef.threadTs as string } : {}),
     text: markdownToSlack(msg.text),
-    ...(who ? { username: who.name } : {}), // chat:write.customize
-    ...(who?.iconUrl ? { icon_url: who.iconUrl } : {}),
     unfurl_links: false,
     unfurl_media: false,
   };
@@ -134,27 +128,22 @@ export class SlackApiError extends Error {
   }
 }
 
-/** Errors meaning "this person's account can't post here" -> fall back to the bot. */
+/** Errors meaning "this person's account can't post here" -> refused (nothing is posted). */
 const NOT_MEMBER_ERRORS = new Set(['not_in_channel', 'channel_not_found', 'restricted_action', 'is_archived', 'token_revoked', 'invalid_auth', 'account_inactive']);
 
-/**
- * Posts as the agent (their user token, chat:write + files:write) when they've connected; otherwise,
- * or if their account can't post in that channel, as the Kita bot with chat:write.customize showing
- * the agent's full name and avatar.
- */
+/** Posts agent replies as the agent (their user token, chat:write + files:write), never as the bot. */
 export class SlackSender implements Sender {
+  /** The bot token: listening only (user, channel lookups). Replies always use the agent's own token. */
   private token: string;
-  private who: SlackIdentity;
   private fetchImpl: typeof fetch;
   private userToken: (agentId: number) => string | undefined;
-  constructor(token: string, who: SlackIdentity = { name: 'Kita' }, fetchImpl: typeof fetch = fetch, userToken: (agentId: number) => string | undefined = () => undefined) {
+  constructor(token: string, userToken: (agentId: number) => string | undefined, fetchImpl: typeof fetch = fetch) {
     this.token = token;
-    this.who = who;
-    this.fetchImpl = fetchImpl;
     this.userToken = userToken;
+    this.fetchImpl = fetchImpl;
   }
 
-  private async api(method: string, body: Record<string, unknown>, token = this.token): Promise<any> {
+  private async api(method: string, body: Record<string, unknown>, token: string): Promise<any> {
     const res = await this.fetchImpl(`https://slack.com/api/${method}`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=utf-8' },
@@ -165,26 +154,26 @@ export class SlackSender implements Sender {
     return json;
   }
 
+  /**
+   * Posts only as the agent (their own user token). With no connected account, or when that account
+   * can't post in the channel, nothing is posted: the bot token is for listening, never for replies.
+   */
   async send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<SendResult> {
     const ut = msg.agent ? this.userToken(msg.agent.id) : undefined;
-    if (ut) {
-      try {
-        return { echoes: await this.deliver(ut, replyRef, msg) };
-      } catch (e) {
-        if (!(e instanceof SlackApiError && NOT_MEMBER_ERRORS.has(e.code))) throw e;
-        log.warn('slack_agent_cannot_post', { agent: msg.agent!.id, error: e.code });
-      }
+    if (!ut) return { refused: 'not_connected' };
+    try {
+      return { echoes: await this.deliver(ut, replyRef, msg) };
+    } catch (e) {
+      if (!(e instanceof SlackApiError && NOT_MEMBER_ERRORS.has(e.code))) throw e;
+      log.warn('slack_agent_cannot_post', { agent: msg.agent!.id, error: e.code });
+      return { refused: 'not_member' };
     }
-    const identity = msg.agent ? { name: msg.agent.name, iconUrl: msg.agent.avatarUrl ?? this.who.iconUrl } : this.who;
-    const echoes = await this.deliver(this.token, replyRef, msg, identity);
-    return msg.agent ? { echoes, fallback: ut ? 'not_member' : 'not_connected' } : { echoes };
   }
 
-  /** identity undefined = user token (posts natively as that person, no customisation). */
-  private async deliver(token: string, replyRef: Record<string, unknown>, msg: OutboundMessage, identity?: SlackIdentity): Promise<string[]> {
+  private async deliver(token: string, replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<string[]> {
     const echoes: string[] = [];
     if (msg.text.trim()) {
-      const post = buildSlackPost(replyRef, msg, identity);
+      const post = buildSlackPost(replyRef, msg);
       const r = await this.api('chat.postMessage', post, token);
       echoes.push(`${replyRef.channel}:${r.ts}`);
     }
@@ -193,7 +182,7 @@ export class SlackSender implements Sender {
   }
 
   /** Native Slack file in the thread (files:write): getUploadURLExternal -> POST bytes -> completeUploadExternal. */
-  private async upload(replyRef: Record<string, unknown>, a: OutboundMessage['attachments'][number], token = this.token): Promise<string[]> {
+  private async upload(replyRef: Record<string, unknown>, a: OutboundMessage['attachments'][number], token: string): Promise<string[]> {
     const src = await this.fetchImpl(a.sourceUrl, { redirect: 'follow' });
     if (!src.ok) throw new Error(`attachment fetch ${src.status}`);
     const bytes = new Uint8Array(await src.arrayBuffer());

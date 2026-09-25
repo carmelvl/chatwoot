@@ -11,7 +11,7 @@ import { parseSlackEvent } from '../src/platforms/slack.ts';
 import { Graph, GraphAuth } from '../src/platforms/teams/graph.ts';
 import { TeamsSender } from '../src/platforms/teams/messages.ts';
 import { Store } from '../src/store.ts';
-import { withNamePrefix, type OutboundMessage, type Platform } from '../src/types.ts';
+import type { OutboundMessage, Platform } from '../src/types.ts';
 import { fakeChatwoot, fixture, PUBLIC_URL, RecordingSender } from './helpers.ts';
 
 const carmel = { id: 3, name: 'Carmel Limcaoco', firstName: 'Carmel', email: 'carmel@kita.ai' };
@@ -42,12 +42,6 @@ test('agent identity comes from the Chatwoot webhook sender', () => {
   assert.equal(auto.send && auto.message.agent, undefined); // automation -> plain Kita, no prefix
 });
 
-test('name prefix', () => {
-  assert.equal(withNamePrefix(reply()).text, 'Carmel: We fixed it');
-  assert.equal(withNamePrefix(reply({ text: '' })).text, 'Carmel:');
-  assert.equal(withNamePrefix(reply({ agent: undefined })).text, 'We fixed it');
-});
-
 test('teams: connected agent posts with their own token (natively as them), no prefix, no fallback', async () => {
   const { calls, f } = recorder(() => Response.json({ id: '42' }, { status: 201 }));
   const kita = new Graph({ accessToken: async () => 'KITA' }, f);
@@ -58,20 +52,22 @@ test('teams: connected agent posts with their own token (natively as them), no p
   assert.equal(calls[0].body.body.content, 'We fixed it');
 });
 
-test('teams: agent not connected -> Kita user posts "Carmel: …", fallback not_connected', async () => {
+test('teams: agent not connected -> nothing is posted (refused), never the Kita user', async () => {
   const { calls, f } = recorder(() => Response.json({ id: '43' }, { status: 201 }));
   const r = await new TeamsSender(new Graph({ accessToken: async () => 'KITA' }, f), 'auto', f).send({ kind: 'chat', chatId: 'X' }, reply());
-  assert.deepEqual(r, { echoes: ['X:43'], fallback: 'not_connected' });
-  assert.equal(calls[0].auth, 'Bearer KITA');
-  assert.equal(calls[0].body.body.content, 'Carmel: We fixed it');
+  assert.deepEqual(r, { refused: 'not_connected' });
+  assert.equal(calls.length, 0);
+  // automated messages (no agent) have no personal identity either
+  assert.deepEqual(await new TeamsSender(new Graph({ accessToken: async () => 'KITA' }, f), 'auto', f).send({ kind: 'chat', chatId: 'X' }, reply({ agent: undefined })), { refused: 'not_connected' });
+  assert.equal(calls.length, 0);
 });
 
-test('teams: agent not a member (403/404) -> Kita user with prefix, fallback not_member; 5xx is not swallowed', async () => {
+test('teams: agent not a member (403/404) -> refused not_member, no Kita-user post; 5xx is not swallowed', async () => {
   const { calls, f } = recorder((_u, auth) => (auth === 'Bearer CARMEL' ? err(403, 'Forbidden') : Response.json({ id: '44' }, { status: 201 })));
   const agentGraph = new Graph({ accessToken: async () => 'CARMEL' }, f);
   const r = await new TeamsSender(new Graph({ accessToken: async () => 'KITA' }, f), 'auto', f, () => agentGraph).send({ kind: 'chat', chatId: 'X' }, reply());
-  assert.deepEqual(r, { echoes: ['X:44'], fallback: 'not_member' });
-  assert.equal(calls.at(-1)!.body.body.content, 'Carmel: We fixed it');
+  assert.deepEqual(r, { refused: 'not_member' });
+  assert.deepEqual(calls.map((c) => c.auth), ['Bearer CARMEL']);
 
   const boom = recorder(() => err(503, 'ServiceUnavailable'));
   await assert.rejects(new TeamsSender(new Graph({ accessToken: async () => 'KITA' }, boom.f), 'auto', boom.f, () => new Graph({ accessToken: async () => 'C' }, boom.f)).send({ kind: 'chat', chatId: 'X' }, reply()));
@@ -79,40 +75,36 @@ test('teams: agent not a member (403/404) -> Kita user with prefix, fallback not
 
 test('slack: connected agent posts with their user token (no username override)', async () => {
   const { calls, f } = recorder(() => Response.json({ ok: true, ts: '1.5' }));
-  const r = await new SlackSender('xoxb-bot', { name: 'Kita' }, f, (id) => (id === 3 ? 'xoxp-carmel' : undefined)).send({ channel: 'C1', threadTs: '1.0' }, reply());
+  const r = await new SlackSender('xoxb-bot', (id) => (id === 3 ? 'xoxp-carmel' : undefined), f).send({ channel: 'C1', threadTs: '1.0' }, reply());
   assert.deepEqual(r, { echoes: ['C1:1.5'] });
   assert.equal(calls[0].auth, 'Bearer xoxp-carmel');
   assert.equal(calls[0].body.username, undefined);
   assert.equal(calls[0].body.text, 'We fixed it');
 });
 
-test('slack: not connected -> bot with chat:write.customize as the agent (full name + avatar)', async () => {
+test('slack: not connected -> nothing is posted (refused), never the bot', async () => {
   const { calls, f } = recorder(() => Response.json({ ok: true, ts: '1.6' }));
-  const r = await new SlackSender('xoxb-bot', { name: 'Kita', iconUrl: 'https://b/kita.png' }, f).send({ channel: 'C1', threadTs: '1.0' }, reply({ agent: { ...carmel, avatarUrl: `${PUBLIC_URL}/media/tok/avatar.png` } }));
-  assert.deepEqual(r, { echoes: ['C1:1.6'], fallback: 'not_connected' });
-  assert.equal(calls[0].auth, 'Bearer xoxb-bot');
-  assert.equal(calls[0].body.username, 'Carmel Limcaoco');
-  assert.equal(calls[0].body.icon_url, `${PUBLIC_URL}/media/tok/avatar.png`);
-  assert.doesNotMatch(JSON.stringify(calls[0].body), /chatwoot|active_storage/i);
+  const slack = new SlackSender('xoxb-bot', () => undefined, f);
+  assert.deepEqual(await slack.send({ channel: 'C1', threadTs: '1.0' }, reply()), { refused: 'not_connected' });
+  assert.deepEqual(await slack.send({ channel: 'C1' }, reply({ agent: undefined })), { refused: 'not_connected' });
+  assert.equal(calls.length, 0);
 });
 
-test('slack: agent not in the channel -> bot fallback not_member; other errors surface', async () => {
-  const { calls, f } = recorder((_u, auth) => Response.json(auth === 'Bearer xoxp-carmel' ? { ok: false, error: 'not_in_channel' } : { ok: true, ts: '1.7' }));
-  const r = await new SlackSender('xoxb-bot', { name: 'Kita' }, f, () => 'xoxp-carmel').send({ channel: 'C1', threadTs: '1.0' }, reply());
-  assert.deepEqual(r, { echoes: ['C1:1.7'], fallback: 'not_member' });
-  assert.equal(calls[1].body.username, 'Carmel Limcaoco');
+test('slack: agent not in the channel -> refused not_member, no bot post; other errors surface', async () => {
+  const { calls, f } = recorder(() => Response.json({ ok: false, error: 'not_in_channel' }));
+  const r = await new SlackSender('xoxb-bot', () => 'xoxp-carmel', f).send({ channel: 'C1', threadTs: '1.0' }, reply());
+  assert.deepEqual(r, { refused: 'not_member' });
+  assert.deepEqual(calls.map((c) => c.auth), ['Bearer xoxp-carmel']);
   const bad = recorder(() => Response.json({ ok: false, error: 'msg_too_long' }));
-  await assert.rejects(new SlackSender('xoxb-bot', { name: 'Kita' }, bad.f, () => 'xoxp-carmel').send({ channel: 'C1', threadTs: '1.0' }, reply()), /msg_too_long/);
+  await assert.rejects(new SlackSender('xoxb-bot', () => 'xoxp-carmel', bad.f).send({ channel: 'C1', threadTs: '1.0' }, reply()), /msg_too_long/);
 });
 
-test('viber: one business identity -> "Carmel: …" by default, configurable off', async () => {
+test('viber (the one exception): replies go out through the Kita bot, with no name prefix', async () => {
   const sent: any[] = [];
   const f = (async (_u: any, init: any) => (sent.push(JSON.parse(init.body)), Response.json({ status: 0 }))) as typeof fetch;
   await new ViberSender('tok', { name: 'Kita' }, f).send({ receiver: 'U1' }, reply());
-  await new ViberSender('tok', { name: 'Kita' }, f, false).send({ receiver: 'U1' }, reply());
-  assert.deepEqual(sent.map((b) => b.text), ['Carmel: We fixed it', 'We fixed it']);
+  assert.deepEqual(sent.map((b) => b.text), ['We fixed it']);
   assert.equal(sent[0].sender.name, 'Kita');
-  assert.equal(buildViberMessages({ receiver: 'U' }, reply(), { name: 'Kita' })[0].text, 'We fixed it'); // prefix is the sender's job
 });
 
 // ---------- bridge: fallback notes, staff sync, loop safety ----------
@@ -166,24 +158,25 @@ const slackMsg = (name: string) => {
 };
 const agentReply = (convId = 100) => ({ ...fixture('chatwoot_outgoing.json'), attachments: [], sender: { id: 3, name: 'Carmel Limcaoco', email: 'carmel@kita.ai', type: 'user' }, conversation: { id: convId } });
 
-test('fallback not_connected -> private note to the agent with their signed connect link', async () => {
-  const { bridge, posts } = bridgeWith({ echoes: ['C0SHARED1:9.9'], fallback: 'not_connected' });
+test('refused not_connected -> nothing posted, 422-style result, private "Not sent" note with the connect link', async () => {
+  const { bridge, posts, sender } = bridgeWith({ refused: 'not_connected' });
   await bridge.inbound(slackMsg('slack_top_level.json'));
-  assert.equal(await bridge.outbound('slack', agentReply()), 'sent:fallback:not_connected');
+  assert.equal(await bridge.outbound('slack', agentReply()), 'refused:not_connected');
   const note = posts.find((p) => p.body.private === true)!;
   assert.equal(note.path, '/api/v1/accounts/1/conversations/100/messages');
-  assert.match(note.body.content, /Carmel, this reply was sent from the shared Kita account .* isn't connected\. Connect it once so replies come from you: https:\/\/support\.internal\.kita\.ai\/bridges\/connect\?a=3&e=carmel%40kita\.ai/);
+  assert.match(note.body.content, /^Not sent — connect your Slack account first \(Profile → Connect accounts\)\. https:\/\/support\.internal\.kita\.ai\/bridges\/connect\?a=3&e=carmel%40kita\.ai/);
   assert.deepEqual(note.body.content_attributes, { kita_bridge_origin: true });
+  assert.equal(posts.filter((p) => !p.body.private).length, 0); // nothing public anywhere
+  assert.equal(sender.sent.length, 1); // the sender was asked, and refused without posting
   // the note's own webhook can never go out
   assert.equal(toOutbound({ ...agentReply(), private: true, content_attributes: { kita_bridge_origin: true } }).send, false);
 });
 
-test('fallback not_member -> note asks to be added; normal sends post no note; agent avatar is proxied for Slack', async () => {
-  const a = bridgeWith({ echoes: [], fallback: 'not_member' });
+test('refused not_member -> "you\'re not in this channel yet" note; normal sends post no note', async () => {
+  const a = bridgeWith({ refused: 'not_member' });
   await a.bridge.inbound(slackMsg('slack_top_level.json'));
-  await a.bridge.outbound('slack', agentReply());
-  assert.match(a.posts.find((p) => p.body.private)!.body.content, /isn't a member of this channel\. Ask to be added/);
-  assert.match(a.sender.sent[0].msg.agent!.avatarUrl!, new RegExp(`^${PUBLIC_URL}/media/`));
+  assert.equal(await a.bridge.outbound('slack', agentReply()), 'refused:not_member');
+  assert.match(a.posts.find((p) => p.body.private)!.body.content, /^Not sent — you're not in this channel yet\./);
 
   const b = bridgeWith({ echoes: ['C0SHARED1:9.8'] });
   await b.bridge.inbound(slackMsg('slack_top_level.json'));

@@ -1,5 +1,5 @@
 import { log } from '../../log.ts';
-import { withNamePrefix, type InboundAttachment, type InboundMessage, type OutboundMessage, type Sender, type SendResult } from '../../types.ts';
+import { type InboundAttachment, type InboundMessage, type OutboundMessage, type Sender, type SendResult } from '../../types.ts';
 import { GraphError, type Graph } from './graph.ts';
 
 // ---------- change notifications ----------
@@ -296,18 +296,17 @@ export class TeamsSender implements Sender {
     );
   }
 
+  /** Posts only as the agent (their delegated token). The shared Kita user never posts replies. */
   async send(ref: Record<string, unknown>, msg: OutboundMessage): Promise<SendResult> {
     const agentGraph = msg.agent ? this.agentGraph(msg.agent.id) : undefined;
-    if (agentGraph) {
-      try {
-        return { echoes: await this.post(agentGraph, ref, msg) };
-      } catch (e) {
-        if (!(e instanceof GraphError && (e.status === 403 || e.status === 404))) throw e;
-        log.warn('teams_agent_cannot_post', { agent: msg.agent!.id, status: e.status });
-      }
+    if (!agentGraph) return { refused: 'not_connected' };
+    try {
+      return { echoes: await this.post(agentGraph, ref, msg) };
+    } catch (e) {
+      if (!(e instanceof GraphError && (e.status === 403 || e.status === 404))) throw e;
+      log.warn('teams_agent_cannot_post', { agent: msg.agent!.id, status: e.status });
+      return { refused: 'not_member' };
     }
-    const echoes = await this.post(this.graph, ref, withNamePrefix(msg));
-    return msg.agent ? { echoes, fallback: agentGraph ? 'not_member' : 'not_connected' } : { echoes };
   }
 
   private async post(graph: Graph, ref: Record<string, unknown>, msg: OutboundMessage): Promise<string[]> {

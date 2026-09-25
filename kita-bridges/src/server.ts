@@ -25,10 +25,10 @@ const slackOAuth =
     ? new SlackUserOAuth({ clientId: cfg.slack.clientId, clientSecret: cfg.slack.clientSecret, redirectUri: `${cfg.publicUrl}/connect/slack/callback`, botToken: cfg.slack.botToken, encryptionKey: cfg.encryptionKey }, store)
     : undefined;
 const slack = enabled.includes('slack')
-  ? new SlackSender(cfg.slack.botToken, { name: cfg.slack.botName, iconUrl: cfg.slack.botIconUrl || undefined }, fetch, (id) => slackOAuth?.userToken(id))
+  ? new SlackSender(cfg.slack.botToken, (id) => slackOAuth?.userToken(id))
   : undefined;
 const teams = enabled.includes('teams') ? new TeamsIntegration(cfg.teams, cfg.publicUrl, store) : undefined;
-const viber = enabled.includes('viber') ? new ViberSender(cfg.viber.authToken, { name: cfg.viber.botName, avatar: cfg.viber.botAvatar || undefined }, fetch, cfg.viber.prefixAgentName) : undefined;
+const viber = enabled.includes('viber') ? new ViberSender(cfg.viber.authToken, { name: cfg.viber.botName, avatar: cfg.viber.botAvatar || undefined }) : undefined;
 const whatsapp = enabled.includes('whatsapp') && cfg.whatsapp.mode === 'send' ? new WhatsAppSender(cfg.whatsapp.accessToken, cfg.whatsapp.prefixAgentName) : undefined;
 const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender, viber, whatsapp };
 

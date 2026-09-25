@@ -14,6 +14,7 @@ cfg.slack.botToken = 'xoxb';
 cfg.slack.internalTeamIds = ['TKITA0001'];
 cfg.viber.authToken = 'viber-tok';
 cfg.inboxes.viber.webhookSecret = 'cw-viber';
+cfg.inboxes.slack.webhookSecret = 'cw-slack';
 const { bridge, senders, store } = makeBridge();
 const upstream = (async (url: any, init: any = {}) => {
   assert.equal(String(url), 'https://support.internal.kita.ai/rails/active_storage/blobs/redirect/abc/steps.png');
@@ -82,6 +83,17 @@ test('http: chatwoot webhook requires the inbox signature; unmapped conversation
   assert.equal(res.status, 200);
   assert.equal((await res.json()).result, 'skip:unmapped_conversation');
   assert.equal(senders.viber.sent.length, 0);
+});
+
+test('http: a refused agent reply (Slack not connected) answers 422 so the desk marks it failed; nothing is posted', async () => {
+  store.putConversation({ platform: 'slack', threadKey: 'C0REFUSE', conversationId: 4242, sourceId: 's', replyRef: { channel: 'C0REFUSE' } });
+  senders.slack.send = async () => ({ refused: 'not_connected' as const });
+  const body = JSON.stringify({ ...JSON.parse(raw('chatwoot_outgoing.json')), id: 777001, conversation: { id: 4242 } });
+  const ts = String(Math.floor(Date.now() / 1000));
+  const res = await post('/chatwoot/slack', body, { 'x-chatwoot-timestamp': ts, 'x-chatwoot-signature': `sha256=${hmacHex('cw-slack', `${ts}.${body}`)}` });
+  assert.equal(res.status, 422);
+  assert.deepEqual(await res.json(), { ok: false, result: 'refused:not_connected' });
+  assert.equal(senders.slack.sent.length, 0);
 });
 
 test('http: media proxy serves agent attachments under the bridge URL without upstream headers; bad tokens 404', async () => {

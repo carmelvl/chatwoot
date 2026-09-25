@@ -54,8 +54,6 @@ export function loadConfig() {
       botToken: env('SLACK_BOT_TOKEN'),
       internalTeamIds: list('SLACK_INTERNAL_TEAM_IDS'),
       allowedChannels: list('SLACK_ALLOWED_CHANNELS'),
-      botName: env('SLACK_BOT_NAME', 'Kita'),
-      botIconUrl: env('SLACK_BOT_ICON_URL'),
       // Per-agent user OAuth (replies post as the real person). Optional.
       clientId: env('SLACK_CLIENT_ID'),
       clientSecret: env('SLACK_CLIENT_SECRET'),
@@ -76,7 +74,6 @@ export function loadConfig() {
       authToken: env('VIBER_AUTH_TOKEN'),
       botName: env('VIBER_BOT_NAME', 'Kita'),
       botAvatar: env('VIBER_BOT_AVATAR'),
-      prefixAgentName: env('VIBER_PREFIX_AGENT_NAME', 'true') !== 'false',
     },
   };
 }

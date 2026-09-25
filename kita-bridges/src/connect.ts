@@ -75,7 +75,7 @@ export class AgentConnect {
         state === 'connected' ? badge('Connected', 'ok') : state === 'not_connected' ? badge('Not connected', 'todo') : badge('Not available yet', 'muted'),
         state === 'unavailable'
           ? `<p>Kita hasn't turned on ${name} yet. Your replies there will come from you once it's set up.</p>`
-          : `<p>Replies you write in the desk are posted in ${name} as you. Sign in with <b>${esc(who.email)}</b>.</p><a class="btn${state === 'connected' ? ' ghost' : ''}" href="${href}">${state === 'connected' ? 'Reconnect' : `Connect ${name}`}</a>`,
+          : `<p>Required to reply in ${name}: replies you write in the desk are posted as you, and nothing is sent until you connect. Sign in with <b>${esc(who.email)}</b>.</p><a class="btn${state === 'connected' ? ' ghost' : ''}" href="${href}">${state === 'connected' ? 'Reconnect' : `Connect ${name}`}</a>`,
       );
     const cards = [
       oauthCard('Slack', LOGOS.slack, s.slack, `connect/slack/start?${q}`),
@@ -88,7 +88,7 @@ export class AgentConnect {
           s.whatsapp === 'none' ? '<p class="note">No number is linked to you yet. Ask an admin to scan your QR code.</p>' : `<p class="note">Linked number: <b>${esc(s.whatsapp)}</b></p>`
         }`,
       ),
-      card('Viber', LOGOS.viber, badge('No setup needed', 'muted'), "<p>Replies go out through the Kita Viber bot with your name. There's no personal link.</p>"),
+      card('Viber', LOGOS.viber, badge('No setup needed', 'muted'), "<p>Replies go out through the Kita Viber bot. Viber has no personal accounts for businesses, so there's no personal link.</p>"),
     ].join('');
     return {
       status: 200,

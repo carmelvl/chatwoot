@@ -70,15 +70,14 @@ test('slack channel allow-list', () => {
   assert.deepEqual(parseSlackEvent(fixture('slack_top_level.json'), { ...opts, allowedChannels: ['COTHER'] }), { kind: 'ignore', reason: 'channel_not_allowed' });
 });
 
-test('slack outbound transform: thread reply as the Kita bot, mrkdwn, no attachment links in text', () => {
+test('slack outbound transform: thread reply, mrkdwn, no attachment links in text, no bot identity', () => {
   const post = buildSlackPost({ channel: 'C0SHARED1', threadTs: '1790000000.000100' }, {
     messageId: 1, conversationId: 42, text: 'We **fixed** it, see [docs](https://kita.ai/d)',
     attachments: [{ url: 'https://support.internal.kita.ai/bridges/media/t/a.pdf', sourceUrl: 'https://cw/a.pdf', name: 'a.pdf' }],
-  }, { name: 'Kita', iconUrl: 'https://kita.ai/icon.png' });
+  });
   assert.equal(post.channel, 'C0SHARED1');
   assert.equal(post.thread_ts, '1790000000.000100');
-  assert.equal(post.username, 'Kita');
-  assert.equal(post.icon_url, 'https://kita.ai/icon.png');
+  assert.equal('username' in post || 'icon_url' in post, false);
   assert.equal(post.text, 'We *fixed* it, see <https://kita.ai/d|docs>');
   assert.equal('thread_ts' in buildSlackPost({ channel: 'C0SHARED1' }, { messageId: 1, conversationId: 1, text: 'top level', attachments: [] }), false);
 });
@@ -95,8 +94,8 @@ test('slack sender: text then native file upload into the same thread (files v2)
     bodies[u.split('/').pop()!] = JSON.parse(init.body);
     return Response.json({ ok: true });
   }) as typeof fetch;
-  await new SlackSender('xoxb', { name: 'Kita' }, f).send({ channel: 'C1', threadTs: '1.2' }, {
-    messageId: 1, conversationId: 1, text: 'Here you go',
+  await new SlackSender('xoxb', () => 'xoxp-carmel', f).send({ channel: 'C1', threadTs: '1.2' }, {
+    messageId: 1, conversationId: 1, text: 'Here you go', agent: { id: 3, name: 'Carmel Limcaoco', firstName: 'Carmel' },
     attachments: [{ url: 'https://support.internal.kita.ai/bridges/media/t/guide.pdf', sourceUrl: 'https://cw/guide.pdf', name: 'guide.pdf' }],
   });
   assert.deepEqual(calls, [
@@ -107,7 +106,7 @@ test('slack sender: text then native file upload into the same thread (files v2)
     'POST https://slack.com/api/files.completeUploadExternal',
   ]);
   assert.deepEqual(bodies['files.completeUploadExternal'], { files: [{ id: 'F9', title: 'guide.pdf' }], channel_id: 'C1', thread_ts: '1.2' });
-  assert.equal(bodies['chat.postMessage'].username, 'Kita');
+  assert.equal(bodies['chat.postMessage'].username, undefined);
 });
 
 test('slack mrkdwn round trip helpers', () => {

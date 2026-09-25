@@ -3,7 +3,7 @@ import { ChatwootAppClient, ChatwootClient, downloadAttachments, toOutbound, typ
 import { log } from './log.ts';
 import type { ScopeCheck } from './scope.ts';
 import type { Store } from './store.ts';
-import type { AgentIdentity, FallbackReason, InboundMessage, OutboundAttachment, Platform, Sender } from './types.ts';
+import type { AgentIdentity, RefusalReason, InboundMessage, OutboundAttachment, Platform, Sender } from './types.ts';
 
 export interface BridgeDeps {
   store: Store;
@@ -12,7 +12,7 @@ export interface BridgeDeps {
   senders: Partial<Record<Platform, Sender>>;
   /** Public base URL of the bridge, used for customer-facing /media links. */
   publicUrl: string;
-  /** Application API client: private notes, staff-typed sync fallback, avatars. Optional. */
+  /** Application API client: private notes and the staff-typed sync fallback. Optional. */
   app?: ChatwootAppClient;
   /** Desk endpoint that posts staff messages as the matching agent (by email). Optional. */
   desk?: KitaDeskClient;
@@ -49,7 +49,6 @@ export class Bridge {
    * our own post (from an agent's account) before send() has returned its message id.
    */
   private recentOut = new Map<string, { norm: string; exp: number }[]>();
-  private avatars = new Map<number, { url?: string; exp: number }>();
 
   constructor(deps: BridgeDeps) {
     this.d = deps;
@@ -237,18 +236,10 @@ export class Bridge {
     return { ...a, url: `${this.d.publicUrl.replace(/\/$/, '')}/media/${token}/${encodeURIComponent(a.name)}` };
   }
 
-  private async withAvatar(agent: AgentIdentity | undefined): Promise<AgentIdentity | undefined> {
-    if (!agent || !this.d.app) return agent;
-    let hit = this.avatars.get(agent.id);
-    if (!hit || hit.exp < Date.now()) {
-      const src = await this.d.app.avatarUrl(agent.id).catch(() => undefined);
-      hit = { url: src ? this.proxied({ url: '', sourceUrl: src, name: 'avatar.png' }).url : undefined, exp: Date.now() + 24 * 3600_000 };
-      this.avatars.set(agent.id, hit);
-    }
-    return hit.url ? { ...agent, avatarUrl: hit.url } : agent;
-  }
-
-  /** Chatwoot webhook -> platform. Returns why it was skipped, or 'sent' / 'sent:fallback:<reason>'. */
+  /**
+   * Chatwoot webhook -> platform. Returns why it was skipped, 'sent', or 'refused:<reason>' when the
+   * agent can't post as themselves (nothing is posted; the caller answers 4xx so the desk marks it failed).
+   */
   async outbound(platform: Platform, payload: any): Promise<string> {
     // Track resolution so long-lived chats can open a fresh conversation next time (webhook ids are display ids).
     if (payload?.event === 'conversation_status_changed' && payload.id && payload.status) {
@@ -263,12 +254,11 @@ export class Bridge {
     if (!sender) return 'skip:platform_disabled';
     const seenKey = `out:${platform}:${decision.message.messageId}`;
     if (!this.d.store.markSeen(seenKey)) return 'skip:duplicate';
-    let fallback: FallbackReason | undefined;
+    let refused: RefusalReason | undefined;
     try {
       const msg = {
         ...decision.message,
         attachments: decision.message.attachments.map((a) => this.proxied(a)),
-        agent: platform === 'slack' ? await this.withAvatar(decision.message.agent) : decision.message.agent,
       };
       this.rememberOut(platform, conv.threadKey, msg.text);
       // "Reply to" in the desk -> that message's platform thread; otherwise a new top-level post.
@@ -277,27 +267,28 @@ export class Bridge {
       for (const id of result?.echoes ?? []) this.d.store.markSeen(`in:${platform}:${id}`);
       const first = result?.echoes?.find((id) => !id.startsWith('file:'));
       if (first) this.d.store.putMessage(platform, first, msg.messageId, root ?? first);
-      fallback = result?.fallback;
+      refused = result?.refused;
     } catch (e) {
       this.d.store.forget(seenKey);
       throw e;
     }
-    if (fallback && decision.message.agent) await this.fallbackNote(platform, conv.conversationId, decision.message.agent, fallback);
-    log.info('outbound', { platform, conversation: decision.message.conversationId, message: decision.message.messageId, fallback });
-    return fallback ? `sent:fallback:${fallback}` : 'sent';
+    if (refused) await this.refusedNote(platform, conv.conversationId, decision.message.agent, refused);
+    log.info('outbound', { platform, conversation: decision.message.conversationId, message: decision.message.messageId, refused });
+    return refused ? `refused:${refused}` : 'sent';
   }
 
-  /** Private note (agents only) explaining why the reply went out from the shared Kita identity. */
-  private async fallbackNote(platform: Platform, conversationId: number, agent: AgentIdentity, reason: FallbackReason) {
+  /** Private note (agents only): the reply was NOT sent, and what to do about it. */
+  private async refusedNote(platform: Platform, conversationId: number, agent: AgentIdentity | undefined, reason: RefusalReason) {
     if (!this.d.app) return;
     const name = PLATFORM_NAME[platform];
-    const link = this.d.connectLink?.(agent);
+    const link = agent ? this.d.connectLink?.(agent) : undefined;
     const content =
       reason === 'not_connected'
-        ? `${agent.firstName}, this reply was sent from the shared Kita account (as "${agent.firstName}: …") because your ${name} account isn't connected.${link ? ` Connect it once so replies come from you: ${link}` : ' Ask an admin for your connect link.'}`
-        : `${agent.firstName}, this reply was sent from the shared Kita account because your ${name} account isn't a member of this ${platform === 'teams' ? 'channel or chat' : 'channel'}. Ask to be added, and your next replies will come from you.`;
-    await this.d.app.createMessage(conversationId, { content, private: true }).catch((e) => log.warn('fallback_note_failed', { error: String(e?.message ?? e) }));
+        ? `Not sent — connect your ${name} account first (Profile → Connect accounts).${link ? ` ${link}` : ''}`
+        : `Not sent — you're not in this ${platform === 'teams' ? 'channel or chat' : 'channel'} yet. Ask to be added, then send it again.`;
+    await this.d.app.createMessage(conversationId, { content, private: true }).catch((e) => log.warn('refused_note_failed', { error: String(e?.message ?? e) }));
   }
+
 }
 
 /** The channel as a contact ("#kita-tala"): owner of a Slack/Teams channel conversation. */

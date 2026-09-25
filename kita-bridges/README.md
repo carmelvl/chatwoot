@@ -23,8 +23,8 @@ Viber webhook ────┘         ▲              └─ SQLite /data: cont
 
 | Platform | Contact identifier | Conversation = | Reply target |
 |---|---|---|---|
-| Slack | `slack:<user id>` per person; the channel is `slack-channel:slack:<channel id>` | one **channel** (threadKey = channel id). A resolved conversation is reopened by the next message, never replaced. | "Reply to" a message in the desk → `chat.postMessage` with `thread_ts` = that message's thread root; a plain reply → a new top-level channel message. As the agent (their token) or **Kita** (`SLACK_BOT_NAME`/`SLACK_BOT_ICON_URL`); files via `files.completeUploadExternal` |
-| Teams | `teams:<Entra user id>` per person; the channel/chat is `teams-channel:teams:<id>` | one **channel** (team + channel) or one **group chat**, reopened (not replaced) after resolution. | "Reply to" → Graph `POST …/messages/{root}/replies`; a plain reply → `POST …/channels/{id}/messages` (new post); chats → `POST /chats/{id}/messages`. As the agent (their own token) or, as a fallback, the Kita user with "Carmel: …"; plain HTML, Adaptive Card only as a fallback |
+| Slack | `slack:<user id>` per person; the channel is `slack-channel:slack:<channel id>` | one **channel** (threadKey = channel id). A resolved conversation is reopened by the next message, never replaced. | "Reply to" a message in the desk → `chat.postMessage` with `thread_ts` = that message's thread root; a plain reply → a new top-level channel message. Only as the agent (their own token); files via `files.completeUploadExternal` |
+| Teams | `teams:<Entra user id>` per person; the channel/chat is `teams-channel:teams:<id>` | one **channel** (team + channel) or one **group chat**, reopened (not replaced) after resolution. | "Reply to" → Graph `POST …/messages/{root}/replies`; a plain reply → `POST …/channels/{id}/messages` (new post); chats → `POST /chats/{id}/messages`. Only as the agent (their own token); plain HTML, Adaptive Card only as a fallback |
 | Viber | `viber:<user id>` | the user (Viber bots are 1:1) | `pa/send_message` |
 
 Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifications` + `POST /teams/lifecycle` (Graph change and lifecycle notifications), `GET /teams/connect?key=…` + `/teams/connect/callback` (one-time sign-in), `POST /viber/webhook`, `GET|POST /whatsapp/webhook` (Cloud API; handshake + signed events), `POST /chatwoot/whatsapp/<phoneNumberId>`, `GET /connect` (+ `/connect/{slack,teams}/start`, `/connect/slack/callback`), `POST /chatwoot/{slack,teams,viber}`, `GET /media/<token>/<name>` (attachment proxy, expires after `MEDIA_TTL_DAYS`), `GET /healthz`.
@@ -105,14 +105,16 @@ The `bridges` service is in `docker-compose.kita.yaml` and the `/bridges/*` rout
 
 ## Who replies are from
 
+**Rule: nobody can send a message to a customer platform until they have connected their own account for it. There is never a fallback to a shared Kita identity.** The Slack bot and the Kita Teams user only **listen**; they never post agent replies.
+
 | Channel | Agent has connected their account | Not connected, or their account isn't in that channel/chat |
 |---|---|---|
-| Slack | Posted **as the agent** (their user token: `chat:write`, `files:write`), natively in the Slack Connect thread | Kita bot posts with `chat:write.customize`: the agent's **full name + avatar** (Chatwoot avatar via the bridge media proxy; otherwise `SLACK_BOT_ICON_URL`) |
-| Teams | Posted **as the agent** (their delegated Graph token: `ChannelMessage.Send`, `ChatMessage.Send`) | The shared **Kita** user posts `Carmel: …` |
-| Viber | n/a: one business identity | `Carmel: …` (`VIBER_PREFIX_AGENT_NAME=true`, the default) |
+| Slack | Posted **as the agent** (their user token: `chat:write`, `files:write`), natively in the Slack Connect thread | **Nothing is posted.** The webhook answers 422, so the desk marks the message failed, and the agent gets a private note |
+| Teams | Posted **as the agent** (their delegated Graph token: `ChannelMessage.Send`, `ChatMessage.Send`) | **Nothing is posted** (same as Slack) |
+| Viber | **The one exception.** A Viber bot is a single business identity and there are no personal accounts for businesses, so replies go out through the Kita Viber bot, with no name prefix | n/a |
 | WhatsApp | n/a: each teammate replies from **their own** WhatsApp Business number on their phone, so attribution is inherent | Mirror mode sends nothing from the desk; see [WhatsApp](#4-whatsapp-business-app-coexistence-mirror) |
 
-* **Fallback note.** Whenever the fallback is used, the bridge adds a **private note** (agents only) to the conversation. If the agent hasn't connected, the note includes their personal connect link. If their account isn't in the channel or chat (Slack `not_in_channel`, Graph 403/404), it asks them to get added.
+* **"Not sent" note.** When a reply is refused, the bridge adds a **private note** (agents only): "Not sent — connect your Slack account first (Profile → Connect accounts)" plus their personal connect link, or "Not sent — you're not in this channel yet" when their account can't post there (Slack `not_in_channel` and similar, Graph 403/404). Automated messages (no agent) are refused the same way on Slack and Teams. The desk also blocks the public reply box until the agent has connected (private notes stay allowed).
 * **Automated messages.** Messages with no agent (automations) go out as plain Kita with no prefix.
 * **Staff typing directly in Slack/Teams.** If a Kita team member writes directly in Slack or Teams, outside the desk, the bridge mirrors it into the channel's conversation as an **outgoing** message **authored by that teammate's desk user**. The desk then shows the full thread. It's never treated as a customer message and never sent back out: it's marked `kita_bridge_origin` and its desk id is pre-marked as seen.
   * Slack: members of `SLACK_INTERNAL_TEAM_IDS`. Teams: members of `TEAMS_INTERNAL_TENANT_IDS`.
@@ -129,7 +131,7 @@ The `bridges` service is in `docker-compose.kita.yaml` and the `/bridges/*` rout
 * The page has one card per platform: **Slack** and **Microsoft Teams** (Connect / Reconnect, or "Not available yet" while that platform isn't configured), **WhatsApp** (your Business number is linked by an admin with a QR scan; shows the number when `WHATSAPP_NUMBERS` has your `agentEmail`) and **Viber** (replies go out through the Kita Viber bot with your name; no personal link). An expired or hand-typed link shows a friendly page pointing back to the desk.
 * `GET /connect/status?a=<id>&e=<email>` returns `{ slack, teams, whatsapp, viber }` as JSON for the desk (`GET /api/v1/kita/connections` proxies it). It needs `X-Kita-Bridge-Secret` = `BRIDGE_LINK_SECRET` (server to server) or a signed link's params.
 * **Other ways to get the link.**
-  * The bridge puts it in the private fallback note the first time the agent replies without being connected.
+  * The bridge puts it in the private "Not sent" note the first time the agent replies without being connected.
   * An admin can also mint one: `docker compose -f docker-compose.kita.yaml exec bridges node src/connect-link.ts <chatwoot-user-id> <email> [days]`.
   * Links are HMAC-signed with `BRIDGE_LINK_SECRET` and expire after 7 days.
 * **Identity check.** The account the agent signs into must match their Chatwoot email:
@@ -188,16 +190,16 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
   * `reauthorizationRequired` → renew
   * `subscriptionRemoved` → recreate
   * `missed` → resync
-* **Outbound.** Graph delegated `ChannelMessage.Send` / `ChatMessage.Send` posts as the agent who wrote the reply, when they've connected. Otherwise, or if they can't post there, the Kita user posts "Carmel: …".
+* **Outbound.** Graph delegated `ChannelMessage.Send` / `ChatMessage.Send` posts as the agent who wrote the reply. If they haven't connected, or can't post there, nothing is posted (see [Who replies are from](#who-replies-are-from)).
 * **No polling.** Change notifications cover every channel and chat Kita belongs to, with an average latency under 10 seconds, so delta queries or polling aren't needed.
 
-**Adaptive Cards: checked against the docs.** Microsoft's Graph reference for sending channel and chat messages and replies (checked 2026-09-24) sets no card-only rule for messages sent with delegated `ChannelMessage.Send` / `ChatMessage.Send`, including in shared channels. It supports HTML bodies, inline `hostedContents` images, and cards with `OpenUrl` actions. Pylon's note ("messages … to Teams Shared channels … appear as … Adaptive Cards … due to Microsoft limitations") comes from Microsoft restricting **bot/app** permissions in shared and private channels. Pylon also uses the card to show *which Pylon agent* replied. We don't need that: a connected agent posts as themselves, and the fallback names them in the text.
+**Adaptive Cards: checked against the docs.** Microsoft's Graph reference for sending channel and chat messages and replies (checked 2026-09-24) sets no card-only rule for messages sent with delegated `ChannelMessage.Send` / `ChatMessage.Send`, including in shared channels. It supports HTML bodies, inline `hostedContents` images, and cards with `OpenUrl` actions. Pylon's note ("messages … to Teams Shared channels … appear as … Adaptive Cards … due to Microsoft limitations") comes from Microsoft restricting **bot/app** permissions in shared and private channels. Pylon also uses the card to show *which Pylon agent* replied. We don't need that: agents always post as themselves.
 * The bridge therefore posts **plain HTML** everywhere.
 * In **channels only**, it retries once as an Adaptive Card (from the same sender, carrying the same text) if Graph rejects the HTML with 400/403. Auth errors, throttling and 5xx never trigger the card retry.
 * `TEAMS_MESSAGE_FORMAT=card` forces cards in channels; `html` disables the fallback.
 * To confirm this in production, send one test reply into a real cross-tenant shared channel after connecting.
 
-**Carmel's steps (all in Kita's tenant).** Agents then connect their own accounts from `/bridges/connect` (see [Connecting accounts](#connecting-accounts-each-agent-once)). Until they do, replies go out from the Kita user as "Carmel: …".
+**Carmel's steps (all in Kita's tenant).** Agents then connect their own accounts from `/bridges/connect` (see [Connecting accounts](#connecting-accounts-each-agent-once)). Until they do, they can't reply in Teams (their replies fail with a private note).
 1. **Create the Kita user.** In the Microsoft 365 admin center → Users → Add a user named `Kita` (e.g. `kita@kita.ai`) with its profile photo set to the Kita mark. Assign a **Microsoft Teams Essentials** license or higher; any license that includes Teams works. Exclude it from MFA prompts that would block the one-time sign-in, or complete MFA during that sign-in.
 2. **Register the Entra app.** In the Entra admin center → App registrations → New registration: name it `Kita Support Bridge`, choose *Accounts in this organizational directory only*, and set the Redirect URI (type **Web**) to `https://support.internal.kita.ai/bridges/teams/connect/callback`.
    * Copy the Application (client) ID → `TEAMS_CLIENT_ID` and the Directory (tenant) ID → `TEAMS_TENANT_ID`.
