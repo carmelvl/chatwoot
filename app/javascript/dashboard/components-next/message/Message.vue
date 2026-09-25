@@ -132,7 +132,7 @@ const props = defineProps({
   },
   conversationId: { type: Number, required: true },
   createdAt: { type: Number, required: true }, // eslint-disable-line vue/no-unused-properties
-  currentUserId: { type: Number, required: true },
+  currentUserId: { type: Number, required: true }, // eslint-disable-line vue/no-unused-properties
   groupWithNext: { type: Boolean, default: false },
   groupWithPrevious: { type: Boolean, default: false },
   conversationChannel: { type: String, default: null },
@@ -144,7 +144,7 @@ const props = defineProps({
   private: { type: Boolean, default: false },
   additionalAttributes: { type: Object, default: () => ({}) }, // eslint-disable-line vue/no-unused-properties
   sender: { type: Object, default: null },
-  senderId: { type: Number, default: null },
+  senderId: { type: Number, default: null }, // eslint-disable-line vue/no-unused-properties
   senderType: { type: String, default: null },
   sourceId: { type: String, default: '' }, // eslint-disable-line vue/no-unused-properties
 });
