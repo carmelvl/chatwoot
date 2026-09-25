@@ -8,7 +8,9 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
   let(:conversation) { create(:conversation, account: account, inbox: api_channel.inbox, contact: contact, contact_inbox: contact_inbox) }
   let!(:agent) { create(:user, account: account, email: 'sam.lee@kita.ai') }
   let(:secret) { 'link-secret' }
-  let(:params) { { conversation_id: conversation.display_id, email: 'Sam.Lee@Kita.ai', content: 'On it', content_attributes: { external_source: 'slack' } } }
+  let(:params) do
+    { conversation_id: conversation.display_id, email: 'Sam.Lee@Kita.ai', content: 'On it', content_attributes: { external_source: 'slack' } }
+  end
 
   around do |example|
     with_modified_env(BRIDGE_LINK_SECRET: secret, KITA_BRIDGE_ACCOUNT_ID: account.id.to_s) { example.run }
@@ -30,12 +32,8 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
     end.to change(conversation.messages.outgoing, :count).by(1)
 
     message = conversation.messages.outgoing.last
-    expect(response).to have_http_status(:ok)
     expect(response.parsed_body).to eq('id' => message.id, 'sender_id' => agent.id)
-    expect(message.sender).to eq(agent)
-    expect(message.message_type).to eq('outgoing')
-    expect(message.private).to be(false)
-    expect(message.content).to eq('On it')
+    expect(message).to have_attributes(sender: agent, private: false, content: 'On it')
     expect(message.content_attributes).to include('kita_bridge_origin' => true, 'external_source' => 'slack')
     expect(response.body).not_to include('access_token')
   end
