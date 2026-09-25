@@ -6,6 +6,8 @@ import { useI18n } from 'vue-i18n';
 import Avatar from 'next/avatar/Avatar.vue';
 import SidebarProfileMenuStatus from './SidebarProfileMenuStatus.vue';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
+import { emitter } from 'shared/helpers/mitt';
+import { BUS_EVENTS } from 'shared/constants/busEvents';
 
 import {
   DropdownContainer,
@@ -67,6 +69,13 @@ const menuItems = computed(() => {
       click: () => {
         emit('openKeyShortcutModal');
       },
+    },
+    {
+      show: true,
+      showOnCustomBrandedInstance: true,
+      label: t('SIDEBAR_ITEMS.CONNECT_ACCOUNTS'),
+      icon: 'i-lucide-link',
+      click: () => emitter.emit(BUS_EVENTS.OPEN_KITA_CONNECT),
     },
     {
       show: true,

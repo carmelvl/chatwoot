@@ -24,6 +24,7 @@ const FloatingCallWidget = defineAsyncComponent(
 import CopilotLauncher from 'dashboard/components-next/copilot/CopilotLauncher.vue';
 import CopilotContainer from 'dashboard/components/copilot/CopilotContainer.vue';
 
+import ConnectAccountsModal from 'dashboard/components-next/kita/ConnectAccountsModal.vue';
 import MobileSidebarLauncher from 'dashboard/components-next/sidebar/MobileSidebarLauncher.vue';
 import { useCallsStore } from 'dashboard/stores/calls';
 
@@ -38,6 +39,7 @@ export default {
     CopilotContainer,
     FloatingCallWidget,
     MobileSidebarLauncher,
+    ConnectAccountsModal,
   },
   setup() {
     const upgradePageRef = ref(null);
@@ -172,6 +174,7 @@ export default {
         @close="closeKeyShortcutModal"
         @clickaway="closeKeyShortcutModal"
       />
+      <ConnectAccountsModal />
     </main>
   </div>
 </template>
