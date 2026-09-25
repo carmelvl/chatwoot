@@ -129,9 +129,7 @@ const sendReply = async () => {
               : 'bg-n-blue-3 text-n-blue-11'
           "
         >
-          {{
-            isResolved ? t('KITA_THREADS.RESOLVED') : t('KITA_THREADS.OPEN')
-          }}
+          {{ isResolved ? t('KITA_THREADS.RESOLVED') : t('KITA_THREADS.OPEN') }}
         </span>
         <KitaTicketChip v-if="thread?.ticket" :ticket="thread.ticket" />
         <Button
