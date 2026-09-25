@@ -297,6 +297,12 @@ Rails.application.routes.draw do
 
           resources :custom_attribute_definitions, only: [:index, :show, :create, :update, :destroy]
           resources :custom_filters, only: [:index, :show, :create, :update, :destroy]
+          # Kita: customers (Grip accounts) derived from conversations, and the "My customers" saved view
+          namespace :kita do
+            resources :customers, only: [:index] do
+              post :my_view, on: :collection
+            end
+          end
           resource :branded_email_layout, only: [:show, :update]
           resources :inboxes, only: [:index, :show, :create, :update, :destroy] do
             get :assignable_agents, on: :member

@@ -74,5 +74,5 @@ jobs:
       - name: Rubocop on Kita-touched Ruby
         run: >-
           bundle exec rubocop app/controllers/devise_overrides/omniauth_callbacks_controller.rb spec/controllers/kita
-          lib/kita app/controllers/kita app/controllers/api/v1/kita app/controllers/concerns/kita
+          lib/kita app/controllers/kita app/controllers/api/v1/kita app/controllers/concerns/kita app/controllers/api/v1/accounts/kita
           app/controllers/public/api/v1/inboxes/messages_controller.rb
