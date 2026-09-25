@@ -10,8 +10,6 @@ import { ChatwootAppClient, KitaDeskClient } from './chatwoot.ts';
 import { signConnectLink } from './links.ts';
 import { TeamsIntegration } from './platforms/teams/index.ts';
 import { SYNC_INTERVAL_MS } from './platforms/teams/subscriptions.ts';
-import { ViberSender } from './platforms/viber.ts';
-import { WhatsAppSender } from './platforms/whatsapp.ts';
 import { ScopeCache } from './scope.ts';
 import { Store } from './store.ts';
 import { parseTeamSyncMode, rosterSource, SlackMembership, TeamSync, TeamsMembership } from './teamsync.ts';
@@ -28,9 +26,8 @@ const slack = enabled.includes('slack')
   ? new SlackSender(cfg.slack.botToken, (id) => slackOAuth?.userToken(id))
   : undefined;
 const teams = enabled.includes('teams') ? new TeamsIntegration(cfg.teams, cfg.publicUrl, store) : undefined;
-const viber = enabled.includes('viber') ? new ViberSender(cfg.viber.authToken, { name: cfg.viber.botName, avatar: cfg.viber.botAvatar || undefined }) : undefined;
-const whatsapp = enabled.includes('whatsapp') && cfg.whatsapp.mode === 'send' ? new WhatsAppSender(cfg.whatsapp.accessToken, cfg.whatsapp.prefixAgentName) : undefined;
-const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender, viber, whatsapp };
+// Viber and WhatsApp are mirrors: the desk never sends there (people reply in the apps themselves).
+const senders: Partial<Record<Platform, Sender>> = { slack, teams: teams?.sender };
 
 const app = cfg.chatwootApiToken && cfg.chatwootAccountId ? new ChatwootAppClient(cfg.chatwootBaseUrl, cfg.chatwootApiToken, cfg.chatwootAccountId) : undefined;
 const connectLink = cfg.linkSecret ? (a: { id: number; email?: string }) => (a.email ? signConnectLink(cfg.linkSecret, cfg.publicUrl, { id: a.id, email: a.email }) : undefined) : undefined;

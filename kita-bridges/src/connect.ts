@@ -84,11 +84,16 @@ export class AgentConnect {
         'WhatsApp',
         LOGOS.whatsapp,
         s.whatsapp === 'none' ? badge('Not linked', 'muted') : badge('Linked', 'ok'),
-        `<p>Your WhatsApp Business number is linked by an admin (QR scan). You keep replying from the WhatsApp Business app on your phone, and the desk shows the whole conversation.</p>${
+        `<p>Your WhatsApp Business number is linked by an admin (QR scan). Reply in WhatsApp yourself, from the WhatsApp Business app on your phone: the desk shows the whole conversation but never sends on WhatsApp.</p>${
           s.whatsapp === 'none' ? '<p class="note">No number is linked to you yet. Ask an admin to scan your QR code.</p>' : `<p class="note">Linked number: <b>${esc(s.whatsapp)}</b></p>`
         }`,
       ),
-      card('Viber', LOGOS.viber, badge('No setup needed', 'muted'), "<p>Replies go out through the Kita Viber bot. Viber has no personal accounts for businesses, so there's no personal link.</p>"),
+      card(
+        'Viber',
+        LOGOS.viber,
+        badge('No setup needed', 'muted'),
+        "<p>Customers' messages to the Kita Viber bot show up in the desk, so you're notified there. Reply in Viber yourself: the desk never sends on Viber.</p><p class=\"note\">Viber only lets Kita see conversations with the Kita Viber bot, not your personal Viber chats.</p>",
+      ),
     ].join('');
     return {
       status: 200,

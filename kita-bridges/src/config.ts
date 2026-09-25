@@ -41,12 +41,9 @@ export function loadConfig() {
       exclude: (list('TEAM_ROSTER_EXCLUDE').length ? list('TEAM_ROSTER_EXCLUDE') : ['bridge@kita.ai']).map((e) => e.toLowerCase()),
     },
     whatsapp: {
-      /** mirror (default): desk is read-only for WhatsApp, the team replies from the phone app. send: desk replies go out via Cloud API. */
-      mode: (env('WHATSAPP_MODE', 'mirror') === 'send' ? 'send' : 'mirror') as 'mirror' | 'send',
       appSecret: env('WHATSAPP_APP_SECRET'),
       verifyToken: env('WHATSAPP_VERIFY_TOKEN'),
       accessToken: env('WHATSAPP_ACCESS_TOKEN'),
-      prefixAgentName: env('WHATSAPP_PREFIX_AGENT_NAME', 'true') !== 'false',
       numbers: parseNumbers(env('WHATSAPP_NUMBERS', '[]')),
     },
     slack: {
@@ -72,8 +69,6 @@ export function loadConfig() {
     },
     viber: {
       authToken: env('VIBER_AUTH_TOKEN'),
-      botName: env('VIBER_BOT_NAME', 'Kita'),
-      botAvatar: env('VIBER_BOT_AVATAR'),
     },
   };
 }

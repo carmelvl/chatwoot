@@ -75,13 +75,13 @@ test('http: connect flow requires the connect key and a valid state', async () =
   assert.equal((await fetch(`${base}/teams/connect/callback?code=abc&state=forged`)).status, 400);
 });
 
-test('http: chatwoot webhook requires the inbox signature; unmapped conversation is a 200 skip', async () => {
+test('http: viber is a mirror: the desk never sends, even through the bot (signed webhook required)', async () => {
   const body = raw('chatwoot_outgoing.json');
   assert.equal((await post('/chatwoot/viber', body)).status, 401);
   const ts = String(Math.floor(Date.now() / 1000));
   const res = await post('/chatwoot/viber', body, { 'x-chatwoot-timestamp': ts, 'x-chatwoot-signature': `sha256=${hmacHex('cw-viber', `${ts}.${body}`)}` });
   assert.equal(res.status, 200);
-  assert.equal((await res.json()).result, 'skip:unmapped_conversation');
+  assert.equal((await res.json()).result, 'skip:mirror');
   assert.equal(senders.viber.sent.length, 0);
 });
 

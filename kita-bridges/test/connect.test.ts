@@ -75,7 +75,7 @@ test('http: the connect page shows all four platforms with their status', async 
   assert.match(html, /Microsoft Teams<\/h2><span class="badge todo">Not connected/);
   assert.match(html, /Your WhatsApp Business number is linked by an admin \(QR scan\)/);
   assert.match(html, /\+63 917 555 0100/);
-  assert.match(html, /Replies go out through the Kita Viber bot\. Viber has no personal accounts for businesses, so there's no personal link\./);
+  assert.match(html, /Reply in Viber yourself: the desk never sends on Viber\./);
   assert.match(html, /href="connect\/teams\/start\?a=3&amp;e=|href="connect\/teams\/start\?a=3&e=/);
   assert.doesNotMatch(html, /chatwoot/i);
 });

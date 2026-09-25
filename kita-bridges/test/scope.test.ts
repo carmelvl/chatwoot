@@ -202,7 +202,7 @@ cfg.slack.signingSecret = 'slack-secret';
 cfg.slack.botToken = 'xoxb';
 cfg.slack.internalTeamIds = ['TKITA0001'];
 cfg.viber.authToken = 'viber-tok';
-cfg.whatsapp = { mode: 'mirror', appSecret: 'app-secret', verifyToken: 'vt', accessToken: 'WA_TOKEN', prefixAgentName: true, numbers };
+cfg.whatsapp = { appSecret: 'app-secret', verifyToken: 'vt', accessToken: 'WA_TOKEN', numbers };
 const hw = world(await loadedScope(['slack:C0SHARED1', 'viber:01234567890A=', 'whatsapp:+639998887777']));
 const platformCalls: string[] = [];
 const outside = (async (u: any) => (platformCalls.push(String(u)), Response.json({ ok: true, user: { real_name: 'x' } }))) as typeof fetch;

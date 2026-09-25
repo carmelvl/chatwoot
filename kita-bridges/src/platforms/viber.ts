@@ -1,5 +1,5 @@
 import { hmacHex, safeEqual } from '../crypto.ts';
-import { type InboundMessage, type OutboundMessage, type Sender } from '../types.ts';
+import type { InboundMessage } from '../types.ts';
 
 /** Viber signs the raw body: X-Viber-Content-Signature = HEX(HMAC_SHA256(auth token, body)). */
 export function verifyViberSignature(authToken: string, rawBody: string, signature?: string): boolean {
@@ -43,52 +43,4 @@ export function parseViberEvent(payload: any, rawBody?: string): ViberParsed {
       conversationAttributes: { channel_key: `viber:${s.id}`, viber_country: String(s.country ?? '') },
     },
   };
-}
-
-const IMAGE_RE = /\.(jpe?g|png|gif)(\?|$)/i;
-
-/** One Viber message per part: text first, then native picture/file messages (bridge media URLs, never Chatwoot's). */
-export function buildViberMessages(replyRef: Record<string, unknown>, msg: OutboundMessage, sender: { name: string; avatar?: string }, sizes?: Record<string, number>) {
-  const base = { receiver: replyRef.receiver as string, min_api_version: 1, sender: { name: sender.name.slice(0, 28), ...(sender.avatar ? { avatar: sender.avatar } : {}) } };
-  const out: Record<string, unknown>[] = [];
-  if (msg.text.trim()) out.push({ ...base, type: 'text', text: msg.text });
-  for (const a of msg.attachments) {
-    if (a.fileType === 'image' || IMAGE_RE.test(a.name)) out.push({ ...base, type: 'picture', text: '', media: a.url });
-    else out.push({ ...base, type: 'file', media: a.url, file_name: a.name.slice(0, 256), size: sizes?.[a.url] ?? 0 });
-  }
-  return out;
-}
-
-export class ViberSender implements Sender {
-  private token: string;
-  private who: { name: string; avatar?: string };
-  private fetchImpl: typeof fetch;
-  /**
-   * The one exception to "agents post only as themselves": a Viber bot is a single business identity
-   * and Viber has no personal accounts for bots, so replies go out as the Kita bot, with no name prefix.
-   */
-  constructor(token: string, who: { name: string; avatar?: string }, fetchImpl: typeof fetch = fetch) {
-    this.token = token;
-    this.who = who;
-    this.fetchImpl = fetchImpl;
-  }
-
-  async send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<void> {
-    // Viber file messages require the byte size up front.
-    const sizes: Record<string, number> = {};
-    for (const a of msg.attachments) {
-      if (a.fileType === 'image' || IMAGE_RE.test(a.name)) continue;
-      const head = await this.fetchImpl(a.sourceUrl, { method: 'HEAD', redirect: 'follow' });
-      sizes[a.url] = Number(head.headers.get('content-length') ?? 0);
-    }
-    for (const body of buildViberMessages(replyRef, msg, this.who, sizes)) {
-      const res = await this.fetchImpl('https://chatapi.viber.com/pa/send_message', {
-        method: 'POST',
-        headers: { 'X-Viber-Auth-Token': this.token, 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const j: any = await res.json();
-      if (j.status !== 0) throw new Error(`viber send_message: ${j.status} ${j.status_message}`);
-    }
-  }
 }

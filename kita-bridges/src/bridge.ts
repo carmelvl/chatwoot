@@ -191,22 +191,29 @@ export class Bridge {
   }
 
   /**
-   * A message the business sent from its own app (WhatsApp Business app echo): mirror it as an
-   * outgoing message, creating the conversation if the business started it. Attributed natively when
-   * `app` is the owner's own Chatwoot client, else "**Owner:** …" through the bridge's client.
+   * A message the teammate sent from their own phone (WhatsApp Business app echo): mirror it as an
+   * outgoing message authored by that teammate, creating the conversation if they started it.
+   * Authored natively by the desk agent with `ownerEmail` (desk staff endpoint), else by the owner's
+   * own Chatwoot client, else "**Owner:** …" through the bridge's client.
    */
-  async businessEcho(msg: InboundMessage, o: { ownerName: string; ownerApp?: ChatwootAppClient }): Promise<InboundResult> {
-    const { store } = this.d;
+  async businessEcho(msg: InboundMessage, o: { ownerName: string; ownerEmail?: string; ownerApp?: ChatwootAppClient }): Promise<InboundResult> {
+    const { store, desk } = this.d;
     const app = o.ownerApp ?? this.d.app;
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
-    if (!app) return 'ignored';
+    if (!app && !(desk && o.ownerEmail)) return 'ignored';
     if (this.outOfScope(msg)) return 'out_of_scope';
     if (!store.markSeen(seenKey)) return 'duplicate';
     try {
       const { conv } = await this.ensureConversation(msg);
       const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
-      const content = composeInboundText(msg.text, o.ownerApp ? undefined : o.ownerName, failed.map((f) => f.url));
-      const created = await app.createMessage(conv.conversationId, { content, private: false, files, contentAttributes: this.attributes(msg) });
+      const failedUrls = failed.map((f) => f.url);
+      const contentAttributes = this.attributes(msg);
+      let created = desk && o.ownerEmail ? await desk.staffMessage(conv.conversationId, o.ownerEmail, { content: composeInboundText(msg.text, undefined, failedUrls), files, contentAttributes }) : undefined;
+      if (!created) {
+        if (!app) return 'ignored';
+        const content = composeInboundText(msg.text, o.ownerApp ? undefined : o.ownerName, failedUrls);
+        created = await app.createMessage(conv.conversationId, { content, private: false, files, contentAttributes });
+      }
       store.markSeen(`out:${msg.platform}:${created.id}`);
       log.info('business_echo', { platform: msg.platform, conversation: conv.conversationId });
       return 'staff_synced';

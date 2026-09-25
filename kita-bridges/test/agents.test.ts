@@ -5,7 +5,6 @@ import { ChatwootAppClient, KitaDeskClient, toOutbound } from '../src/chatwoot.t
 import { AgentConnect } from '../src/connect.ts';
 import { seal, unseal } from '../src/crypto.ts';
 import { signConnectLink, verifyConnectParams } from '../src/links.ts';
-import { buildViberMessages, ViberSender } from '../src/platforms/viber.ts';
 import { SlackSender, SlackUserOAuth } from '../src/platforms/slack.ts';
 import { parseSlackEvent } from '../src/platforms/slack.ts';
 import { Graph, GraphAuth } from '../src/platforms/teams/graph.ts';
@@ -97,14 +96,6 @@ test('slack: agent not in the channel -> refused not_member, no bot post; other 
   assert.deepEqual(calls.map((c) => c.auth), ['Bearer xoxp-carmel']);
   const bad = recorder(() => Response.json({ ok: false, error: 'msg_too_long' }));
   await assert.rejects(new SlackSender('xoxb-bot', () => 'xoxp-carmel', bad.f).send({ channel: 'C1', threadTs: '1.0' }, reply()), /msg_too_long/);
-});
-
-test('viber (the one exception): replies go out through the Kita bot, with no name prefix', async () => {
-  const sent: any[] = [];
-  const f = (async (_u: any, init: any) => (sent.push(JSON.parse(init.body)), Response.json({ status: 0 }))) as typeof fetch;
-  await new ViberSender('tok', { name: 'Kita' }, f).send({ receiver: 'U1' }, reply());
-  assert.deepEqual(sent.map((b) => b.text), ['We fixed it']);
-  assert.equal(sent[0].sender.name, 'Kita');
 });
 
 // ---------- bridge: fallback notes, staff sync, loop safety ----------

@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Bridge } from '../src/bridge.ts';
-import { ChatwootAppClient } from '../src/chatwoot.ts';
+import { ChatwootAppClient, KitaDeskClient } from '../src/chatwoot.ts';
 import { createHandler, MIRROR_NOTE } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { hmacHex } from '../src/crypto.ts';
 import { Store } from '../src/store.ts';
 import {
-  e164, parseWhatsAppWebhook, resolveMedia, verifyWhatsAppSignature, verifyWhatsAppSubscription, WhatsAppSender, whatsappChannelKey, type WhatsAppNumber,
+  e164, parseWhatsAppWebhook, resolveMedia, verifyWhatsAppSignature, verifyWhatsAppSubscription, whatsappChannelKey, type WhatsAppNumber,
 } from '../src/platforms/whatsapp.ts';
 import type { Platform } from '../src/types.ts';
 import { fakeChatwoot, fixture, PUBLIC_URL, raw } from './helpers.ts';
@@ -107,7 +107,7 @@ function world() {
 }
 
 const cfg = loadConfig();
-cfg.whatsapp = { mode: 'mirror', appSecret: 'app-secret', verifyToken: 'vt', accessToken: 'WA_TOKEN', prefixAgentName: true, numbers };
+cfg.whatsapp = { appSecret: 'app-secret', verifyToken: 'vt', accessToken: 'WA_TOKEN', numbers };
 const w = world();
 const server = createServer(createHandler({ cfg, store: w.store, bridge: w.bridge, enabled: ['whatsapp'], fetchImpl: w.fetchImpl, whatsappOwnerApps: new Map([['222222222222222', w.rheaApp]]) }));
 await new Promise<void>((r) => server.listen(0, r));
@@ -166,7 +166,7 @@ test('mirror mode: an agent typing in the desk sends nothing and gets a private 
   assert.equal((await hit(body)).result, 'skip:duplicate');
   const notes = w.appPosts.slice(before);
   assert.equal(notes.length, 1);
-  assert.deepEqual(notes[0].body, { content: MIRROR_NOTE, message_type: 'outgoing', private: true, content_attributes: { kita_bridge_origin: true } });
+  assert.deepEqual(notes[0].body, { content: MIRROR_NOTE.whatsapp, message_type: 'outgoing', private: true, content_attributes: { kita_bridge_origin: true } });
   // the echo we mirrored comes back as an outgoing webhook: skipped, never re-noted
   assert.equal((await hit(JSON.stringify({ ...payload, id: 9999, content_attributes: { kita_bridge_origin: true } }))).result, 'skip:external_echo');
   // wrong number secret
@@ -174,13 +174,24 @@ test('mirror mode: an agent typing in the desk sends nothing and gets a private 
   assert.equal(bad.status, 401);
 });
 
-test('send mode (opt-in): Cloud API text with "Carmel: " prefix', async () => {
-  let sent: any;
-  const f = (async (_u: any, init: any) => ((sent = JSON.parse(init.body)), Response.json({ messages: [{ id: 'wamid.OUT' }] }))) as typeof fetch;
-  const r = await new WhatsAppSender('WA_TOKEN', true, f).send({ phoneNumberId: '111', to: '639998887777' }, { messageId: 1, conversationId: 1, text: 'Approved', attachments: [], agent: { id: 3, name: 'Carmel Limcaoco', firstName: 'Carmel' } });
-  assert.deepEqual(sent, { messaging_product: 'whatsapp', recipient_type: 'individual', to: '639998887777', type: 'text', text: { body: 'Carmel: Approved', preview_url: false } });
-  assert.deepEqual(r, { echoes: ['wamid.OUT'] });
+test('the desk never sends on WhatsApp: the mirror note says to reply in WhatsApp yourself', () => {
+  assert.match(MIRROR_NOTE.whatsapp, /^Reply in WhatsApp yourself — this inbox is a mirror\./);
 });
+
+test('phone-app echo with the owner\'s agentEmail is authored by that desk agent (no prefix, no tokens in the bridge)', async () => {
+  const deskCalls: any[] = [];
+  const desk = new KitaDeskClient('https://support.internal.kita.ai', 'link-secret', (async (_u: any, init: any) => (deskCalls.push(JSON.parse(init.body)), Response.json({ id: 8100 }))) as typeof fetch);
+  const cw = fakeChatwoot();
+  const store = new Store(':memory:');
+  const bridge = new Bridge({ store, chatwoot: cw.client, inboxes: {} as any, senders: {}, publicUrl: PUBLIC_URL, desk, fetchImpl: cw.fetchImpl });
+  const echo = parseWhatsAppWebhook(fixture('wa_echo_text.json'), numbers).items.find((i) => i.kind === 'echo')!;
+  assert.equal(await bridge.businessEcho({ ...echo.message, attachments: [] }, { ownerName: 'Carmel Limcaoco', ownerEmail: 'carmel@kita.ai' }), 'staff_synced');
+  assert.equal(deskCalls[0].email, 'carmel@kita.ai');
+  assert.equal(deskCalls[0].content, 'Yes Maria, approved today!');
+  assert.equal(deskCalls[0].content_attributes.external_source, 'whatsapp');
+  assert.equal(store.isSeen('out:whatsapp:8100'), true); // never sent back out
+});
+
 
 test('BSUID tolerance: phone preferred; business-scoped user id used only when the phone is withheld', () => {
   const echo = fixture('wa_echo_text.json');

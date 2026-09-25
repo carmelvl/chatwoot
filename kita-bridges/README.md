@@ -1,10 +1,10 @@
 # kita-bridges
 
-Lets customers talk to Kita natively in **Slack** (Slack Connect / shared channels), **Microsoft Teams**, **Viber** and **WhatsApp**. Every conversation lands in Chatwoot (the internal desk). For Slack, Teams and Viber, agent replies go back out on the same channel and thread. WhatsApp is a **mirror**: the team keeps replying from the WhatsApp Business app on their phones, and the desk shows the whole conversation.
+Lets customers talk to Kita natively in **Slack** (Slack Connect / shared channels), **Microsoft Teams**, **Viber** and **WhatsApp**. Every conversation lands in Chatwoot (the internal desk). For Slack and Teams, agent replies go back out on the same channel and thread, always from the agent's own connected account. **WhatsApp and Viber are mirrors**: the desk shows the conversations and centralises notifications, but it never sends there; people reply in the apps themselves.
 
 **Customers never see Chatwoot.**
 * Replies come from **the Kita team member who wrote them** (see [Who replies are from](#who-replies-are-from)). There's no "via" text and there are no Chatwoot links. Customers install nothing.
-* Agent attachments are sent as native Slack files, Viber picture/file messages, or Teams inline images. Any remaining file link points at the bridge's own `…/bridges/media/<random token>/<file>`, never at a Chatwoot URL.
+* Agent attachments are sent as native Slack files or Teams inline images. Any remaining file link points at the bridge's own `…/bridges/media/<random token>/<file>`, never at a Chatwoot URL.
 * CSAT surveys and Chatwoot interactive messages are never forwarded.
 * Contacts are created with no email or phone, so the desk can't email them. See [No emails to customers](#no-emails-to-customers).
 
@@ -18,14 +18,14 @@ Lets customers talk to Kita natively in **Slack** (Slack Connect / shared channe
 Slack Events API ─┐                        ┌─> POST /public/api/v1/inboxes/<id>/contacts|conversations|messages
 Teams (Graph)     ├─> Caddy /bridges/* ─> bridges:8080 ─┤              (one API-channel inbox per platform)
 Viber webhook ────┘         ▲              └─ SQLite /data: contacts, thread→conversation, reply refs, dedupe keys
-                            └── Chatwoot API-inbox webhook (message_created, outgoing, non-private) ─> Slack thread / Teams thread or chat (as the Kita user) / Viber user
+                            └── Chatwoot API-inbox webhook (message_created, outgoing, non-private) ─> Slack thread / Teams thread or chat (as the Kita user)
 ```
 
 | Platform | Contact identifier | Conversation = | Reply target |
 |---|---|---|---|
 | Slack | `slack:<user id>` per person; the channel is `slack-channel:slack:<channel id>` | one **channel** (threadKey = channel id). A resolved conversation is reopened by the next message, never replaced. | "Reply to" a message in the desk → `chat.postMessage` with `thread_ts` = that message's thread root; a plain reply → a new top-level channel message. Only as the agent (their own token); files via `files.completeUploadExternal` |
 | Teams | `teams:<Entra user id>` per person; the channel/chat is `teams-channel:teams:<id>` | one **channel** (team + channel) or one **group chat**, reopened (not replaced) after resolution. | "Reply to" → Graph `POST …/messages/{root}/replies`; a plain reply → `POST …/channels/{id}/messages` (new post); chats → `POST /chats/{id}/messages`. Only as the agent (their own token); plain HTML, Adaptive Card only as a fallback |
-| Viber | `viber:<user id>` | the user (Viber bots are 1:1) | `pa/send_message` |
+| Viber | `viber:<user id>` | the user (Viber bots are 1:1) | none: mirror only, the desk never sends |
 
 Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifications` + `POST /teams/lifecycle` (Graph change and lifecycle notifications), `GET /teams/connect?key=…` + `/teams/connect/callback` (one-time sign-in), `POST /viber/webhook`, `GET|POST /whatsapp/webhook` (Cloud API; handshake + signed events), `POST /chatwoot/whatsapp/<phoneNumberId>`, `GET /connect` (+ `/connect/{slack,teams}/start`, `/connect/slack/callback`), `POST /chatwoot/{slack,teams,viber}`, `GET /media/<token>/<name>` (attachment proxy, expires after `MEDIA_TTL_DAYS`), `GET /healthz`.
 
@@ -49,7 +49,7 @@ Endpoints (Caddy strips `/bridges`): `POST /slack/events`, `POST /teams/notifica
 * **Store migration.** Before per-channel conversations, Slack/Teams rows in `conversations` were keyed per thread (`<channel>:<root ts>`, `channel:<team>:<channel>:<root>`). Those rows are test data: they are left alone and simply no longer matched; new messages use the channel keys and open one new conversation per channel.
 * Attachments:
   * Inbound files (Slack `files:read`, Teams file/inline image, Viber media) are copied into Chatwoot. If a download fails, the link is added to the message instead of dropping it (agents see it; customers never do).
-  * Outbound, Slack uploads native files (as the agent when connected). Viber sends picture/file messages. Teams embeds images inline (`hostedContents`, up to 3 MB) and sends other files as a named link to the bridge media URL.
+  * Outbound, Slack uploads native files (as the agent when connected). Teams embeds images inline (`hostedContents`, up to 3 MB) and sends other files as a named link to the bridge media URL.
 * Logs contain ids only, never message bodies or tokens.
 
 ## Grip scope: only Customers-page accounts reach the desk
@@ -111,8 +111,8 @@ The `bridges` service is in `docker-compose.kita.yaml` and the `/bridges/*` rout
 |---|---|---|
 | Slack | Posted **as the agent** (their user token: `chat:write`, `files:write`), natively in the Slack Connect thread | **Nothing is posted.** The webhook answers 422, so the desk marks the message failed, and the agent gets a private note |
 | Teams | Posted **as the agent** (their delegated Graph token: `ChannelMessage.Send`, `ChatMessage.Send`) | **Nothing is posted** (same as Slack) |
-| Viber | **The one exception.** A Viber bot is a single business identity and there are no personal accounts for businesses, so replies go out through the Kita Viber bot, with no name prefix | n/a |
-| WhatsApp | n/a: each teammate replies from **their own** WhatsApp Business number on their phone, so attribution is inherent | Mirror mode sends nothing from the desk; see [WhatsApp](#4-whatsapp-business-app-coexistence-mirror) |
+| Viber | **Never sent from the desk.** Mirror only: desk replies get a private note, "Reply in Viber yourself — this inbox is a mirror", and the desk replaces the reply box with that notice (notes still work) | same |
+| WhatsApp | **Never sent from the desk.** Each teammate replies from **their own** WhatsApp Business number on their phone; those replies (`smb_message_echoes`) show in the desk as that teammate. Desk replies get "Reply in WhatsApp yourself — this inbox is a mirror" | same |
 
 * **"Not sent" note.** When a reply is refused, the bridge adds a **private note** (agents only): "Not sent — connect your Slack account first (Profile → Connect accounts)" plus their personal connect link, or "Not sent — you're not in this channel yet" when their account can't post there (Slack `not_in_channel` and similar, Graph 403/404). Automated messages (no agent) are refused the same way on Slack and Teams. The desk also blocks the public reply box until the agent has connected (private notes stay allowed).
 * **Automated messages.** Messages with no agent (automations) go out as plain Kita with no prefix.
@@ -128,7 +128,7 @@ The `bridges` service is in `docker-compose.kita.yaml` and the `/bridges/*` rout
 
 ### Connecting accounts (each agent, once)
 * In the desk: **Profile → Connect accounts** (and a one-time "Connect your accounts" prompt after login). The desk's `GET /kita/connect` redirects the signed-in agent to their personal link, `https://support.internal.kita.ai/bridges/connect?a=<chatwoot user id>&e=<email>&x=<expiry>&s=<signature>`, signed exactly like `src/links.ts` (a shared fixture, `test/fixtures/connect-link.json`, is checked by both the Ruby and the TypeScript tests).
-* The page has one card per platform: **Slack** and **Microsoft Teams** (Connect / Reconnect, or "Not available yet" while that platform isn't configured), **WhatsApp** (your Business number is linked by an admin with a QR scan; shows the number when `WHATSAPP_NUMBERS` has your `agentEmail`) and **Viber** (replies go out through the Kita Viber bot with your name; no personal link). An expired or hand-typed link shows a friendly page pointing back to the desk.
+* The page has one card per platform: **Slack** and **Microsoft Teams** (Connect / Reconnect, or "Not available yet" while that platform isn't configured), **WhatsApp** (your Business number is linked by an admin with a QR scan; shows the number when `WHATSAPP_NUMBERS` has your `agentEmail`) and **Viber** (mirror only: reply in Viber yourself; Kita only sees conversations with the Kita Viber bot). An expired or hand-typed link shows a friendly page pointing back to the desk.
 * `GET /connect/status?a=<id>&e=<email>` returns `{ slack, teams, whatsapp, viber }` as JSON for the desk (`GET /api/v1/kita/connections` proxies it). It needs `X-Kita-Bridge-Secret` = `BRIDGE_LINK_SECRET` (server to server) or a signed link's params.
 * **Other ways to get the link.**
   * The bridge puts it in the private "Not sent" note the first time the agent replies without being connected.
@@ -148,7 +148,7 @@ The coexistence mirror below doesn't need this: each teammate replies from their
 1. Each agent sets a signature under Chatwoot **Profile settings → Personal message signature**, e.g. `— Carmel, Kita`.
 2. In any WhatsApp conversation, turn on the **signature** toggle in the reply box. Chatwoot remembers it per channel type.
 
-Chatwoot appends the signature at the end of the message, so it isn't a leading "Carmel:" prefix, and it's per agent rather than enforced. Leave the signature **off** for the API inboxes (Slack/Teams/Viber): the bridge already names the agent there and would otherwise show it twice.
+Chatwoot appends the signature at the end of the message, so it isn't a leading "Carmel:" prefix, and it's per agent rather than enforced. Leave the signature **off** for the API inboxes (Slack/Teams): replies already come from the agent's own account.
 
 ## No emails to customers
 
@@ -219,7 +219,7 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
 
 ### 3. Viber
 1. Viber has closed self-serve bot creation. Bots now go through a Viber partner or the **Viber for Business** commercial program (`partners.viber.com`), and since 2024 bot-initiated and ongoing messaging is billed. Apply for a bot account named **Kita** with the Kita avatar, and confirm pricing for the Philippines.
-2. Once the bot is approved, copy its **authentication token** → `VIBER_AUTH_TOKEN`. `VIBER_BOT_NAME` defaults to `Kita` (28 characters max). Set `VIBER_BOT_AVATAR` to a public URL of the Kita mark (sent with every message).
+2. Once the bot is approved, copy its **authentication token** → `VIBER_AUTH_TOKEN`. The bridge only receives (it never sends on Viber), so no sender name or avatar is configured.
 3. Register the webhook after the bridge is live. It's a single call; Viber sends a signed `webhook` event that the bridge acknowledges:
    ```bash
    curl -X POST https://chatapi.viber.com/pa/set_webhook \
@@ -238,7 +238,8 @@ Chatwoot only emails a contact about a conversation (`Messages::SendEmailNotific
 * **Echo types.** `revoke` and `edit` echoes aren't mirrored (the original stays).
 * **Media.** Images, video, audio, documents and stickers are fetched with `GET /<media-id>` → download URL (bearer token) and attached. If that fails, the message still arrives without the file.
 * **Ignored.** `statuses` are ignored. `history` (up to 180 days of past chats) and `smb_app_state_sync` (contacts) are **acknowledged but not imported**, so the desk starts from the day you connect. A backfill importer can be added later if needed.
-* **Mirror mode (`WHATSAPP_MODE=mirror`, default).** Nothing typed in the desk for these inboxes is sent. The agent gets a private note instead: *"Reply from WhatsApp on your phone — this inbox is a mirror."* `WHATSAPP_MODE=send` would send desk replies through Cloud API as text ("Carmel: …", only inside the 24h window). It's off by default because the team replies from their phones.
+* **Mirror only.** Nothing typed in the desk for these inboxes is ever sent (there is no send mode). The desk replaces the reply box with *"Reply in WhatsApp yourself — this inbox is a mirror"* (private notes still work), and a reply that gets through anyway only produces that private note.
+* **Who wrote what.** Customer messages are authored by the customer contact; the teammate's phone replies are authored by their desk user when the number's entry has `agentEmail` (posted by the desk's staff endpoint), else by `agentAccessToken`, else by the bridge user as "**Owner:** …". Every message carries the WhatsApp badge (`external_source`).
 * **Security.** Webhooks are verified with the `hub.challenge` handshake (`WHATSAPP_VERIFY_TOKEN`) and the `X-Hub-Signature-256` HMAC with the Meta **app secret**. Deliveries are de-duplicated on the `wamid`, so Meta's retries are harmless.
 * **Multiple numbers.** Use one entry in `WHATSAPP_NUMBERS` and one Chatwoot API inbox per teammate's number. Optional `agentEmail` (the owner's desk email) and `displayPhoneNumber` show the number on that teammate's Connect accounts page. The inbox webhook URL is `…/bridges/chatwoot/whatsapp/<phoneNumberId>`.
 
@@ -288,8 +289,10 @@ The bridge adds those three and uses one API inbox per number. Its BSUID handlin
 6. **Chatwoot inboxes.** Create one API inbox per number (e.g. "WhatsApp · Carmel") with the webhook URL `https://support.internal.kita.ai/bridges/chatwoot/whatsapp/<PHONE_NUMBER_ID>`. Add an entry to `WHATSAPP_NUMBERS` with the inbox identifier, webhook secret, owner name, and optionally the owner's own Chatwoot access token (Profile settings → Access token).
 7. **Tell the team:** keep replying on the phone. The desk is a read-only mirror.
 
-### Viber: why there's no mirror
-Viber has no official API for reading a person's or a business account's own chats. The only official integration is the **bot** (Chatbot API) this bridge already uses. So a WhatsApp-style mirror of teammates' personal Viber chats isn't possible without unofficial clients, and the bridge doesn't build one. Customers who should reach Kita on Viber should message the Kita bot.
+### Viber: mirror of the Kita bot only
+* **The desk never sends on Viber**, not even through the bot. Customers' messages to the Kita Viber bot are surfaced in the desk (notifications are centralised there); desk replies are not sent and get the private note *"Reply in Viber yourself — this inbox is a mirror"*, and the reply box is replaced with that notice.
+* **What Viber lets us see.** The Viber API only receives messages sent to a Viber **bot** or business account (the Chatbot API this bridge uses). It cannot read people's personal Viber chats, and there's no official API for a person's or a business account's own chats. So the mirror covers **only conversations customers have with the Kita Viber bot**, never teammates' personal Viber conversations.
+* **Consequence.** A person can't answer *as the bot* from the Viber app, so a customer who writes to the Kita bot gets a reply only if a teammate contacts them from their own Viber, in a separate chat the bridge can't see.
 
 ## Limitations and next steps
 * Teams non-image files go out as a link to the bridge media URL; native Teams files would need uploading to the channel's SharePoint (`Files.ReadWrite.All`).

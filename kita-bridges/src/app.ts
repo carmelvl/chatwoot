@@ -28,7 +28,11 @@ export interface AppDeps {
   whatsappOwnerApps?: Map<string, ChatwootAppClient>;
 }
 
-export const MIRROR_NOTE = 'Reply from WhatsApp on your phone — this inbox is a mirror. Nothing typed here is sent to the customer.';
+/** Viber and WhatsApp are mirrors: nothing typed in the desk is ever sent; the agent gets this private note. */
+export const MIRROR_NOTE: Record<'whatsapp' | 'viber', string> = {
+  whatsapp: 'Reply in WhatsApp yourself — this inbox is a mirror. Nothing typed here is sent to the customer.',
+  viber: 'Reply in Viber yourself — this inbox is a mirror. Nothing typed here is sent to the customer.',
+};
 
 /** Cloud API webhook batch -> customer messages (incoming) and phone-app echoes (outgoing, owner). */
 async function processWhatsApp(d: AppDeps, body: unknown) {
@@ -42,7 +46,7 @@ async function processWhatsApp(d: AppDeps, body: unknown) {
       if (attachments.length < it.media.length) log.warn('whatsapp_media_unresolved', { missing: it.media.length - attachments.length });
       const msg = { ...it.message, attachments };
       if (it.kind === 'customer') await d.bridge.inbound(msg);
-      else await d.bridge.businessEcho(msg, { ownerName: it.number.ownerName, ownerApp: d.whatsappOwnerApps?.get(it.number.phoneNumberId) });
+      else await d.bridge.businessEcho(msg, { ownerName: it.number.ownerName, ownerEmail: it.number.agentEmail, ownerApp: d.whatsappOwnerApps?.get(it.number.phoneNumberId) });
     } catch (e: any) {
       log.error('whatsapp_item_failed', { kind: it.kind, error: String(e?.message ?? e) });
     }
@@ -214,11 +218,17 @@ export function createHandler(d: AppDeps) {
         if (!number || !verifyChatwootSignature(number.webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))
           return send(res, 401);
         const payload = JSON.parse(raw);
-        const result = cfg.whatsapp.mode === 'mirror' ? await bridge.mirrorNotice('whatsapp', payload, MIRROR_NOTE) : await bridge.outbound('whatsapp', payload);
+        const result = await bridge.mirrorNotice('whatsapp', payload, MIRROR_NOTE.whatsapp);
         return send(res, 200, { ok: true, result });
       }
 
-      const cw = path.match(/^\/chatwoot\/(slack|teams|viber)$/);
+      if (path === '/chatwoot/viber' && d.enabled.includes('viber')) {
+        if (!verifyChatwootSignature(cfg.inboxes.viber.webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))
+          return send(res, 401);
+        return send(res, 200, { ok: true, result: await bridge.mirrorNotice('viber', JSON.parse(raw), MIRROR_NOTE.viber) });
+      }
+
+      const cw = path.match(/^\/chatwoot\/(slack|teams)$/);
       if (cw && d.enabled.includes(cw[1] as Platform)) {
         const platform = cw[1] as Platform;
         if (!verifyChatwootSignature(cfg.inboxes[platform].webhookSecret, raw, { signature: h(req, 'x-chatwoot-signature'), timestamp: h(req, 'x-chatwoot-timestamp') }))

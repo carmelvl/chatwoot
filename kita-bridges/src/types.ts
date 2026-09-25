@@ -90,8 +90,3 @@ export interface OutboundMessage {
 export interface Sender {
   send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<SendResult | void>;
 }
-
-/** "Carmel: …" for channels that can only speak as one business identity. */
-export function withNamePrefix(msg: OutboundMessage): OutboundMessage {
-  return msg.agent ? { ...msg, text: `${msg.agent.firstName}:${msg.text.trim() ? ` ${msg.text}` : ''}` } : msg;
-}

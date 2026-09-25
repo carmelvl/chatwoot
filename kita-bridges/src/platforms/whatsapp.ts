@@ -1,5 +1,5 @@
 import { hmacHex, safeEqual } from '../crypto.ts';
-import { withNamePrefix, type InboundAttachment, type InboundMessage, type OutboundMessage, type Sender } from '../types.ts';
+import type { InboundAttachment, InboundMessage } from '../types.ts';
 
 /**
  * WhatsApp Business app coexistence (Cloud API on the same number the team keeps using in the
@@ -154,32 +154,4 @@ export async function resolveMedia(media: PendingMedia[], token: string, fetchIm
     out.push({ url: j.url, name: m.name, contentType: j.mime_type ?? m.contentType, headers: { authorization: `Bearer ${token}` } });
   }
   return out;
-}
-
-/**
- * Only used with WHATSAPP_MODE=send: replies typed in the desk go out through Cloud API (text within
- * the 24h customer-service window; files as links). Default mode is mirror, where nothing is sent.
- */
-export class WhatsAppSender implements Sender {
-  private token: string;
-  private prefix: boolean;
-  private fetchImpl: typeof fetch;
-  constructor(token: string, prefixAgentName = true, fetchImpl: typeof fetch = fetch) {
-    this.token = token;
-    this.prefix = prefixAgentName;
-    this.fetchImpl = fetchImpl;
-  }
-
-  async send(ref: Record<string, unknown>, original: OutboundMessage) {
-    const msg = this.prefix ? withNamePrefix(original) : original;
-    const body = [msg.text, ...msg.attachments.map((a) => `${a.name}: ${a.url}`)].filter((s) => s.trim()).join('\n');
-    const res = await this.fetchImpl(`${GRAPH_FB}/${ref.phoneNumberId}/messages`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: ref.to, type: 'text', text: { body, preview_url: false } }),
-    });
-    const j: any = await res.json();
-    if (!res.ok) throw new Error(`whatsapp send: ${res.status} ${j.error?.message ?? ''}`);
-    return { echoes: (j.messages ?? []).map((m: any) => m.id) };
-  }
 }
