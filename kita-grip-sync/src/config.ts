@@ -16,6 +16,8 @@ export function loadConfig() {
     anthropicApiKey: env('ANTHROPIC_API_KEY'),
     anthropicBaseUrl: url('ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
     claudeModel: env('CLAUDE_MODEL', 'claude-sonnet-5'),
+    openaiApiKey: env('OPENAI_API_KEY'),
+    openaiModel: env('OPENAI_MODEL', 'gpt-5-mini'),
     /** Trailing debounce before classifying a batch of customer messages. */
     debounceMs: Number(env('CLASSIFY_DEBOUNCE_SECONDS', '60')) * 1000,
     /** A conversation that keeps talking is still classified after this long. */
@@ -36,7 +38,7 @@ export type Config = ReturnType<typeof loadConfig>;
 export function capabilities(cfg: Config) {
   const webhook = !!cfg.webhookSecret;
   const grip = !!cfg.gripApiKey;
-  const tickets = webhook && grip && cfg.ticketsEnabled && !!cfg.anthropicApiKey && !!cfg.chatwootApiToken;
+  const tickets = webhook && grip && cfg.ticketsEnabled && !!(cfg.anthropicApiKey || cfg.openaiApiKey) && !!cfg.chatwootApiToken;
   const owners = webhook && grip && cfg.ownerSync && !!cfg.chatwootApiToken;
   return { webhook, grip, tickets, owners };
 }

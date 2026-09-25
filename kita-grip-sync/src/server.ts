@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { createHandler } from './app.ts';
 import { ChatwootApi } from './chatwoot.ts';
-import { ClaudeClassifier } from './claude.ts';
+import { ClaudeClassifier, OpenAIClassifier } from './claude.ts';
 import { capabilities, loadConfig } from './config.ts';
 import { GripClient } from './grip.ts';
 import { log } from './log.ts';
@@ -21,7 +21,12 @@ const sync = new Sync({
   owners,
   grip: caps.grip ? new GripClient(cfg.gripBaseUrl, cfg.gripApiKey) : undefined,
   chatwoot: caps.tickets ? botApi : undefined,
-  claude: caps.tickets ? new ClaudeClassifier({ apiKey: cfg.anthropicApiKey, model: cfg.claudeModel, baseUrl: cfg.anthropicBaseUrl }) : undefined,
+  // Anthropic when its key is set, otherwise OpenAI.
+  claude: !caps.tickets
+    ? undefined
+    : cfg.anthropicApiKey
+      ? new ClaudeClassifier({ apiKey: cfg.anthropicApiKey, model: cfg.claudeModel, baseUrl: cfg.anthropicBaseUrl })
+      : new OpenAIClassifier({ apiKey: cfg.openaiApiKey, model: cfg.openaiModel }),
   publicUrl: cfg.chatwootPublicUrl,
   debounceMs: cfg.debounceMs,
   debounceMaxMs: cfg.debounceMaxMs,

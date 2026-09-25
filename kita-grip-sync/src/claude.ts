@@ -66,6 +66,39 @@ export class ClaudeClassifier {
   }
 }
 
+/** OpenAI Chat Completions with strict JSON-schema output; same interface as ClaudeClassifier. */
+export class OpenAIClassifier {
+  private cfg: { apiKey: string; model: string; baseUrl: string };
+  private fetchImpl: typeof fetch;
+
+  constructor(cfg: { apiKey: string; model: string; baseUrl?: string }, fetchImpl: typeof fetch = fetch) {
+    this.cfg = { ...cfg, baseUrl: cfg.baseUrl ?? 'https://api.openai.com' };
+    this.fetchImpl = fetchImpl;
+  }
+
+  async classify(thread: ThreadMessage[], ticket?: Pick<TicketRow, 'title' | 'priority' | 'summary'>): Promise<Classification> {
+    const res = await requestJson(this.fetchImpl, 'openai chat', `${this.cfg.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      timeoutMs: 120_000,
+      headers: { authorization: `Bearer ${this.cfg.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: this.cfg.model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: buildUserPrompt(thread, ticket) },
+        ],
+        response_format: { type: 'json_schema', json_schema: { name: 'classification', strict: true, schema: CLASSIFICATION_SCHEMA } },
+      }),
+    });
+    const choice = res.choices?.[0];
+    if (choice?.message?.refusal) return { is_issue: false, title: '', priority: 'low', summary: '' };
+    if (choice?.finish_reason === 'length') throw new HttpError('openai length', 500); // retryable
+    return normalize(JSON.parse(choice?.message?.content ?? ''));
+  }
+}
+
+export type Classifier = Pick<ClaudeClassifier, 'classify'>;
+
 function normalize(o: any): Classification {
   const priority = ['low', 'medium', 'high', 'urgent'].includes(o?.priority) ? o.priority : 'medium';
   return { is_issue: o?.is_issue === true, title: String(o?.title ?? '').slice(0, 200), priority, summary: String(o?.summary ?? '') };

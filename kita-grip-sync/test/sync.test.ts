@@ -416,3 +416,16 @@ test('in_scope is read from both the flat response and Grip\'s { success, data }
     assert.deepEqual(w.labels.get(42), ['out-of-scope']);
   }
 });
+
+test('openai classifier: strict json_schema request, parses the reply', async () => {
+  const { OpenAIClassifier } = await import('../src/claude.ts');
+  let sent: any;
+  const fake = (async (_u: any, init: any) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ is_issue: true, title: 'Fix export', priority: 'high', summary: 's' }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const c = new OpenAIClassifier({ apiKey: 'k', model: 'gpt-5-mini' }, fake);
+  const r = await c.classify([{ role: 'customer', content: 'export broken', createdAt: '2026-09-25T00:00:00Z' } as any]);
+  assert.equal(sent.response_format.json_schema.strict, true);
+  assert.deepEqual(r, { is_issue: true, title: 'Fix export', priority: 'high', summary: 's' });
+});

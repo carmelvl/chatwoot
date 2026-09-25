@@ -1,5 +1,5 @@
 import type { ChatwootApi } from './chatwoot.ts';
-import type { ClaudeClassifier } from './claude.ts';
+import type { Classifier } from './claude.ts';
 import { chatwootUrl, conversationBody, deriveChannelKey, NOT_A_TICKET, OUT_OF_SCOPE_LABEL, platformOf, preview, speakerOf, TICKET_LABEL, toIso } from './derive.ts';
 import type { GripClient } from './grip.ts';
 import { backoffMs, isRetryable } from './http.ts';
@@ -15,7 +15,7 @@ export interface SyncDeps {
   store: Store;
   grip?: GripClient;
   chatwoot?: ChatwootApi;
-  claude?: ClaudeClassifier;
+  claude?: Classifier;
   /** Owner in the desk (DRI attributes + assignment). Needs a Chatwoot token. */
   owners?: Owners;
   publicUrl: string;
