@@ -13,8 +13,10 @@ const props = defineProps({
   showNoteAction: { type: Boolean, default: true },
 });
 
-// Private notes are never gated: the bar opens the private-note composer
-const emit = defineEmits(['addPrivateNote']);
+// Private notes are never gated: the bar opens the private-note composer.
+// On a mirror, "Replied from phone" clears needs-reply when the bridge missed
+// the phone reply.
+const emit = defineEmits(['addPrivateNote', 'repliedFromPhone']);
 
 const { t } = useI18n();
 
@@ -75,6 +77,15 @@ const description = computed(() =>
       size="sm"
       data-test-id="kita-connect"
       @click="openKitaConnect"
+    />
+    <Button
+      v-if="reason === 'mirror' && showNoteAction"
+      :label="t('KITA_CONNECT.REPLY_GATE.REPLIED_FROM_PHONE')"
+      size="sm"
+      variant="ghost"
+      color="slate"
+      data-test-id="kita-replied-from-phone"
+      @click="emit('repliedFromPhone')"
     />
     <Button
       v-if="showNoteAction"

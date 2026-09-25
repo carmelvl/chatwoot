@@ -18,6 +18,7 @@
 #   conversation_type - mention, participating or unattended (the classic views)
 #   sort        - latest, oldest, created_desc, created_asc, priority
 #   page        - 1-based, PER_PAGE rows a page
+#   meta_only   - only meta.needs_reply (the sidebar badge)
 class Kita::Inbox
   PER_PAGE = 25
   SCOPES = %w[mine unassigned all].freeze
@@ -48,12 +49,20 @@ class Kita::Inbox
   end
 
   def result
+    return { payload: [], meta: { needs_reply: needs_reply_count } } if ActiveModel::Type::Boolean.new.cast(@params[:meta_only])
+
     keys = ordered_keys
     page = [@params[:page].to_i, 1].max
     page_keys = keys.slice((page - 1) * PER_PAGE, PER_PAGE) || []
     rows = page_keys.any? ? ::Kita::Customers.new(conversations.where("#{::Kita::Customers::ROW_KEY} IN (?)", page_keys)).rows : []
     rows = rows.index_by { |row| row[:id] }.values_at(*page_keys).compact
-    { payload: rows, meta: { count: keys.size, page: page, per_page: PER_PAGE, has_more: keys.size > page * PER_PAGE } }
+    meta = { count: keys.size, page: page, per_page: PER_PAGE, has_more: keys.size > page * PER_PAGE, needs_reply: needs_reply_count }
+    { payload: rows, meta: meta }
+  end
+
+  # Rows waiting on us among those listed (the sidebar badge; unlinked channels count too)
+  def needs_reply_count
+    ::Kita::Customers.keyed(conversations.where(::Kita::Customers::NEEDS_REPLY)).distinct.count('conversations.row_key')
   end
 
   # The conversations matching every filter, as a plain relation (no joins or preloads) for grouping.

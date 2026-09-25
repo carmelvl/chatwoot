@@ -1,7 +1,8 @@
 import { frontendURL } from '../../../helper/URLHelper';
-import store from '../../../store';
-import KitaCustomersAPI from '../../../api/kitaCustomers';
+import { redirectListToInbox } from '../../../helper/kitaRedirects';
 import ConversationView from '../conversation/ConversationView.vue';
+import CustomersPage from './CustomersPage.vue';
+import CustomerProfile from './CustomerProfile.vue';
 
 const meta = {
   permissions: [
@@ -13,50 +14,73 @@ const meta = {
   ],
 };
 
-// Kita: the Customers workspace is the conversation view with the customers
-// list in place of the conversation list, and one tab per platform conversation.
-const customerProps = route => ({
-  inboxId: 0,
+// Kita: the Inbox is the one work list (a row per customer); a row opens the
+// customer view on a platform tab, optionally with a thread open.
+const inboxProps = route => ({
   customerId: route.params.customerId ?? '',
-  conversationId: route.params.conversation_id ?? 0,
+  tab: route.params.tab ?? '',
+  threadId: Number(route.params.threadId) || 0,
 });
 
 export const routes = [
   {
+    path: frontendURL('accounts/:accountId/inbox'),
+    name: 'kita_inbox',
+    component: ConversationView,
+    props: inboxProps,
+    meta,
+  },
+  {
+    path: frontendURL('accounts/:accountId/inbox/customer/:customerId/:tab?'),
+    name: 'kita_inbox_customer',
+    component: ConversationView,
+    props: inboxProps,
+    meta,
+  },
+  {
+    path: frontendURL(
+      'accounts/:accountId/inbox/customer/:customerId/:tab/thread/:threadId'
+    ),
+    name: 'kita_inbox_thread',
+    component: ConversationView,
+    props: inboxProps,
+    meta,
+  },
+  {
     path: frontendURL('accounts/:accountId/customers'),
     name: 'kita_customers',
-    component: ConversationView,
-    props: customerProps,
+    component: CustomersPage,
     meta,
   },
   {
     path: frontendURL('accounts/:accountId/customers/mine'),
     name: 'kita_my_customers',
-    component: ConversationView,
+    component: CustomersPage,
+    beforeEnter: redirectListToInbox,
     meta,
-    beforeEnter: async to => {
-      const { data } = await KitaCustomersAPI.myView();
-      await store.dispatch('customViews/get', 'conversation');
-      return {
-        name: 'folder_conversations',
-        params: { accountId: to.params.accountId, id: data.id },
-      };
-    },
   },
   {
     path: frontendURL('accounts/:accountId/customers/:customerId'),
     name: 'kita_customer',
-    component: ConversationView,
-    props: customerProps,
+    component: CustomerProfile,
+    props: route => ({ customerId: route.params.customerId }),
     meta,
   },
   {
+    // Earlier customer-workspace links
     path: frontendURL(
       'accounts/:accountId/customers/:customerId/conversations/:conversation_id'
     ),
     name: 'kita_customer_conversation',
     component: ConversationView,
-    props: customerProps,
     meta,
+    beforeEnter: to => ({
+      name: 'kita_inbox_customer',
+      params: {
+        accountId: to.params.accountId,
+        customerId: to.params.customerId,
+      },
+      query: { c: to.params.conversation_id },
+    }),
   },
 ];

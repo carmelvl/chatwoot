@@ -79,6 +79,8 @@ RSpec.describe 'Kita inbox', type: :request do
     amartha.update!(waiting_since: 1.minute.ago)
     body = fetch(scope: 'all')
     expect(body['payload'].pluck('id')).to eq(['7', '9', unlinked_id])
+    expect(body['meta']['needs_reply']).to eq(3)
+    expect(fetch(meta_only: true)).to eq('payload' => [], 'meta' => { 'needs_reply' => 1 })
     expect(body['payload'].first).to include('section' => 'needs_reply', 'waiting_platform' => 'whatsapp')
 
     ticket(amartha, 'urgent')

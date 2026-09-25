@@ -3,28 +3,13 @@ import {
   customerPreview,
   firstName,
   gripAccountUrl,
-  sectionCustomers,
 } from '../customersHelper';
 
 const platformName = platform =>
   ({ slack: 'Slack', whatsapp: 'WhatsApp' })[platform] || '';
 
 describe('customers workspace helpers', () => {
-  it('splits customers into NEEDS REPLY, ACTIVE, then UNLINKED channels, dropping empty sections', () => {
-    const tala = { id: '1', waiting_on_us: true };
-    const n90 = { id: '2', waiting_on_us: false };
-    const teams = { id: 'unlinked-7', waiting_on_us: true, unlinked: true };
-    expect(sectionCustomers([teams, n90, tala])).toEqual([
-      { key: 'NEEDS_REPLY', customers: [tala] },
-      { key: 'ACTIVE', customers: [n90] },
-      { key: 'UNLINKED', customers: [teams] },
-    ]);
-    expect(sectionCustomers([n90]).map(section => section.key)).toEqual([
-      'ACTIVE',
-    ]);
-  });
-
-  it('builds the preview line with platform and sender first name', () => {
+  it('builds the preview line from the sender first name', () => {
     const customer = {
       last_message: {
         platform: 'slack',
@@ -32,13 +17,13 @@ describe('customers workspace helpers', () => {
         content: 'batch 14 scores came back empty',
       },
     };
-    const options = { platformName, you: 'You', currentUserName: 'Carmel' };
+    const options = { you: 'You', currentUserName: 'Carmel' };
     expect(customerPreview(customer, options)).toBe(
-      'Slack · Maria: batch 14 scores came back empty'
+      'Maria: batch 14 scores came back empty'
     );
     customer.last_message.sender_name = 'Carmel';
     expect(customerPreview(customer, options)).toBe(
-      'Slack · You: batch 14 scores came back empty'
+      'You: batch 14 scores came back empty'
     );
     expect(customerPreview({ last_message: null }, options)).toBe('');
   });
@@ -53,12 +38,21 @@ describe('customers workspace helpers', () => {
   it('labels a per-platform conversation tab', () => {
     expect(
       conversationTab(
-        { id: 7, platform: 'whatsapp', label: 'Jun Lim', unread_count: 1 },
+        {
+          id: 7,
+          platform: 'whatsapp',
+          label: 'Jun Lim',
+          unread_count: 1,
+          inbox_id: 3,
+          channel_type: 'Channel::Api',
+        },
         platformName
       )
     ).toEqual({
       id: 7,
       platform: 'whatsapp',
+      inboxId: 3,
+      channelType: 'Channel::Api',
       title: 'WhatsApp',
       detail: 'Jun Lim',
       unreadCount: 1,

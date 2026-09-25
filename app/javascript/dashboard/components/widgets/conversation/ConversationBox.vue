@@ -2,29 +2,37 @@
 import { mapGetters } from 'vuex';
 import ConversationHeader from './ConversationHeader.vue';
 import DashboardAppFrame from '../DashboardApp/Frame.vue';
-import EmptyState from './EmptyState/EmptyState.vue';
 import MessagesView from './MessagesView.vue';
-import KitaThreadsTabs from 'dashboard/components-next/kita/KitaThreadsTabs.vue';
-import KitaThreadsList from 'dashboard/components-next/kita/KitaThreadsList.vue';
 import KitaCustomerHeader from 'dashboard/components-next/kita/KitaCustomerHeader.vue';
-import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
-import { isBridgeConversation } from 'dashboard/helper/kitaThreads';
+import KitaAccountTickets from 'dashboard/components-next/kita/KitaAccountTickets.vue';
+import KitaInboxEmpty from 'dashboard/components-next/kita/KitaInboxEmpty.vue';
+import { TICKETS_TAB } from 'dashboard/helper/kitaInbox';
 
+// Kita: every conversation opens under its customer's header (platform tabs
+// plus Tickets); the Tickets tab lists the customer's tickets instead of the
+// messages. With nothing open, a friendly Inbox-zero state. Chatwoot's
+// notifications page (isInboxView) keeps the classic header.
 export default {
   components: {
     ConversationHeader,
     DashboardAppFrame,
-    EmptyState,
     MessagesView,
-    KitaThreadsTabs,
-    KitaThreadsList,
     KitaCustomerHeader,
+    KitaAccountTickets,
+    KitaInboxEmpty,
   },
   props: {
-    // Kita: the Customers workspace swaps the conversation header for the customer header
+    customer: {
+      type: Object,
+      default: null,
+    },
     customerId: {
       type: String,
-      default: null,
+      default: '',
+    },
+    tab: {
+      type: String,
+      default: '',
     },
     inboxId: {
       type: [Number, String],
@@ -43,10 +51,6 @@ export default {
       type: Boolean,
       default: true,
     },
-  },
-  setup() {
-    const { showThreadsTab } = useKitaThreads();
-    return { showThreadsTab };
   },
   data() {
     return { activeIndex: 0 };
@@ -70,14 +74,8 @@ export default {
         })),
       ];
     },
-    isKitaBridge() {
-      return !!this.currentChat.id && isBridgeConversation(this.currentChat);
-    },
-    isCustomerView() {
-      return !!this.customerId && !!this.currentChat.id;
-    },
-    showKitaThreads() {
-      return (this.isKitaBridge || this.isCustomerView) && this.showThreadsTab;
+    isTicketsTab() {
+      return this.tab === TICKETS_TAB;
     },
     showContactPanel() {
       return this.isContactPanelOpen && this.currentChat.id;
@@ -126,53 +124,45 @@ export default {
     }"
   >
     <KitaCustomerHeader
-      v-if="isCustomerView"
+      v-if="customerId && !isInboxView"
+      :customer="customer"
       :customer-id="customerId"
-      :conversation-id="currentChat.id"
+      :tab="tab"
+      :conversation-id="currentChat.id || 0"
     />
     <ConversationHeader
       v-else-if="currentChat.id"
       :chat="currentChat"
-      :show-back-button="isOnExpandedLayout && !isInboxView"
       :class="{
         'border-b border-b-n-weak !pt-2': !dashboardApps.length,
       }"
     />
-    <KitaThreadsTabs
-      v-if="isKitaBridge && !isCustomerView && !activeIndex"
-      :conversation-id="currentChat.id"
-    />
     <woot-tabs
-      v-if="dashboardApps.length && currentChat.id"
+      v-if="dashboardApps.length && currentChat.id && !isTicketsTab"
       :index="activeIndex"
       class="h-10"
       @change="onDashboardAppTabChange"
     >
       <woot-tabs-item
-        v-for="tab in dashboardAppTabs"
-        :key="tab.key"
-        :index="tab.index"
-        :name="tab.name"
+        v-for="appTab in dashboardAppTabs"
+        :key="appTab.key"
+        :index="appTab.index"
+        :name="appTab.name"
         :show-badge="false"
         is-compact
       />
     </woot-tabs>
     <div v-show="!activeIndex" class="flex h-full min-h-0 m-0">
-      <KitaThreadsList
-        v-if="showKitaThreads"
-        :conversation-id="currentChat.id"
-        :tickets-only="isCustomerView"
+      <KitaAccountTickets
+        v-if="isTicketsTab && customerId"
+        :customer-id="customerId"
       />
       <MessagesView
-        v-if="currentChat.id"
-        v-show="!showKitaThreads"
+        v-else-if="currentChat.id && (!customerId || customer)"
         :inbox-id="inboxId"
         :is-inbox-view="isInboxView"
       />
-      <EmptyState
-        v-if="!currentChat.id && !isInboxView"
-        :is-on-expanded-layout="isOnExpandedLayout"
-      />
+      <KitaInboxEmpty v-else-if="!customerId && !isInboxView" />
       <slot />
     </div>
     <DashboardAppFrame

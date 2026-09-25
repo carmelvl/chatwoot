@@ -1,5 +1,5 @@
 # Kita: an action on whole Inbox rows (customers, unlinked channels, other conversations), fanned out to every
-# conversation of each row the agent can see:
+# conversation of each row the agent can see, or on single conversations:
 #   resolve            - resolve them all; with close_tickets, also resolve their open Grip tickets (via grip-sync)
 #   reopen             - reopen them all
 #   snooze             - snooze them all until snoozed_until (unix seconds; nil = until the next reply)
@@ -31,9 +31,12 @@ class Kita::AccountActions
 
   private
 
+  # Whole rows (ids: Inbox row ids) or single conversations (conversation_ids: display ids)
   def conversations
     ids = Array(@params[:ids]).compact_blank
-    raise InvalidAction, 'ids are required' if ids.empty?
+    display_ids = Array(@params[:conversation_ids]).compact_blank
+    raise InvalidAction, 'ids or conversation_ids are required' if ids.empty? && display_ids.empty?
+    return @viewer.conversations.where(display_id: display_ids) if ids.empty?
 
     @viewer.conversations.where("#{::Kita::Customers::ROW_KEY} IN (?)", ids)
   end

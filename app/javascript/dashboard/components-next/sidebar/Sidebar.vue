@@ -1,5 +1,6 @@
 <script setup>
-import { h, ref, computed, onMounted, watch } from 'vue';
+import { h, ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { provideSidebarContext, useSidebarResize } from './provider';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useConfig } from 'dashboard/composables/useConfig';
@@ -22,6 +23,7 @@ import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import EmojiIcon from 'next/emoji-icon-picker/EmojiIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
 import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
+import KitaNotificationBell from 'dashboard/components-next/kita/KitaNotificationBell.vue';
 import {
   SIDEBAR_SORT_SECTIONS,
   getSidebarSortOptions,
@@ -258,24 +260,38 @@ onMounted(() => {
 // Served from public/ (a static src would be bundled as an import)
 const KITA_LOGO_DARK = '/brand-assets/kita-logo-dark.svg';
 
-// Kita: my customers (DRI = me) for the Customers count and the MY CUSTOMERS list
-const myCustomers = useMapGetter('kitaCustomers/getMine');
+// Kita: the Inbox badge (customers waiting on me), refreshed every minute
+const NEEDS_REPLY_REFRESH_MS = 60_000;
+const fetchNeedsReplyCount = () =>
+  store.dispatch('kitaInbox/fetchNeedsReplyCount').catch(() => {});
+let needsReplyTimer;
 watch(
   accountId,
   id => {
-    if (id) store.dispatch('kitaCustomers/get', { mine: true }).catch(() => {});
+    clearInterval(needsReplyTimer);
+    if (!id) return;
+    fetchNeedsReplyCount();
+    needsReplyTimer = setInterval(fetchNeedsReplyCount, NEEDS_REPLY_REFRESH_MS);
   },
   { immediate: true }
 );
-const myCustomerItems = computed(() =>
-  myCustomers.value
-    .filter(customer => customer.name)
-    .map(customer => ({
-      name: `kita-customer-${customer.id}`,
-      label: customer.name,
-      to: accountScopedRoute('kita_customer', { customerId: customer.id }),
-      activeOn: [],
-    }))
+onUnmounted(() => clearInterval(needsReplyTimer));
+
+// Kita: saved views (Chatwoot custom views) as children under Inbox
+const route = useRoute();
+const savedViewLinks = computed(() =>
+  conversationCustomViews.value.map(view => ({
+    id: view.id,
+    name: view.name,
+    to: {
+      name: 'kita_inbox',
+      params: { accountId: accountId.value },
+      query: { scope: 'all', view: String(view.id) },
+    },
+    active:
+      route.name?.startsWith('kita_inbox') &&
+      String(route.query.view) === String(view.id),
+  }))
 );
 
 watch([accountId, hasConversationUnreadCounts], fetchConversationUnreadCounts, {
@@ -384,6 +400,21 @@ const reportRoutes = computed(() => newReportRoutes());
 
 const menuItems = computed(() => {
   return [
+    {
+      name: 'Kita Inbox',
+      label: t('SIDEBAR.KITA_INBOX'),
+      icon: 'i-lucide-inbox',
+      to: accountScopedRoute('kita_inbox'),
+      activeOn: ['kita_inbox', 'kita_inbox_customer', 'kita_inbox_thread'],
+      getterKeys: { count: 'kitaInbox/getNeedsReplyCount' },
+    },
+    {
+      name: 'Tickets',
+      label: t('SIDEBAR.TICKETS'),
+      icon: 'i-lucide-ticket',
+      to: accountScopedRoute('kita_tickets'),
+      activeOn: ['kita_tickets'],
+    },
     {
       name: 'Inbox',
       label: t('SIDEBAR.INBOX'),
@@ -533,12 +564,7 @@ const menuItems = computed(() => {
       label: t('SIDEBAR.CUSTOMERS'),
       icon: 'i-lucide-building-2',
       to: accountScopedRoute('kita_customers'),
-      activeOn: [
-        'kita_customers',
-        'kita_customer',
-        'kita_customer_conversation',
-      ],
-      getterKeys: { count: 'kitaCustomers/getMineCount' },
+      activeOn: ['kita_customers', 'kita_customer'],
     },
     {
       name: 'Kita Mentions',
@@ -935,6 +961,12 @@ const menuItems = computed(() => {
           to: accountScopedRoute('macros_wrapper'),
         },
         {
+          name: 'Settings Contacts',
+          label: t('SIDEBAR.CONTACTS'),
+          icon: 'i-lucide-contact',
+          to: accountScopedRoute('contacts_dashboard_index'),
+        },
+        {
           name: 'Settings Canned Responses',
           label: t('SIDEBAR.CANNED_RESPONSES'),
           icon: 'i-lucide-message-square-quote',
@@ -996,17 +1028,17 @@ const menuItems = computed(() => {
     },
   ];
 });
-// Kita nav: Conversations, Customers, Mentions and Reports first; every other
-// upstream entry stays, in its original order, under "More".
-const PRIMARY_MENU = ['Conversation', 'Customers', 'Kita Mentions', 'Reports'];
+// Kita nav: Inbox, Customers, Tickets, Reports, then Settings pinned at the
+// bottom. The upstream entries (Conversations, Mentions, My Inbox, Contacts,
+// Campaigns, Help Center, Captain…) stay defined but out of the nav: their
+// routes still work (classic conversation URLs redirect into the Inbox),
+// mentions live in the bell and Contacts under Settings.
+const PRIMARY_MENU = ['Kita Inbox', 'Customers', 'Tickets', 'Reports'];
+const findMenuItem = name => menuItems.value.find(item => item.name === name);
 const primaryMenuItems = computed(() =>
-  PRIMARY_MENU.map(name =>
-    menuItems.value.find(item => item.name === name)
-  ).filter(Boolean)
+  PRIMARY_MENU.map(findMenuItem).filter(Boolean)
 );
-const moreMenuItems = computed(() =>
-  menuItems.value.filter(item => !PRIMARY_MENU.includes(item.name))
-);
+const settingsMenuItem = computed(() => findMenuItem('Settings'));
 </script>
 
 <template>
@@ -1038,12 +1070,12 @@ const moreMenuItems = computed(() =>
     >
       <RouterLink
         v-if="!isEffectivelyCollapsed"
-        :to="accountScopedRoute('kita_customers')"
+        :to="accountScopedRoute('kita_inbox')"
         class="px-3 pt-4 pb-2"
       >
         <img
           :src="KITA_LOGO_DARK"
-          :alt="t('SIDEBAR.CUSTOMERS')"
+          :alt="t('SIDEBAR.KITA_INBOX')"
           class="w-auto h-12"
         />
       </RouterLink>
@@ -1094,6 +1126,7 @@ const moreMenuItems = computed(() =>
         >
           <span class="i-lucide-search size-4 text-n-slate-11" />
         </RouterLink>
+        <KitaNotificationBell :is-collapsed="isEffectivelyCollapsed" />
         <ComposeConversation align="start">
           <template #trigger="{ isOpen }">
             <Button
@@ -1120,45 +1153,35 @@ const moreMenuItems = computed(() =>
         class="flex flex-col gap-1 m-0 list-none min-w-0"
         :class="{ 'items-center': isEffectivelyCollapsed }"
       >
-        <SidebarGroup
-          v-for="item in primaryMenuItems"
-          :key="item.name"
-          v-bind="item"
-        />
-      </ul>
-      <template v-if="myCustomerItems.length && !isEffectivelyCollapsed">
-        <p
-          class="px-2 pt-4 mb-0 text-xs font-medium tracking-widest uppercase text-n-slate-11"
-        >
-          {{ t('SIDEBAR.MY_CUSTOMERS') }}
-        </p>
-        <ul
-          data-test="kita-my-customers"
-          class="flex flex-col gap-1 m-0 list-none min-w-0"
-        >
-          <SidebarGroup
-            v-for="item in myCustomerItems"
-            :key="item.name"
-            v-bind="item"
-          />
-        </ul>
-      </template>
-      <p
-        v-if="!isEffectivelyCollapsed"
-        class="px-2 pt-4 mb-0 text-xs font-medium tracking-widest uppercase text-n-slate-11"
-      >
-        {{ t('SIDEBAR.MORE') }}
-      </p>
-      <ul
-        data-test="kita-more-menu"
-        class="flex flex-col gap-1 m-0 list-none min-w-0"
-        :class="{ 'items-center': isEffectivelyCollapsed }"
-      >
-        <SidebarGroup
-          v-for="item in moreMenuItems"
-          :key="item.name"
-          v-bind="item"
-        />
+        <template v-for="item in primaryMenuItems" :key="item.name">
+          <SidebarGroup v-bind="item" />
+          <li
+            v-if="
+              item.name === 'Kita Inbox' &&
+              savedViewLinks.length &&
+              !isEffectivelyCollapsed
+            "
+          >
+            <ul
+              data-test="kita-saved-views"
+              class="flex flex-col gap-0.5 m-0 list-none min-w-0 ps-7"
+            >
+              <li v-for="view in savedViewLinks" :key="view.id">
+                <RouterLink
+                  :to="view.to"
+                  class="flex items-center h-7 px-2 text-sm truncate rounded-lg"
+                  :class="
+                    view.active
+                      ? 'bg-n-alpha-2 text-n-slate-12 font-medium'
+                      : 'text-n-slate-11 hover:bg-n-alpha-1 hover:text-n-slate-12'
+                  "
+                >
+                  {{ view.name }}
+                </RouterLink>
+              </li>
+            </ul>
+          </li>
+        </template>
       </ul>
     </nav>
     <section
@@ -1167,6 +1190,14 @@ const moreMenuItems = computed(() =>
       <div
         class="pointer-events-none absolute inset-x-0 -top-[1.938rem] h-8 bg-gradient-to-t from-[#14402A] to-transparent"
       />
+      <ul
+        v-if="settingsMenuItem"
+        data-test="kita-settings-menu"
+        class="flex flex-col w-full gap-1 px-2 pb-1 m-0 list-none min-w-0"
+        :class="{ 'items-center px-1': isEffectivelyCollapsed }"
+      >
+        <SidebarGroup v-bind="settingsMenuItem" />
+      </ul>
       <SidebarChangelogCard
         v-if="
           isOnChatwootCloud &&

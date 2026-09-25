@@ -45,6 +45,13 @@ RSpec.describe 'Kita account actions', type: :request do
     expect(slack.reload.team).to eq(team)
   end
 
+  it 'marks one conversation as replied from the phone' do
+    act(conversation_ids: [whatsapp.display_id], action_name: 'replied_from_phone')
+    expect(response.parsed_body).to eq('updated' => 1)
+    expect(whatsapp.reload.custom_attributes['kita_replied_at'].to_f).to be_within(5).of(Time.current.to_f)
+    expect(slack.reload.custom_attributes).not_to have_key('kita_replied_at')
+  end
+
   it 'rejects an unknown action or missing rows' do
     act(ids: ['7'], action_name: 'delete')
     expect(response).to have_http_status(:unprocessable_entity)

@@ -17,6 +17,7 @@ import CopilotEditorSection from './CopilotEditorSection.vue';
 import MessageSignatureMissingAlert from './MessageSignatureMissingAlert.vue';
 import ReplyBoxBanner from './ReplyBoxBanner.vue';
 import KitaReplyGate from 'dashboard/components-next/kita/KitaReplyGate.vue';
+import KitaInboxAPI from 'dashboard/api/kitaInbox';
 import { useKitaConnections } from 'dashboard/composables/useKitaConnections';
 import {
   KITA_PERSONAL_PLATFORMS,
@@ -1112,6 +1113,19 @@ export default {
     addKitaPrivateNote() {
       this.setReplyMode(REPLY_EDITOR_MODES.NOTE);
     },
+    // Kita: a WhatsApp/Viber reply sent from the phone that the bridge didn't mirror
+    async markRepliedFromPhone() {
+      try {
+        await KitaInboxAPI.act({
+          conversation_ids: [this.currentChat.id],
+          action_name: 'replied_from_phone',
+        });
+        useAlert(this.$t('KITA_CONNECT.REPLY_GATE.REPLIED_FROM_PHONE_DONE'));
+        this.$store.dispatch('kitaInbox/fetch').catch(() => {});
+      } catch {
+        useAlert(this.$t('KITA_INBOX.ACTION_ERROR'));
+      }
+    },
     setReplyMode(mode = REPLY_EDITOR_MODES.REPLY) {
       // Clear attachments when switching between private note and reply modes
       // This is to prevent from breaking the upload rules
@@ -1498,6 +1512,7 @@ export default {
       :reason="kitaReplyBlockReason"
       :contact-name="kitaContactName"
       @add-private-note="addKitaPrivateNote"
+      @replied-from-phone="markRepliedFromPhone"
     />
     <Transition
       v-else
