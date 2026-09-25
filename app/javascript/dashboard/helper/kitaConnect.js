@@ -14,7 +14,9 @@ export const openKitaConnect = () =>
  */
 export const shouldPromptKitaConnect = status =>
   !!status &&
-  KITA_PERSONAL_PLATFORMS.some(platform => status[platform] === 'not_connected');
+  KITA_PERSONAL_PLATFORMS.some(
+    platform => status[platform] === 'not_connected'
+  );
 
 /**
  * Public replies in a Slack/Teams conversation are blocked until the agent has

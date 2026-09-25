@@ -6,7 +6,11 @@ import { openKitaConnect } from 'dashboard/helper/kitaConnect';
 
 vi.mock('dashboard/helper/kitaConnect', () => ({ openKitaConnect: vi.fn() }));
 
-const i18n = createI18n({ legacy: false, locale: 'en', messages: { en: settings } });
+const i18n = createI18n({
+  legacy: false,
+  locale: 'en',
+  messages: { en: settings },
+});
 
 const mountGate = props =>
   mount(KitaReplyGate, {
@@ -17,7 +21,9 @@ const mountGate = props =>
 describe('KitaReplyGate', () => {
   it('asks to connect Slack and opens /kita/connect', async () => {
     const wrapper = mountGate({ platform: 'slack', reason: 'not_connected' });
-    expect(wrapper.text()).toContain('Connect your Slack account to reply here');
+    expect(wrapper.text()).toContain(
+      'Connect your Slack account to reply here'
+    );
     expect(wrapper.text()).toContain('Private notes still work.');
     await wrapper.find('button').trigger('click');
     expect(openKitaConnect).toHaveBeenCalled();
