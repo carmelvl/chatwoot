@@ -7,6 +7,8 @@ vi.mock('dashboard/composables/store', async importOriginal => {
   return {
     ...(await importOriginal()),
     useMapGetter: () => computed(() => () => ({})),
+    useStoreGetters: () => ({}),
+    useStore: () => ({ getters: {}, dispatch: () => {} }),
   };
 });
 
