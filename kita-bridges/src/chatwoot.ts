@@ -47,7 +47,8 @@ export function toOutbound(payload: any): OutboundDecision {
     s?.type === 'user' && s.id
       ? { id: Number(s.id), name: String(s.name ?? s.available_name ?? '').trim(), firstName: String(s.available_name ?? s.name ?? '').trim().split(/\s+/)[0], email: s.email }
       : undefined;
-  return { send: true, message: { messageId: Number(payload.id), conversationId, text, attachments, ...(agent?.name ? { agent } : {}) } };
+  const inReplyTo = Number(payload.content_attributes?.in_reply_to) || undefined;
+  return { send: true, message: { messageId: Number(payload.id), conversationId, text, attachments, ...(agent?.name ? { agent } : {}), ...(inReplyTo ? { inReplyTo } : {}) } };
 }
 
 /** Thin client for Chatwoot's public (inbox-identifier) client API. No agent token required. */
@@ -86,18 +87,42 @@ export class ChatwootClient {
     return Number(r.id);
   }
 
-  async createMessage(inbox: string, sourceId: string, conversationId: number, content: string, files: { blob: Blob; name: string }[] = [], echoId?: string): Promise<void> {
+  /** Incoming message; `senderIdentifier` attributes it to another contact of the inbox (Kita fork). Returns the desk id. */
+  async createMessage(
+    inbox: string,
+    sourceId: string,
+    conversationId: number,
+    content: string,
+    files: { blob: Blob; name: string }[] = [],
+    echoId?: string,
+    extra: { senderIdentifier?: string; contentAttributes?: MessageAttributes } = {},
+  ): Promise<number> {
     const path = `${inbox}/contacts/${sourceId}/conversations/${conversationId}/messages`;
-    if (files.length === 0) {
-      await this.call(path, this.json({ content, echo_id: echoId }));
-      return;
-    }
-    const form = new FormData();
-    form.set('content', content);
-    if (echoId) form.set('echo_id', echoId);
-    for (const f of files) form.append('attachments[]', f.blob, f.name);
-    await this.call(path, { method: 'POST', body: form });
+    const fields = { content, echo_id: echoId, sender_identifier: extra.senderIdentifier, content_attributes: extra.contentAttributes };
+    const r = await this.call(path, files.length === 0 ? this.json(fields) : { method: 'POST', body: toForm(fields, files) });
+    return Number(r.id);
   }
+}
+
+/** What the bridge records on every message it creates (see Kita::Bridge.message_attributes in the desk). */
+export interface MessageAttributes {
+  external_source?: string;
+  external_thread?: { root: string };
+  in_reply_to?: number;
+  kita_bridge_origin?: boolean;
+}
+
+/** Multipart body with Rails-style nested keys (content_attributes[external_thread][root]). */
+function toForm(fields: Record<string, unknown>, files: { blob: Blob; name: string }[]): FormData {
+  const form = new FormData();
+  const put = (key: string, v: unknown) => {
+    if (v === undefined || v === null) return;
+    if (typeof v === 'object') for (const [k, x] of Object.entries(v)) put(`${key}[${k}]`, x);
+    else form.set(key, String(v));
+  };
+  for (const [k, v] of Object.entries(fields)) put(k, v);
+  for (const f of files) form.append('attachments[]', f.blob, f.name);
+  return form;
 }
 
 const MAX_ATTACHMENT_BYTES = 40 * 1024 * 1024;
@@ -142,26 +167,12 @@ export class ChatwootAppClient {
 
   async createMessage(
     conversationId: number,
-    m: { content: string; private: boolean; files?: { blob: Blob; name: string }[] },
+    m: { content: string; private: boolean; files?: { blob: Blob; name: string }[]; contentAttributes?: MessageAttributes },
   ): Promise<{ id: number }> {
-    const attrs = { kita_bridge_origin: true };
-    let init: RequestInit;
-    if (m.files?.length) {
-      const form = new FormData();
-      form.set('content', m.content);
-      form.set('message_type', 'outgoing');
-      form.set('private', String(m.private));
-      form.set('content_attributes', JSON.stringify(attrs));
-      for (const f of m.files) form.append('attachments[]', f.blob, f.name);
-      init = { method: 'POST', body: form };
-    } else {
-      init = {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content: m.content, message_type: 'outgoing', private: m.private, content_attributes: attrs }),
-      };
-    }
-    init.headers = { ...(init.headers as Record<string, string>), 'api-access-token': this.token };
+    const fields = { content: m.content, message_type: 'outgoing', private: m.private, content_attributes: { ...m.contentAttributes, kita_bridge_origin: true } };
+    const init: RequestInit = m.files?.length
+      ? { method: 'POST', body: toForm(fields, m.files), headers: { 'api-access-token': this.token } }
+      : { method: 'POST', body: JSON.stringify(fields), headers: { 'content-type': 'application/json', 'api-access-token': this.token } };
     const res = await this.fetchImpl(`${this.base}/conversations/${conversationId}/messages`, init);
     if (!res.ok) throw new Error(`chatwoot app api messages -> ${res.status}`);
     const j: any = await res.json();
@@ -185,5 +196,41 @@ export class ChatwootAppClient {
       this.agents = { at: Date.now(), byId: new Map(list.map((a) => [Number(a.id), a.thumbnail || undefined])) };
     }
     return this.agents.byId.get(agentId);
+  }
+}
+
+/**
+ * Kita desk endpoint for staff who typed directly in Slack/Teams: the desk posts the message as the
+ * agent whose email matches, so it's authored by them natively. The bridge never holds agent tokens.
+ * Returns undefined when no desk agent has that email (the caller falls back to its own client).
+ */
+export class KitaDeskClient {
+  private url: string;
+  private secret: string;
+  private fetchImpl: typeof fetch;
+
+  constructor(baseUrl: string, secret: string, fetchImpl: typeof fetch = fetch) {
+    this.url = `${baseUrl}/api/v1/kita/staff_messages`;
+    this.secret = secret;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async staffMessage(
+    conversationId: number,
+    email: string,
+    m: { content: string; files?: { blob: Blob; name: string }[]; contentAttributes?: MessageAttributes },
+  ): Promise<{ id: number } | undefined> {
+    const fields = { conversation_id: conversationId, email, content: m.content, content_attributes: m.contentAttributes };
+    const init: RequestInit = m.files?.length
+      ? { method: 'POST', body: toForm(fields, m.files), headers: { 'x-kita-bridge-secret': this.secret } }
+      : { method: 'POST', body: JSON.stringify(fields), headers: { 'content-type': 'application/json', 'x-kita-bridge-secret': this.secret } };
+    const res = await this.fetchImpl(this.url, init);
+    if (res.status === 404) {
+      const j: any = await res.json().catch(() => ({}));
+      if (j?.error === 'no_agent') return undefined;
+    }
+    if (!res.ok) throw new Error(`kita desk staff_messages -> ${res.status}`);
+    const j: any = await res.json();
+    return { id: Number(j.id) };
   }
 }

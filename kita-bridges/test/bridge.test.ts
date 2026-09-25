@@ -14,27 +14,46 @@ const slackMsg = (name: string) => {
   return { ...p.message, userName: p.message.userKey === 'UCUST001' ? 'Ana (Customer Co)' : 'Ben (Customer Co)' };
 };
 
-test('mapping: slack thread -> one conversation; first message creates contact + conversation', async () => {
+test('mapping: one conversation per slack channel; the channel is the contact, each message is authored by its writer', async () => {
   const { bridge, cw, store } = makeBridge();
   assert.equal(await bridge.inbound(slackMsg('slack_top_level.json')), 'created');
   assert.equal(await bridge.inbound(slackMsg('slack_thread_reply.json')), 'appended');
   const paths = cw.calls.filter((c) => c.path.startsWith('/public')).map((c) => `${c.method} ${c.path}`);
   assert.deepEqual(paths, [
-    'POST /public/api/v1/inboxes/IN_SLACK/contacts',
+    'POST /public/api/v1/inboxes/IN_SLACK/contacts', // the channel
     'POST /public/api/v1/inboxes/IN_SLACK/contacts/src-1/conversations',
+    'POST /public/api/v1/inboxes/IN_SLACK/contacts', // Ana
     'POST /public/api/v1/inboxes/IN_SLACK/contacts/src-1/conversations/100/messages',
-    'POST /public/api/v1/inboxes/IN_SLACK/contacts', // second person in the thread gets their own contact...
-    'POST /public/api/v1/inboxes/IN_SLACK/contacts/src-1/conversations/100/messages', // ...but posts into the thread's conversation
+    'POST /public/api/v1/inboxes/IN_SLACK/contacts', // Ben
+    'POST /public/api/v1/inboxes/IN_SLACK/contacts/src-1/conversations/100/messages',
   ]);
-  assert.equal(cw.calls[0].body.identifier, 'slack:UCUST001');
-  const reply = cw.calls.at(-1)!.body;
-  assert.equal(reply.content, '**Ben (Customer Co):** screenshot attached');
+  assert.equal(cw.calls[0].body.identifier, 'slack-channel:slack:C0SHARED1');
+  const [root, reply] = cw.calls.filter((c) => c.path.endsWith('/messages')).map((c) => c.body);
+  assert.equal(root.sender_identifier, 'slack:UCUST001');
+  assert.deepEqual(root.content_attributes, { external_source: 'slack', external_thread: { root: 'C0SHARED1:1790000000.000100' } });
+  // the thread reply is Ben's own message (no name prefix), natively replying to the root's desk message
+  assert.equal(reply.content, 'screenshot attached');
+  assert.equal(reply.sender_identifier, 'slack:UCUST002');
+  assert.equal(reply['content_attributes[in_reply_to]'], '1');
+  assert.equal(reply['content_attributes[external_thread][root]'], 'C0SHARED1:1790000000.000100');
+  assert.equal(reply['content_attributes[external_source]'], 'slack');
   assert.deepEqual(reply.files, ['error.png']);
   assert.equal(reply.echo_id, 'slack:C0SHARED1:1790000050.000200');
   // the file download used the Slack bot token
   const dl = cw.calls.find((c) => c.path.includes('/files-pri/'));
   assert.ok(dl);
-  assert.equal(store.getByConversation('slack', 100)?.threadKey, 'C0SHARED1:1790000000.000100');
+  assert.equal(store.getByConversation('slack', 100)?.threadKey, 'C0SHARED1');
+  assert.deepEqual(store.getMessageByExt('slack', 'C0SHARED1:1790000050.000200'), { extId: 'C0SHARED1:1790000050.000200', deskId: 2, root: 'C0SHARED1:1790000000.000100' });
+});
+
+test('mapping: a resolved channel conversation is reopened by the next message, never replaced', async () => {
+  const { bridge, cw } = makeBridge();
+  await bridge.inbound(slackMsg('slack_top_level.json'));
+  assert.equal(await bridge.outbound('slack', { event: 'conversation_status_changed', id: 100, status: 'resolved' }), 'status:resolved');
+  const later = { ...slackMsg('slack_top_level.json'), eventId: 'C0SHARED1:1790009999.000100', thread: { root: 'C0SHARED1:1790009999.000100', reply: false } };
+  assert.equal(await bridge.inbound(later), 'appended');
+  assert.equal(cw.calls.filter((c) => c.path.endsWith('/conversations')).length, 1);
+  assert.match(cw.calls.at(-1)!.path, /conversations\/100\/messages$/);
 });
 
 test('idempotency: platform retries of the same event are not duplicated', async () => {
@@ -101,29 +120,52 @@ const teamsChatMsg = (id: string) => {
   return t.message;
 };
 
-test('end to end: teams reply goes to the channel thread root; slack reply goes into the thread', async () => {
+test('outbound: "Reply to" posts into that message\'s thread; a plain reply is a new top-level channel message', async () => {
   const { bridge, senders } = makeBridge();
   const t = teamsChannelMsg();
-  await bridge.inbound({ ...t.message, attachments: [] }); // conv 100
-  await bridge.inbound(slackMsg('slack_top_level.json')); // conv 101
-  await bridge.outbound('teams', { ...fixture('chatwoot_outgoing.json'), conversation: { id: 100 } });
-  await bridge.outbound('slack', { ...fixture('chatwoot_outgoing.json'), id: 9100, conversation: { id: 101 } });
-  assert.deepEqual(senders.teams.sent[0].ref, { kind: 'channel', teamId: 'team-acme', channelId: '19:acme-shared@thread.tacv2', rootId: '1790000000000' });
-  assert.deepEqual(senders.slack.sent[0].ref, { channel: 'C0SHARED1', threadTs: '1790000000.000100' });
+  await bridge.inbound({ ...t.message, attachments: [] }); // conv 100, desk message 1
+  await bridge.inbound(slackMsg('slack_top_level.json')); // conv 101, desk message 2
+  await bridge.inbound(slackMsg('slack_thread_reply.json')); // desk message 3, in the same Slack thread
+  const reply = (id: number, conversation: number, inReplyTo?: number) => ({
+    ...fixture('chatwoot_outgoing.json'), id, conversation: { id: conversation }, ...(inReplyTo ? { content_attributes: { in_reply_to: inReplyTo } } : {}),
+  });
+  await bridge.outbound('teams', reply(9001, 100));
+  await bridge.outbound('teams', reply(9002, 100, 1));
+  await bridge.outbound('slack', reply(9101, 101));
+  await bridge.outbound('slack', reply(9102, 101, 3)); // replying to a thread reply targets the thread root
+  assert.deepEqual(senders.teams.sent.map((x) => x.ref), [
+    { kind: 'channel', teamId: 'team-acme', channelId: '19:acme-shared@thread.tacv2' },
+    { kind: 'channel', teamId: 'team-acme', channelId: '19:acme-shared@thread.tacv2', rootId: '1790000000000' },
+  ]);
+  assert.deepEqual(senders.slack.sent.map((x) => x.ref), [{ channel: 'C0SHARED1' }, { channel: 'C0SHARED1', threadTs: '1790000000.000100' }]);
   // platform isolation: a Slack inbox webhook can't send into a Teams conversation
-  assert.equal(await bridge.outbound('slack', { ...fixture('chatwoot_outgoing.json'), id: 9200, conversation: { id: 100 } }), 'skip:unmapped_conversation');
+  assert.equal(await bridge.outbound('slack', reply(9200, 100)), 'skip:unmapped_conversation');
 });
 
-test('teams group chat: new conversation once the previous one is resolved (conversation_status_changed)', async () => {
-  const { bridge, store } = makeBridge();
+test('outbound: the posted platform id maps back to the desk message, so replies to it thread natively', async () => {
+  const { bridge, store, cw, senders } = makeBridge();
+  await bridge.inbound(slackMsg('slack_top_level.json')); // conv 100
+  senders.slack.send = async (ref, msg) => (senders.slack.sent.push({ ref, msg }), { echoes: ['C0SHARED1:1790000100.000100'] });
+  await bridge.outbound('slack', { ...fixture('chatwoot_outgoing.json'), id: 9300, conversation: { id: 100 } });
+  assert.deepEqual(store.getMessageByExt('slack', 'C0SHARED1:1790000100.000100'), { extId: 'C0SHARED1:1790000100.000100', deskId: 9300, root: 'C0SHARED1:1790000100.000100' });
+  // a customer answers in the thread under the agent's top-level message
+  await bridge.inbound({ ...slackMsg('slack_top_level.json'), eventId: 'C0SHARED1:1790000200.000100', thread: { root: 'C0SHARED1:1790000100.000100', reply: true } });
+  assert.equal(cw.calls.at(-1)!.body.content_attributes.in_reply_to, 9300);
+  // and a desk "Reply to" on that customer message goes into the agent's thread
+  await bridge.outbound('slack', { ...fixture('chatwoot_outgoing.json'), id: 9301, conversation: { id: 100 }, content_attributes: { in_reply_to: 2 } });
+  assert.deepEqual(senders.slack.sent.at(-1)!.ref, { channel: 'C0SHARED1', threadTs: '1790000100.000100' });
+});
+
+test('teams group chat: one conversation per chat, reopened (not replaced) after resolution', async () => {
+  const { bridge, store, cw } = makeBridge();
   assert.equal(await bridge.inbound(teamsChatMsg('1')), 'created'); // conv 100
   assert.equal(await bridge.inbound(teamsChatMsg('2')), 'appended');
   assert.equal(await bridge.outbound('teams', { event: 'conversation_status_changed', id: 100, status: 'resolved' }), 'status:resolved');
-  assert.equal(await bridge.inbound(teamsChatMsg('3')), 'created'); // conv 101
-  assert.equal(store.getByThread('teams', 'chat:19:acme-group@thread.v2')?.conversationId, 101);
-  // a resolved channel thread is simply appended to (Chatwoot reopens it)
+  assert.equal(await bridge.inbound(teamsChatMsg('3')), 'appended');
+  assert.equal(store.getByThread('teams', 'chat:19:acme-group@thread.v2')?.conversationId, 100);
+  assert.equal(cw.calls.filter((c) => c.path.endsWith('/conversations')).length, 1);
+  // Teams channels: every thread lands in the channel's one conversation
   await bridge.inbound(teamsChannelMsg().message);
-  await bridge.outbound('teams', { event: 'conversation_status_changed', id: 102, status: 'resolved' });
   assert.equal(await bridge.inbound({ ...teamsChannelMsg().message, eventId: 'x:2' }), 'appended');
 });
 

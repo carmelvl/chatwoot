@@ -27,22 +27,25 @@ test('slack url_verification returns the challenge', () => {
   assert.deepEqual(parseSlackEvent(fixture('slack_url_verification.json'), opts), { kind: 'challenge', challenge: '3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P' });
 });
 
-test('slack top-level message opens a thread keyed by channel + ts', () => {
+test('slack top-level message: one conversation per channel; the message is its own thread root', () => {
   const p = parseSlackEvent(fixture('slack_top_level.json'), opts);
   assert.equal(p.kind, 'message');
   if (p.kind !== 'message') return;
-  assert.equal(p.message.threadKey, 'C0SHARED1:1790000000.000100');
-  assert.deepEqual(p.message.replyRef, { channel: 'C0SHARED1', threadTs: '1790000000.000100' });
+  assert.equal(p.message.threadKey, 'C0SHARED1');
+  assert.deepEqual(p.message.replyRef, { channel: 'C0SHARED1' });
+  assert.deepEqual(p.message.thread, { root: 'C0SHARED1:1790000000.000100', reply: false });
+  assert.equal(p.message.channelConversation, true);
   assert.equal(p.message.userKey, 'UCUST001');
   assert.equal(p.message.eventId, 'C0SHARED1:1790000000.000100'); // channel:ts, matches our own postMessage ts
   assert.equal(p.message.text, 'Hi, our webhook fails with **401** since today & see [status page](https://status.example.com)');
 });
 
-test('slack thread reply maps to the root thread and carries authenticated file downloads', () => {
+test('slack thread reply: same channel conversation, points at its thread root, carries authenticated file downloads', () => {
   const p = parseSlackEvent(fixture('slack_thread_reply.json'), opts);
   assert.equal(p.kind, 'message');
   if (p.kind !== 'message') return;
-  assert.equal(p.message.threadKey, 'C0SHARED1:1790000000.000100');
+  assert.equal(p.message.threadKey, 'C0SHARED1');
+  assert.deepEqual(p.message.thread, { root: 'C0SHARED1:1790000000.000100', reply: true });
   assert.equal(p.message.attachments.length, 1);
   assert.equal(p.message.attachments[0].url, 'https://files.slack.com/files-pri/T-F01/download/error.png');
   assert.deepEqual(p.message.attachments[0].headers, { authorization: 'Bearer xoxb-test' });
@@ -55,7 +58,7 @@ test('slack loop prevention: bot echoes ignored; Kita staff typing directly beco
   assert.deepEqual(parseSlackEvent(self, opts), { kind: 'ignore', reason: 'self' });
   const staff = parseSlackEvent(fixture('slack_internal_staff.json'), opts);
   assert.equal(staff.kind === 'message' && staff.message.author, 'staff');
-  assert.equal(staff.kind === 'message' && staff.message.threadKey, 'C0SHARED1:1790000000.000100');
+  assert.equal(staff.kind === 'message' && staff.message.threadKey, 'C0SHARED1');
   const customer = parseSlackEvent(fixture('slack_top_level.json'), opts);
   assert.equal(customer.kind === 'message' && customer.message.author, 'customer');
   const edited = fixture('slack_top_level.json');
@@ -77,6 +80,7 @@ test('slack outbound transform: thread reply as the Kita bot, mrkdwn, no attachm
   assert.equal(post.username, 'Kita');
   assert.equal(post.icon_url, 'https://kita.ai/icon.png');
   assert.equal(post.text, 'We *fixed* it, see <https://kita.ai/d|docs>');
+  assert.equal('thread_ts' in buildSlackPost({ channel: 'C0SHARED1' }, { messageId: 1, conversationId: 1, text: 'top level', attachments: [] }), false);
 });
 
 test('slack sender: text then native file upload into the same thread (files v2)', async () => {

@@ -24,8 +24,17 @@ export interface InboundMessage {
   attachments: InboundAttachment[];
   /** Extra context shown to agents on the Chatwoot conversation. */
   conversationAttributes?: Record<string, string>;
-  /** Long-lived containers (Teams group chats): start a fresh conversation once the last one was resolved. */
-  newConversationIfResolved?: boolean;
+  /**
+   * Slack/Teams: one desk conversation per channel or group chat. Its contact is the channel itself
+   * ("#kita-tala"); each message is authored by the person who wrote it (their own contact).
+   */
+  channelConversation?: boolean;
+  /** Platform thread: `root` is the root message's id in eventId format; `reply` = this is a thread reply. */
+  thread?: { root: string; reply: boolean };
+  /** Staff: the platform account's email (Slack profile, Graph mail/UPN), matched to a desk agent. */
+  userEmail?: string;
+  /** Public avatar URL of the person (Slack profile image), used for their desk contact. */
+  userAvatarUrl?: string;
   /**
    * 'staff' = a Kita team member typed directly in Slack/Teams (outside the desk). Synced into the
    * mapped conversation as an outgoing agent message; never treated as a customer, never echoed back.
@@ -75,6 +84,8 @@ export interface OutboundMessage {
   attachments: OutboundAttachment[];
   /** Absent for automated messages (they go out as plain Kita). */
   agent?: AgentIdentity;
+  /** Desk message this reply answers (Chatwoot "Reply to"): posted into that message's platform thread. */
+  inReplyTo?: number;
 }
 
 export interface Sender {

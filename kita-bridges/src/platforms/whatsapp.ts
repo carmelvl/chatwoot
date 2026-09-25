@@ -19,6 +19,10 @@ export interface WhatsAppNumber {
   ownerName: string;
   /** Optional: that agent's own Chatwoot access token, so echoes are attributed to them natively. */
   agentAccessToken?: string;
+  /** Optional: the owner's desk email, so their Connect accounts page shows this number. */
+  agentEmail?: string;
+  /** Optional: the number as people know it, e.g. "+63 917 555 0100" (shown on the Connect accounts page). */
+  displayPhoneNumber?: string;
 }
 
 /** Cloud API webhook signature: X-Hub-Signature-256: sha256=HEX(HMAC_SHA256(app secret, raw body)). */

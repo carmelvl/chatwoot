@@ -34,9 +34,9 @@ const ALLOWED_SUBTYPES = new Set([undefined, 'file_share', 'thread_broadcast']);
 
 /**
  * Slack Events API payload -> normalised customer message.
- * Thread mapping: a top-level message in a shared channel opens a conversation keyed by
- * channel + its ts; every reply in that thread (thread_ts) lands in the same conversation and
- * agent replies are posted back into that thread.
+ * Mapping: one desk conversation per channel. Threads are surfaced per message: every message
+ * records its thread root, and a thread reply points at the root's desk message (native reply UI).
+ * Agent replies go into a thread when the agent uses "Reply to", otherwise top-level in the channel.
  */
 export function parseSlackEvent(payload: any, opts: SlackParseOptions): SlackParsed {
   if (payload?.type === 'url_verification') return { kind: 'challenge', challenge: String(payload.challenge ?? '') };
@@ -72,8 +72,10 @@ export function parseSlackEvent(payload: any, opts: SlackParseOptions): SlackPar
       echoKeys: (ev.files ?? []).filter((f: any) => f?.id).map((f: any) => `file:${f.id}`),
       author,
       userKey: ev.user,
-      threadKey: `${ev.channel}:${rootTs}`,
-      replyRef: { channel: ev.channel, threadTs: rootTs },
+      threadKey: ev.channel,
+      replyRef: { channel: ev.channel },
+      thread: { root: `${ev.channel}:${rootTs}`, reply: rootTs !== ev.ts },
+      channelConversation: true,
       text: slackToMarkdown(ev.text ?? ''),
       attachments,
       conversationAttributes: { channel_key: `slack:${ev.channel}`, slack_channel: ev.channel, slack_team: String(userTeam ?? '') },
@@ -100,6 +102,12 @@ export function markdownToSlack(text: string): string {
     .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<$2|$1>');
 }
 
+export interface SlackProfile {
+  name?: string;
+  email?: string;
+  avatarUrl?: string;
+}
+
 export interface SlackIdentity {
   name: string;
   iconUrl?: string;
@@ -109,7 +117,7 @@ export interface SlackIdentity {
 export function buildSlackPost(replyRef: Record<string, unknown>, msg: OutboundMessage, who?: SlackIdentity) {
   return {
     channel: replyRef.channel as string,
-    thread_ts: replyRef.threadTs as string,
+    ...(replyRef.threadTs ? { thread_ts: replyRef.threadTs as string } : {}),
     text: markdownToSlack(msg.text),
     ...(who ? { username: who.name } : {}), // chat:write.customize
     ...(who?.iconUrl ? { icon_url: who.iconUrl } : {}),
@@ -199,23 +207,25 @@ export class SlackSender implements Sender {
     return [`file:${up.file_id}`];
   }
 
-  private names = new Map<string, string>();
-  /** Best-effort display name (users:read); falls back to the id. */
-  async userName(userId: string): Promise<string | undefined> {
-    if (this.names.has(userId)) return this.names.get(userId);
+  private profiles = new Map<string, SlackProfile>();
+  /** Best-effort name, email (users:read.email) and avatar; empty when unknown. */
+  async userProfile(userId: string): Promise<SlackProfile> {
+    const hit = this.profiles.get(userId);
+    if (hit) return hit;
     try {
       const res = await this.fetchImpl(`https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`, {
         headers: { authorization: `Bearer ${this.token}` },
       });
       const j: any = await res.json();
       const p = j.user?.profile ?? {};
-      const name = p.real_name || p.display_name || j.user?.name;
-      if (name) this.names.set(userId, name);
-      return name;
+      const profile = { name: p.real_name || p.display_name || j.user?.name || undefined, email: p.email ? String(p.email).toLowerCase() : undefined, avatarUrl: p.image_192 || p.image_72 || undefined };
+      if (profile.name) this.profiles.set(userId, profile);
+      return profile;
     } catch {
-      return undefined;
+      return {};
     }
   }
+
 
   private channels = new Map<string, string>();
   /** Best-effort "#channel-name" (channels:read / groups:read); undefined when unknown. */

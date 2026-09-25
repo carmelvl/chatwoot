@@ -6,7 +6,7 @@ import { createHandler } from './app.ts';
 import { log } from './log.ts';
 import { SlackSender, SlackUserOAuth } from './platforms/slack.ts';
 import { AgentConnect } from './connect.ts';
-import { ChatwootAppClient } from './chatwoot.ts';
+import { ChatwootAppClient, KitaDeskClient } from './chatwoot.ts';
 import { signConnectLink } from './links.ts';
 import { TeamsIntegration } from './platforms/teams/index.ts';
 import { SYNC_INTERVAL_MS } from './platforms/teams/subscriptions.ts';
@@ -48,8 +48,12 @@ const scope = new ScopeCache({
   onRefresh: (inScope) => void teamSync.run(inScope).catch((e) => log.error('teamsync_failed', { error: String(e?.message ?? e) })),
 });
 void scope.start();
-const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, connectLink, scope });
-const connect = cfg.linkSecret && (teams || slackOAuth) ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth }) : undefined;
+// Staff typing in Slack/Teams are posted by the desk as the matching agent (shared BRIDGE_LINK_SECRET).
+const desk = cfg.linkSecret ? new KitaDeskClient(cfg.chatwootBaseUrl, cfg.linkSecret) : undefined;
+const bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inboxes: cfg.inboxes, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope });
+const connect = cfg.linkSecret
+  ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth, whatsappNumbers: cfg.whatsapp.numbers, deskUrl: cfg.chatwootBaseUrl })
+  : undefined;
 const whatsappOwnerApps = new Map(
   cfg.whatsapp.numbers
     .filter((n) => n.agentAccessToken && cfg.chatwootAccountId)

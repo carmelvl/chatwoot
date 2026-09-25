@@ -14,6 +14,12 @@ export interface ConversationRow {
   status?: string;
 }
 
+export interface MessageRow {
+  extId: string;
+  deskId: number;
+  root: string;
+}
+
 export interface SubscriptionRow {
   id: string;
   resource: string;
@@ -38,6 +44,10 @@ export class Store {
         source_id TEXT NOT NULL, reply_ref TEXT NOT NULL, updated_at INTEGER NOT NULL,
         PRIMARY KEY (platform, thread_key));
       CREATE INDEX IF NOT EXISTS conversations_by_cw ON conversations (platform, conversation_id);
+      CREATE TABLE IF NOT EXISTS messages (
+        platform TEXT NOT NULL, ext_id TEXT NOT NULL, desk_id INTEGER NOT NULL, root TEXT NOT NULL, at INTEGER NOT NULL,
+        PRIMARY KEY (platform, ext_id));
+      CREATE INDEX IF NOT EXISTS messages_by_desk ON messages (platform, desk_id);
       CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS media (token TEXT PRIMARY KEY, source_url TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -81,6 +91,21 @@ export class Store {
 
   setConversationStatus(platform: Platform, conversationId: number, status: string): void {
     this.db.prepare('UPDATE conversations SET status = ? WHERE platform = ? AND conversation_id = ?').run(status, platform, conversationId);
+  }
+
+  /** Platform message (eventId format) <-> desk message id, with its thread root (eventId format). */
+  putMessage(platform: Platform, extId: string, deskId: number, root: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO messages (platform, ext_id, desk_id, root, at) VALUES (?, ?, ?, ?, ?)').run(platform, extId, deskId, root, Date.now());
+  }
+
+  getMessageByExt(platform: Platform, extId: string): MessageRow | undefined {
+    const r = this.db.prepare('SELECT * FROM messages WHERE platform = ? AND ext_id = ?').get(platform, extId) as any;
+    return r ? { extId: r.ext_id, deskId: Number(r.desk_id), root: r.root } : undefined;
+  }
+
+  getMessageByDesk(platform: Platform, deskId: number): MessageRow | undefined {
+    const r = this.db.prepare('SELECT * FROM messages WHERE platform = ? AND desk_id = ? ORDER BY at LIMIT 1').get(platform, deskId) as any;
+    return r ? { extId: r.ext_id, deskId: Number(r.desk_id), root: r.root } : undefined;
   }
 
   getKv(key: string): string | undefined {

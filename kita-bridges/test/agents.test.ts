@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Bridge } from '../src/bridge.ts';
-import { ChatwootAppClient, toOutbound } from '../src/chatwoot.ts';
+import { ChatwootAppClient, KitaDeskClient, toOutbound } from '../src/chatwoot.ts';
 import { AgentConnect } from '../src/connect.ts';
 import { seal, unseal } from '../src/crypto.ts';
 import { signConnectLink, verifyConnectParams } from '../src/links.ts';
@@ -131,7 +131,20 @@ function appFake() {
   return { posts, app: new ChatwootAppClient('http://rails:3000', 'APP_TOKEN', '1', f) };
 }
 
-function bridgeWith(senderResult: any) {
+/** Fake desk staff_messages endpoint: only carmel@kita.ai / sam@kita.ai are agents. */
+function deskFake() {
+  const calls: { headers: any; body: any }[] = [];
+  let next = 7000;
+  const fetchImpl = (async (_url: any, init: any) => {
+    const body = JSON.parse(init.body);
+    calls.push({ headers: init.headers, body });
+    if (!['carmel@kita.ai', 'sam@kita.ai'].includes(body.email)) return Response.json({ error: 'no_agent' }, { status: 404 });
+    return Response.json({ id: next++, sender_id: 3 });
+  }) as typeof fetch;
+  return { calls, desk: new KitaDeskClient('https://support.internal.kita.ai', 'link-secret', fetchImpl) };
+}
+
+function bridgeWith(senderResult: any, desk?: KitaDeskClient) {
   const cw = fakeChatwoot();
   const store = new Store(':memory:');
   const { posts, app } = appFake();
@@ -139,7 +152,7 @@ function bridgeWith(senderResult: any) {
   (sender as any).send = async (ref: any, msg: any) => (sender.sent.push({ ref, msg }), senderResult);
   const inboxes = { slack: { inboxIdentifier: 'IN_SLACK' }, teams: { inboxIdentifier: 'IN_TEAMS' }, viber: { inboxIdentifier: 'IN_VIBER' } } as Record<Platform, { inboxIdentifier: string }>;
   const bridge = new Bridge({
-    store, chatwoot: cw.client, inboxes, senders: { slack: sender, teams: sender }, publicUrl: PUBLIC_URL, app, fetchImpl: cw.fetchImpl,
+    store, chatwoot: cw.client, inboxes, senders: { slack: sender, teams: sender }, publicUrl: PUBLIC_URL, app, desk, fetchImpl: cw.fetchImpl,
     connectLink: (a) => signConnectLink('link-secret', PUBLIC_URL, { id: a.id, email: a.email ?? 'x@kita.ai' }),
   });
   return { bridge, store, posts, sender, cw };
@@ -178,27 +191,59 @@ test('fallback not_member -> note asks to be added; normal sends post no note; a
   assert.equal(b.posts.filter((p) => p.body.private).length, 0);
 });
 
-test('staff typing directly in a mapped thread is mirrored as an outgoing agent message (never a customer message)', async () => {
-  const { bridge, posts, cw } = bridgeWith({ echoes: [] });
+test('staff typing directly in Slack with no matching desk agent: the bridge user posts it, name-prefixed (never a customer message)', async () => {
+  const { calls, desk } = deskFake();
+  const { bridge, posts, cw } = bridgeWith({ echoes: [] }, desk);
   await bridge.inbound(slackMsg('slack_top_level.json')); // customer opens conv 100
   const contactsBefore = cw.calls.filter((c) => c.path.endsWith('/contacts')).length;
-  assert.equal(await bridge.inbound(slackMsg('slack_internal_staff.json')), 'staff_synced');
+  assert.equal(await bridge.inbound({ ...slackMsg('slack_internal_staff.json'), userEmail: 'contractor@elsewhere.io' }), 'staff_synced');
+  assert.equal(calls.length, 1); // asked the desk first
   const synced = posts.at(-1)!;
-  assert.deepEqual(synced.body, { content: '**Sam Staff (in Slack):** internal chatter', message_type: 'outgoing', private: false, content_attributes: { kita_bridge_origin: true } });
+  assert.deepEqual(synced.body, {
+    content: '**Sam Staff (in Slack):** internal chatter', message_type: 'outgoing', private: false,
+    content_attributes: { external_source: 'slack', external_thread: { root: 'C0SHARED1:1790000000.000100' }, in_reply_to: 1, kita_bridge_origin: true },
+  });
   assert.equal(cw.calls.filter((c) => c.path.endsWith('/contacts')).length, contactsBefore); // no contact created
   // never echoed back: marker + its id pre-marked
   assert.equal(await bridge.outbound('slack', { ...agentReply(), id: 5001, content_attributes: { kita_bridge_origin: true } }), 'skip:external_echo');
   assert.equal(await bridge.outbound('slack', { ...agentReply(), id: 5001 }), 'skip:duplicate');
-  // a thread Kita starts is still a customer conversation: the channel becomes its contact
+  // a channel Kita starts is still a customer conversation: the channel becomes its contact
   const before = cw.calls.filter((c) => c.path.endsWith('/contacts')).length;
   const staffMsg = slackMsg('slack_internal_staff.json');
-  const attrs = { ...staffMsg.conversationAttributes, channel_label: '#kita-tala' };
-  assert.equal(await bridge.inbound({ ...staffMsg, eventId: 'x:1', threadKey: 'C9:1.0', conversationAttributes: attrs }), 'staff_synced');
+  const attrs = { ...staffMsg.conversationAttributes, channel_key: 'slack:C9', channel_label: '#kita-tala' };
+  assert.equal(await bridge.inbound({ ...staffMsg, eventId: 'C9:1.0', threadKey: 'C9', conversationAttributes: attrs }), 'staff_synced');
   const newContact = cw.calls.filter((c) => c.path.endsWith('/contacts'));
   assert.equal(newContact.length, before + 1);
   assert.equal(newContact.at(-1)!.body.name, '#kita-tala');
   assert.equal(posts.at(-1)!.body.message_type, 'outgoing');
 });
+
+test('staff typing directly in Slack is authored by the matching desk agent, with no name prefix', async () => {
+  const { calls, desk } = deskFake();
+  const { bridge, posts } = bridgeWith({ echoes: [] }, desk);
+  await bridge.inbound(slackMsg('slack_top_level.json'));
+  const postsBefore = posts.length;
+  assert.equal(await bridge.inbound({ ...slackMsg('slack_internal_staff.json'), userEmail: 'sam@kita.ai' }), 'staff_synced');
+  assert.equal(posts.length, postsBefore); // the bridge's own desk user posted nothing
+  assert.equal(calls[0].headers['x-kita-bridge-secret'], 'link-secret');
+  assert.deepEqual(calls[0].body, {
+    conversation_id: 100, email: 'sam@kita.ai', content: 'internal chatter',
+    content_attributes: { external_source: 'slack', external_thread: { root: 'C0SHARED1:1790000000.000100' }, in_reply_to: 1 },
+  });
+  // loop safety: the desk marks it kita_bridge_origin, and its desk id is pre-marked as ours
+  assert.equal(await bridge.outbound('slack', { ...agentReply(), id: 7000 }), 'skip:duplicate');
+  assert.equal(await bridge.outbound('slack', { ...agentReply(), id: 7000, content_attributes: { kita_bridge_origin: true } }), 'skip:external_echo');
+});
+
+test('staff typing in Slack without a known email (profile lookup failed) falls back to the bridge user', async () => {
+  const { calls, desk } = deskFake();
+  const { bridge, posts } = bridgeWith({ echoes: [] }, desk);
+  await bridge.inbound(slackMsg('slack_top_level.json'));
+  assert.equal(await bridge.inbound(slackMsg('slack_internal_staff.json')), 'staff_synced');
+  assert.equal(calls.length, 0);
+  assert.match(posts.at(-1)!.body.content, /^\*\*Sam Staff \(in Slack\):\*\* /);
+});
+
 
 test('loop safety: our own post from the agent account (echo id, fingerprint race, file ids) is never re-ingested', async () => {
   const { bridge, posts, store } = bridgeWith({ echoes: ['C0SHARED1:1790000300.000500', 'file:F77'] });
@@ -288,7 +333,7 @@ test('connect page: signed link required; shows Slack/Teams buttons; start endpo
   const good = new URL(signConnectLink('link-secret', PUBLIC_URL, { id: 3, email: 'carmel@kita.ai' })).searchParams;
   const page = c.page(good);
   assert.equal(page.status, 200);
-  assert.match(page.html, /Connect your Slack account/);
+  assert.match(page.html, /Connect Slack/);
   assert.doesNotMatch(page.html, /chatwoot/i);
   assert.match(c.start('slack', good)!, /^https:\/\/slack\.com\/oauth\/v2\/authorize\?/);
   assert.equal(c.start('slack', new URLSearchParams('a=3')), undefined);
