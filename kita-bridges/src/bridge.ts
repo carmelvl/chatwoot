@@ -52,7 +52,9 @@ function labelOf(msg: InboundMessage, channelKey: string, previous?: string): st
 }
 
 /** Conversation key: one per Grip account, else one per (not yet linked) channel. */
-export const conversationKey = (channelKey: string, sc?: ScopeChannel) => (sc?.account_id ? `account:${sc.account_id}` : `channel:${channelKey}`);
+/** One conversation per customer per platform: `account:<id>:<platform>` once Grip links the channel, else `channel:<key>`. */
+export const conversationKey = (channelKey: string, sc?: ScopeChannel, platform?: string) =>
+  sc?.account_id ? `account:${sc.account_id}:${platform ?? channelKey.split(':')[0]}` : `channel:${channelKey}`;
 
 /**
  * Letters/digits only, lowercased, URLs dropped: survives markdown <-> Slack mrkdwn / Teams HTML
@@ -148,8 +150,13 @@ export class Bridge {
     return conv;
   }
 
-  private accountOwner(sc: ScopeChannel): Owner {
-    return { identifier: `grip-account:${sc.account_id}`, name: sc.account_name || `Account ${sc.account_id}`, customAttributes: { grip_account_id: String(sc.account_id) } };
+  private accountOwner(sc: ScopeChannel, platform: string): Owner {
+    const name = sc.account_name || `Account ${sc.account_id}`;
+    return {
+      identifier: `grip-account:${sc.account_id}:${platform}`,
+      name: `${name} · ${PLATFORM_NAME[platform as keyof typeof PLATFORM_NAME] ?? platform}`,
+      customAttributes: { grip_account_id: String(sc.account_id), channel: platform },
+    };
   }
 
   /**
@@ -164,7 +171,7 @@ export class Bridge {
     const label = labelOf(msg, channelKey, prev?.label);
     const sc = this.scopeChannel(channelKey);
     if (sc?.account_id) await this.mergeChannel(channelKey, sc);
-    const threadKey = conversationKey(channelKey, sc);
+    const threadKey = conversationKey(channelKey, sc, msg.platform);
     let conv = store.getByThread(CUSTOMERS, threadKey);
     let result: InboundResult = 'appended';
     const now = Date.now();
@@ -174,7 +181,7 @@ export class Bridge {
     });
     if (!conv) {
       const owner = sc?.account_id
-        ? this.accountOwner(sc)
+        ? this.accountOwner(sc, msg.platform)
         : { identifier: `${msg.platform}-channel:${channelKey}`, name: label, customAttributes: { channel: msg.platform } };
       conv = await this.openConversation(threadKey, owner, [channel(0)], sc);
       result = 'created';
@@ -192,8 +199,9 @@ export class Bridge {
     const { store, desk } = this.d;
     const from = store.getByThread(CUSTOMERS, `channel:${channelKey}`);
     if (!from) return false;
-    const toKey = `account:${sc.account_id}`;
-    const to = store.getByThread(CUSTOMERS, toKey) ?? (await this.openConversation(toKey, this.accountOwner(sc), store.channelsFor(from.conversationId), sc));
+    const platform = channelKey.split(':')[0];
+    const toKey = conversationKey(channelKey, sc, platform);
+    const to = store.getByThread(CUSTOMERS, toKey) ?? (await this.openConversation(toKey, this.accountOwner(sc, platform), store.channelsFor(from.conversationId), sc));
     if (desk) {
       const { moved } = await desk.mergeConversations(from.conversationId, to.conversationId);
       log.info('conversation_merged', { from: from.conversationId, to: to.conversationId, moved });
@@ -444,6 +452,8 @@ export function conversationAttributes(channels: ChannelRow[], sc?: ScopeChannel
   }
   const primary = channels.find((c) => SENDABLE_PLATFORMS.includes(c.platform)) ?? channels[0];
   put('channel_key', primary?.channelKey);
+  // One conversation per customer per platform: the desk's badges, gating and Customers view read this.
+  put('channel', primary?.platform);
   out.kita_channels = JSON.stringify(channels.map((c) => ({ key: c.channelKey, platform: c.platform, label: c.label, sendable: SENDABLE_PLATFORMS.includes(c.platform) })));
   return out;
 }

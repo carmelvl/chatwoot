@@ -48,6 +48,17 @@ RSpec.describe 'Kita customers', type: :request do
     expect(rows.last).to include('name' => nil, 'platforms' => ['viber'])
   end
 
+  it 'aggregates one customer across its per-platform conversations by grip_account_id' do
+    %w[slack whatsapp].each do |platform|
+      conversation_for({ 'grip_account' => 'Kredit', 'grip_account_id' => '42', 'channel' => platform })
+    end
+
+    get path, headers: agent.create_new_auth_token, as: :json
+
+    kredit = response.parsed_body['payload'].find { |row| row['id'] == '42' }
+    expect(kredit).to include('name' => 'Kredit', 'platforms' => %w[slack whatsapp], 'open_count' => 2)
+  end
+
   it 'filters to my customers, matching the DRI email across Kita domain aliases' do
     get path, params: { mine: true }, headers: agent.create_new_auth_token, as: :json
     expect(response.parsed_body['payload'].pluck('id')).to eq(['Tala'])

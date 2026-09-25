@@ -1,6 +1,8 @@
 # Kita: customers (Grip accounts) derived from conversations, aggregated in SQL on
 # conversations.custom_attributes (grip_account, account_owner, account_owner_email, channel; set by
-# grip-sync and kita-bridges). Conversations with no grip_account are grouped as "Unlinked".
+# grip-sync and kita-bridges). A customer has one conversation per platform ("Tala · Slack", "Tala · WhatsApp"),
+# so rows group by grip_account_id (falling back to the grip_account name when only grip-sync has set it).
+# Conversations with neither are grouped as "Unlinked".
 # Row shape: {id, name, dri_name, dri_email, platforms[], open_count, waiting_on_us, last_activity_at};
 # the source can later become Grip's full customer list without changing it.
 class Kita::Customers
@@ -18,8 +20,10 @@ class Kita::Customers
     @conversations = conversations
   end
 
+  CUSTOMER_KEY = "COALESCE(conversations.custom_attributes->>'grip_account_id', conversations.custom_attributes->>'grip_account')".freeze
+
   def rows
-    grouped = @conversations.reorder(nil).group(Arel.sql("conversations.custom_attributes->>'grip_account'"))
+    grouped = @conversations.reorder(nil).group(Arel.sql(CUSTOMER_KEY))
     rows = grouped.pluck(*columns).map { |values| row(values) }
     rows.sort_by { |r| [r[:id] == UNLINKED_ID ? 1 : 0, -r[:last_activity_at].to_i] }
   end
@@ -29,7 +33,8 @@ class Kita::Customers
   def columns
     open = Conversation.statuses[:open]
     [
-      "conversations.custom_attributes->>'grip_account'",
+      CUSTOMER_KEY,
+      "MAX(conversations.custom_attributes->>'grip_account')",
       "MAX(conversations.custom_attributes->>'account_owner')",
       "MAX(conversations.custom_attributes->>'account_owner_email')",
       "ARRAY_REMOVE(ARRAY_AGG(DISTINCT conversations.custom_attributes->>'channel'), NULL)",
@@ -40,9 +45,9 @@ class Kita::Customers
   end
 
   def row(values)
-    name, dri_name, dri_email, platforms, open_count, waiting_on_us, last_activity_at = values
+    key, name, dri_name, dri_email, platforms, open_count, waiting_on_us, last_activity_at = values
     {
-      id: name.presence || UNLINKED_ID, name: name.presence, dri_name: dri_name, dri_email: dri_email,
+      id: key.presence || UNLINKED_ID, name: name.presence, dri_name: dri_name, dri_email: dri_email,
       platforms: platforms.sort, open_count: open_count, waiting_on_us: waiting_on_us, last_activity_at: last_activity_at&.to_i
     }
   end
