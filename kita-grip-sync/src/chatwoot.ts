@@ -39,7 +39,7 @@ export class ChatwootApi {
   private call(method: string, accountId: number, path: string, body?: unknown) {
     return requestJson(this.fetchImpl, `chatwoot ${method} ${path.replace(/\d+/g, ':id')}`, `${this.baseUrl}/api/v1/accounts/${accountId}/${path}`, {
       method,
-      headers: { api_access_token: this.token, 'content-type': 'application/json' },
+      headers: { 'api-access-token': this.token, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   }

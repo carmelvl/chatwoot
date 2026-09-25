@@ -116,7 +116,7 @@ test('tickets: created once with private note + label, then updated/escalated th
   const notes = w.of('rails', 'POST', /\/messages$/);
   assert.equal(notes.length, 1);
   assert.equal(notes[0].body.private, true, 'ticket notes are private, never customer-facing');
-  assert.equal(notes[0].headers.api_access_token, 'cw-bot-token');
+  assert.equal(notes[0].headers['api-access-token'], 'cw-bot-token');
   assert.ok(notes[0].body.content.includes('https://internal.kita.ai/tasks/t-1'));
   assert.deepEqual(w.labels.get(42), ['ticket']);
 
@@ -328,7 +328,7 @@ test('out of scope: resolved via toggle_status + label out-of-scope (existing la
   assert.equal(w.store.getJob('classify:42'), undefined, 'pending classification cancelled');
   const [toggle] = w.of('rails', 'POST', '/api/v1/accounts/1/conversations/42/toggle_status');
   assert.deepEqual(toggle.body, { status: 'resolved' });
-  assert.equal(toggle.headers.api_access_token, 'cw-bot-token');
+  assert.equal(toggle.headers['api-access-token'], 'cw-bot-token');
   assert.equal(w.statuses.get(42), 'resolved');
   assert.deepEqual(w.labels.get(42), ['vip', 'out-of-scope']);
   w.advance(10 * 60 * 1000);

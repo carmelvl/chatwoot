@@ -124,7 +124,7 @@ function appFake() {
     const url = String(u);
     if (url.endsWith('/agents')) return Response.json([{ id: 3, thumbnail: 'https://support.internal.kita.ai/rails/active_storage/avatar3.png' }]);
     const body = init.body instanceof FormData ? Object.fromEntries([...init.body.entries()].map(([k, v]) => [k, typeof v === 'string' ? v : (v as File).name])) : JSON.parse(init.body);
-    assert.equal(init.headers.api_access_token, 'APP_TOKEN');
+    assert.equal(init.headers['api-access-token'], 'APP_TOKEN');
     posts.push({ path: new URL(url).pathname, body });
     return Response.json({ id: ++id });
   }) as typeof fetch;

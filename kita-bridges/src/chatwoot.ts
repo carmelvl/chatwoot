@@ -161,7 +161,7 @@ export class ChatwootAppClient {
         body: JSON.stringify({ content: m.content, message_type: 'outgoing', private: m.private, content_attributes: attrs }),
       };
     }
-    init.headers = { ...(init.headers as Record<string, string>), api_access_token: this.token };
+    init.headers = { ...(init.headers as Record<string, string>), 'api-access-token': this.token };
     const res = await this.fetchImpl(`${this.base}/conversations/${conversationId}/messages`, init);
     if (!res.ok) throw new Error(`chatwoot app api messages -> ${res.status}`);
     const j: any = await res.json();
@@ -170,7 +170,7 @@ export class ChatwootAppClient {
 
   /** Every agent in the account (agents#index): id, email, name, confirmed, role. Throws on HTTP errors. */
   async listAgents(): Promise<{ id: number; email?: string; name?: string; confirmed?: boolean; role?: string; type?: string }[]> {
-    const res = await this.fetchImpl(`${this.base}/agents`, { headers: { api_access_token: this.token } });
+    const res = await this.fetchImpl(`${this.base}/agents`, { headers: { 'api-access-token': this.token } });
     if (!res.ok) throw new Error(`chatwoot app api agents -> ${res.status}`);
     const list: any = await res.json();
     return Array.isArray(list) ? list : [];
@@ -179,7 +179,7 @@ export class ChatwootAppClient {
   /** Agent avatar (thumbnail) by Chatwoot user id; cached for an hour. */
   async avatarUrl(agentId: number): Promise<string | undefined> {
     if (!this.agents || Date.now() - this.agents.at > 3600_000) {
-      const res = await this.fetchImpl(`${this.base}/agents`, { headers: { api_access_token: this.token } });
+      const res = await this.fetchImpl(`${this.base}/agents`, { headers: { 'api-access-token': this.token } });
       if (!res.ok) return undefined;
       const list: any[] = await res.json();
       this.agents = { at: Date.now(), byId: new Map(list.map((a) => [Number(a.id), a.thumbnail || undefined])) };

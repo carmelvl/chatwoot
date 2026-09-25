@@ -91,7 +91,7 @@ function world() {
   let id = 7000;
   const appFetch = (async (u: any, init: any) => {
     const body = init.body instanceof FormData ? { content: init.body.get('content'), private: init.body.get('private') === 'true', files: init.body.getAll('attachments[]').map((f: any) => f.name) } : JSON.parse(init.body);
-    appPosts.push({ token: init.headers.api_access_token, conv: String(u).split('/conversations/')[1].split('/')[0], body });
+    appPosts.push({ token: init.headers['api-access-token'], conv: String(u).split('/conversations/')[1].split('/')[0], body });
     return Response.json({ id: ++id });
   }) as typeof fetch;
   const app = new ChatwootAppClient('http://rails:3000', 'BRIDGE_TOKEN', '1', appFetch);

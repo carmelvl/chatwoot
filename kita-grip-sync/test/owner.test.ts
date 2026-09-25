@@ -21,8 +21,8 @@ test('owner: unassigned conversation is assigned to the DRI agent (email match i
   const [a] = assigns(w);
   assert.equal(a.path, '/api/v1/accounts/1/conversations/42/assignments');
   assert.deepEqual(a.body, { assignee_id: 11 }, 'Rhea@Kita.ai in Chatwoot matches rhea@kita.ai from Grip');
-  assert.equal(a.headers.api_access_token, 'cw-bot-token');
-  assert.equal(w.of('rails', 'GET', '/api/v1/accounts/1/agents')[0].headers.api_access_token, 'cw-admin-token');
+  assert.equal(a.headers['api-access-token'], 'cw-bot-token');
+  assert.equal(w.of('rails', 'GET', '/api/v1/accounts/1/agents')[0].headers['api-access-token'], 'cw-admin-token');
   const [attrs] = attrWrites(w);
   assert.deepEqual(attrs.body, {
     merge: true,
