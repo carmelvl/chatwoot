@@ -1,0 +1,153 @@
+# Kita support desk STAGING (staging.support.internal.kita.ai), development mode.
+# Code is bind-mounted from the checkout (/opt/chatwoot-staging, branch `staging`), so a
+# `git pull` is picked up live: Rails autoreloads Ruby, vite serves frontend changes,
+# the Node bridges run under `node --watch`. See docs/kita-staging.md.
+# Secrets live in .env / .env.caddy on the instance (fresh, never prod's), never here.
+#
+#   docker compose -f docker-compose.staging.yaml build base   # one-time dev image
+#   docker compose -f docker-compose.staging.yaml up -d
+name: kita-staging
+
+x-app: &app
+  image: chatwoot:development
+  env_file: .env
+  restart: unless-stopped
+  tty: true
+  stdin_open: true
+  volumes:
+    - ./:/app
+    - node_modules:/app/node_modules
+    - packs:/app/public/packs
+    - cache:/app/tmp/cache
+    - gems:/gems # dev gems baked into the image; persisted so `bundle install` sticks
+    - storage:/app/storage
+
+x-bridge: &bridge
+  image: node:24-alpine
+  restart: unless-stopped
+  working_dir: /app
+  depends_on: [rails]
+  command: ['node', '--watch', '--disable-warning=ExperimentalWarning', 'src/server.ts']
+
+services:
+  # Build-only: the upstream dev image (docker/Dockerfile with development args).
+  base:
+    <<: *app
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+      args:
+        BUNDLE_WITHOUT: ''
+        EXECJS_RUNTIME: 'Node'
+        RAILS_ENV: 'development'
+        RAILS_SERVE_STATIC_FILES: 'false'
+    profiles: [build]
+    restart: 'no'
+
+  rails:
+    <<: *app
+    depends_on: [postgres, redis, vite, mailhog]
+    environment:
+      - NODE_ENV=development
+      - RAILS_ENV=development
+      - DISABLE_ENTERPRISE=true
+      - VITE_RUBY_HOST=vite
+    entrypoint: ['sh', 'docker/entrypoints/rails.sh']
+    command: ['bundle', 'exec', 'rails', 's', '-p', '3000', '-b', '0.0.0.0']
+
+  sidekiq:
+    <<: *app
+    depends_on: [postgres, redis, mailhog]
+    environment:
+      - NODE_ENV=development
+      - RAILS_ENV=development
+      - DISABLE_ENTERPRISE=true
+    command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
+
+  vite:
+    <<: *app
+    environment:
+      - NODE_ENV=development
+      - RAILS_ENV=development
+      - VITE_RUBY_HOST=0.0.0.0
+      # Rails proxies /vite-dev/* to http://vite:3036; let vite accept that Host header.
+      - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=vite
+    entrypoint: ['sh', 'docker/entrypoints/vite.sh']
+    command: ['bin/vite', 'dev']
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - POSTGRES_DB=chatwoot
+      - POSTGRES_USER=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    command: ['sh', '-c', 'redis-server --requirepass "$$REDIS_PASSWORD"']
+    env_file: .env
+    volumes:
+      - redis_data:/data
+
+  # Catches every outgoing email (SMTP_ADDRESS=mailhog). Not published: staging never emails anyone.
+  mailhog:
+    image: mailhog/mailhog
+    restart: unless-stopped
+
+  # Staging bridges/grip-sync: NO platform or Grip credentials, so they never message
+  # customers or write to Grip. Only non-secret settings are set here.
+  bridges:
+    <<: *bridge
+    volumes:
+      - ./kita-bridges:/app:ro
+      - bridges_data:/data
+    environment:
+      - PORT=8080
+      - CHATWOOT_BASE_URL=http://rails:3000
+      - BRIDGE_PUBLIC_URL=https://staging.support.internal.kita.ai/bridges
+      - BRIDGE_DB_PATH=/data/bridges.sqlite
+      - GRIP_BASE_URL=
+      - TEAM_SYNC=off
+
+  grip-sync:
+    <<: *bridge
+    volumes:
+      - ./kita-grip-sync:/app:ro
+      - grip_sync_data:/data
+    environment:
+      - PORT=8080
+      - CHATWOOT_BASE_URL=http://rails:3000
+      - CHATWOOT_PUBLIC_URL=https://staging.support.internal.kita.ai
+      - GRIP_SYNC_DB_PATH=/data/grip-sync.sqlite
+      - GRIP_BASE_URL=http://grip.invalid # never the real Grip, even if a key were added
+      - AUTO_TICKETS=false
+      - OWNER_SYNC=false
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [rails, bridges, grip-sync]
+    env_file: .env.caddy # BASIC_AUTH_USER / BASIC_AUTH_HASH (bcrypt), root-only
+    ports:
+      - '80:80'
+      - '443:443'
+      - '127.0.0.1:8080:8080' # plain-HTTP, on-box checks only (SSM)
+    volumes:
+      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  node_modules:
+  packs:
+  cache:
+  gems:
+  storage:
+  postgres_data:
+  redis_data:
+  bridges_data:
+  grip_sync_data:
+  caddy_data:

@@ -1,0 +1,25 @@
+# Kita support desk STAGING. Basic auth covers the whole site (UI, API, /cable, /bridges, /grip-sync).
+# BASIC_AUTH_USER / BASIC_AUTH_HASH come from .env.caddy on the instance.
+(staging) {
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+	handle_path /bridges/* {
+		reverse_proxy bridges:8080
+	}
+	handle_path /grip-sync/* {
+		reverse_proxy grip-sync:8080
+	}
+	handle {
+		reverse_proxy rails:3000
+	}
+}
+
+staging.support.internal.kita.ai {
+	import staging
+}
+
+# Plain HTTP, published on 127.0.0.1:8080 only, for on-box checks over SSM.
+http://:8080 {
+	import staging
+}
