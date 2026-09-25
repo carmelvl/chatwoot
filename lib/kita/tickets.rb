@@ -66,15 +66,19 @@ class Kita::Tickets
   end
 
   def row(thread)
-    conversation = thread.conversation
+    {
+      id: thread.id, root_message_id: thread.root_message_id, ticket_id: thread.ticket_id, display_id: thread.ticket_display_id,
+      title: thread.title.presence || thread.root_message&.content.to_s.truncate(120), url: thread.ticket_url,
+      priority: thread.ticket_priority, status: thread.ticket_status || 'open', owner: thread.ticket_owner,
+      created_at: thread.created_at.to_i, updated_at: thread.updated_at.to_i
+    }.merge(customer(thread.conversation))
+  end
+
+  def customer(conversation)
     attrs = conversation.custom_attributes || {}
     {
-      id: thread.id, root_message_id: thread.root_message_id, conversation_id: conversation.display_id, ticket_id: thread.ticket_id,
-      display_id: thread.ticket_display_id, title: thread.title.presence || thread.root_message&.content.to_s.truncate(120),
-      url: thread.ticket_url, priority: thread.ticket_priority, status: thread.ticket_status || 'open', owner: thread.ticket_owner,
-      platform: attrs['channel'], customer_id: @row_ids[conversation.id],
-      customer_name: attrs['grip_account'].presence || ::Kita::Customers.display_label(attrs['channel_label'], attrs['channel']),
-      created_at: thread.created_at.to_i, updated_at: thread.updated_at.to_i
+      conversation_id: conversation.display_id, platform: attrs['channel'], customer_id: @row_ids[conversation.id],
+      customer_name: attrs['grip_account'].presence || ::Kita::Customers.display_label(attrs['channel_label'], attrs['channel'])
     }
   end
 end

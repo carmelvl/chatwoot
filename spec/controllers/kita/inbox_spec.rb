@@ -93,7 +93,7 @@ RSpec.describe 'Kita inbox', type: :request do
   it 'clears needs reply when a phone reply is marked' do
     incoming(tala_whatsapp)
     post "/api/v1/accounts/#{account.id}/kita/account_actions", params: { ids: ['7'], action_name: 'replied_from_phone' },
-                                                                 headers: agent.create_new_auth_token
+                                                                headers: agent.create_new_auth_token
     expect(fetch(scope: 'all')['payload'].first['section']).to eq('active')
   end
 
@@ -115,7 +115,7 @@ RSpec.describe 'Kita inbox', type: :request do
     expect(ids(scope: 'unassigned')).to eq(['7', '9', unlinked_id])
   end
 
-  it 'filters by status, platform, team, labels, stage, DRI, tickets and conversation type' do
+  it 'filters by status, platform, team, labels, stage and DRI' do
     expect(ids(scope: 'all', status: 'resolved')).to eq([website_id])
     expect(ids(scope: 'all', platform: 'whatsapp')).to eq(['7'])
     expect(ids(scope: 'all', stage: 'Production')).to eq(['7'])
@@ -127,7 +127,9 @@ RSpec.describe 'Kita inbox', type: :request do
 
     amartha.update!(label_list: ['billing'])
     expect(ids(scope: 'all', labels: ['billing'])).to eq(['9'])
+  end
 
+  it 'filters by tickets and conversation type' do
     ticket(amartha, 'high')
     expect(ids(scope: 'all', ticket_priority: 'high', ticket_status: 'open')).to eq(['9'])
 
@@ -137,7 +139,7 @@ RSpec.describe 'Kita inbox', type: :request do
 
   it 'archives "Not a customer" rows into Other' do
     post "/api/v1/accounts/#{account.id}/kita/account_actions", params: { ids: [unlinked_id], action_name: 'not_customer' },
-                                                                 headers: agent.create_new_auth_token
+                                                                headers: agent.create_new_auth_token
     expect(ids(scope: 'all')).not_to include(unlinked_id)
     expect(ids(scope: 'all', status: 'other')).to eq([unlinked_id])
   end

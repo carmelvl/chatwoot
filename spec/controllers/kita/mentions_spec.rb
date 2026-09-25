@@ -37,7 +37,7 @@ RSpec.describe 'Kita mentions', type: :request do
     expect(response.parsed_body['payload'].pluck('id')).to eq(['7'])
 
     get "/api/v1/accounts/#{account.id}/kita/customers/lookup", params: { conversation_id: conversation.display_id },
-                                                                   headers: rhea.create_new_auth_token
+                                                                headers: rhea.create_new_auth_token
     expect(response.parsed_body).to include('id' => '7', 'name' => 'Tala')
   end
 end

@@ -14,6 +14,9 @@ const meta = {
   ],
 };
 
+// The Inbox children only carry params; ConversationView renders them all
+const RouteStub = { render: () => null };
+
 // Kita: the Inbox is the one work list (a row per customer); a row opens the
 // customer view on a platform tab, optionally with a thread open.
 const inboxProps = route => ({
@@ -24,27 +27,26 @@ const inboxProps = route => ({
 
 export const routes = [
   {
+    // One route record, so the list stays mounted while rows open and close
     path: frontendURL('accounts/:accountId/inbox'),
-    name: 'kita_inbox',
     component: ConversationView,
     props: inboxProps,
     meta,
-  },
-  {
-    path: frontendURL('accounts/:accountId/inbox/customer/:customerId/:tab?'),
-    name: 'kita_inbox_customer',
-    component: ConversationView,
-    props: inboxProps,
-    meta,
-  },
-  {
-    path: frontendURL(
-      'accounts/:accountId/inbox/customer/:customerId/:tab/thread/:threadId'
-    ),
-    name: 'kita_inbox_thread',
-    component: ConversationView,
-    props: inboxProps,
-    meta,
+    children: [
+      { path: '', name: 'kita_inbox', component: RouteStub, meta },
+      {
+        path: 'customer/:customerId/:tab?',
+        name: 'kita_inbox_customer',
+        component: RouteStub,
+        meta,
+      },
+      {
+        path: 'customer/:customerId/:tab/thread/:threadId',
+        name: 'kita_inbox_thread',
+        component: RouteStub,
+        meta,
+      },
+    ],
   },
   {
     path: frontendURL('accounts/:accountId/customers'),
