@@ -18,7 +18,7 @@ RSpec.describe 'Kita mentions', type: :request do
   end
 
   it 'notifies the mentioned teammate and lists the customer under their Mine and Mentions' do
-    perform_enqueued_jobs(only: EventDispatcherJob) do
+    perform_enqueued_jobs(only: [EventDispatcherJob, Conversations::UserMentionJob]) do
       post "/api/v1/accounts/#{account.id}/conversations/#{conversation.display_id}/messages",
            params: { content: "[@Rhea Malhotra](mention://user/#{rhea.id}/Rhea%20Malhotra) can you check batch 14?", private: true },
            headers: carmel.create_new_auth_token, as: :json

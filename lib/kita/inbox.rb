@@ -145,11 +145,16 @@ class Kita::Inbox
   def filter_attributes(scope)
     scope = scope.where(team_id: @params[:team_id]) if @params[:team_id].present?
     scope = scope.where(inbox_id: @params[:inbox_id]) if @params[:inbox_id].present?
-    scope = scope.tagged_with(Array(@params[:labels]), any: true) if @params[:labels].present?
+    scope = scope.where(id: labelled(Array(@params[:labels])).select(:taggable_id)) if @params[:labels].present?
     scope = scope.where("conversations.custom_attributes->>'grip_stage' = ?", @params[:stage]) if @params[:stage].present?
     return scope if @params[:dri].blank?
 
     scope.where("LOWER(conversations.custom_attributes->>'account_owner_email') = ?", @params[:dri].to_s.downcase)
+  end
+
+  # Conversations with any of the labels (taggings; tagged_with's own select can't be a subquery)
+  def labelled(labels)
+    ActsAsTaggableOn::Tagging.joins(:tag).where(taggable_type: 'Conversation', context: 'labels', tags: { name: labels })
   end
 
   def filter_tickets(scope)
