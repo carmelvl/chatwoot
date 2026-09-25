@@ -66,7 +66,7 @@ const mountMessage = props =>
           template: '<span data-test="avatar">{{ name }}</span>',
         },
         MessageMeta: {
-          props: ['compact'],
+          props: { compact: Boolean },
           template: '<time data-test="meta" :data-compact="compact" />',
         },
         FormattedContent: {
