@@ -45,15 +45,15 @@ const onClick = event => {
     :title="label"
     :class="{
       // Kita forest sidebar (Paper S02/S03): white at 72%, active on white/10
-      'text-white bg-white/10': isActive && !hasActiveChild,
+      'text-white bg-white/[0.12]': isActive && !hasActiveChild,
       'text-white': hasActiveChild,
-      'text-white/70 hover:bg-white/5 hover:text-white':
+      'text-white/[0.72] hover:bg-white/5 hover:text-white':
         !isActive && !hasActiveChild,
     }"
     @click.stop="onClick"
   >
     <div v-if="icon" class="relative flex items-center gap-2">
-      <Icon v-if="icon" :icon="icon" class="size-4" />
+      <Icon v-if="icon" :icon="icon" class="size-[1.125rem]" />
       <span
         v-if="showBadge"
         class="size-2 -top-px ltr:-right-px rtl:-left-px bg-n-brand absolute rounded-full border border-n-solid-2"

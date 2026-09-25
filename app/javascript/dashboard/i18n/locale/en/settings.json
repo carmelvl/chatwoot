@@ -426,7 +426,8 @@
     "CAPTAIN_AI": "Captain",
     "CONVERSATION_WORKFLOW": "Conversation Workflow",
     "MORE": "More",
-    "MENTIONS": "Mentions"
+    "MENTIONS": "Mentions",
+    "NEW_CONVERSATION": "New conversation"
   },
   "DATA_IMPORTS": {
     "HEADER": "Data",

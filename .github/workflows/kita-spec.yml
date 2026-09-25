@@ -57,6 +57,9 @@ jobs:
           app/javascript/dashboard/routes/dashboard/dashboard.routes.js
           app/javascript/dashboard/components-next/sidebar/Sidebar.vue
           app/javascript/dashboard/components-next/sidebar/SidebarGroupHeader.vue
+          app/javascript/dashboard/components-next/sidebar/SidebarProfileMenu.vue
+          app/javascript/dashboard/helper/kitaSidebar.js
+          app/javascript/dashboard/helper/specs/kitaSidebar.spec.js
           app/javascript/dashboard/components-next/message/MessageStrip.vue
           app/javascript/dashboard/components-next/message/helpers/*.js
           app/javascript/dashboard/components-next/message/helpers/specs/*.js
@@ -103,6 +106,7 @@ jobs:
           app/javascript/dashboard/helper/specs/kitaRedirects.spec.js
           app/javascript/dashboard/helper/specs/kitaTickets.spec.js
           app/javascript/dashboard/helper/specs/kitaNotifications.spec.js
+          app/javascript/dashboard/helper/specs/kitaSidebar.spec.js
           app/javascript/dashboard/store/modules/specs/kitaInbox
           app/javascript/dashboard/components-next/message app/javascript/dashboard/components-next/kita
           app/javascript/dashboard/components/widgets/conversation

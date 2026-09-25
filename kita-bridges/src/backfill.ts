@@ -32,7 +32,22 @@ export interface BackfillDeps {
   /** BACKFILL_MAX_DAYS; 0 / undefined = the whole history. */
   maxDays?: number;
   now?: () => number;
+  /** Delays of the in-process retries after a retryable failure (default 30s, 2m, 10m). */
+  retryDelaysMs?: number[];
+  /** Schedules a retry (default: an unref'd setTimeout). */
+  schedule?: (fn: () => void, ms: number) => void;
 }
+
+export const RETRY_DELAYS_MS = [30_000, 120_000, 600_000];
+
+/**
+ * A failure worth retrying on its own: the desk or platform had a 5xx or 429 (e.g. a 502 during a desk
+ * deploy), or the network dropped. 4xx answers and bugs are not retried.
+ */
+export const isRetryableError = (error: string) =>
+  /-> (5\d\d|429)\b|\b(5\d\d|429)\b.*(bad gateway|unavailable|timeout|too many)|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|network/i.test(
+    error,
+  );
 
 export type BackfillOutcome = BackfillState | 'no_runner';
 
@@ -50,6 +65,8 @@ export class Backfiller {
   private d: BackfillDeps;
   private tail: Promise<unknown> = Promise.resolve();
   private pending = new Map<string, Promise<BackfillOutcome>>();
+  /** Retries already made per channel since its last success (in-process backoff). */
+  private retries = new Map<string, number>();
 
   constructor(d: BackfillDeps) {
     this.d = d;
@@ -76,7 +93,10 @@ export class Backfiller {
     return Promise.all(rows.map((b) => this.request(b.platform, b.channelKey, b.ref)));
   }
 
-  /** Interrupted or failed runs (bridge restarted mid-import, platform outage): resume from their cursor. */
+  /**
+   * Interrupted or failed runs (bridge restarted mid-import, platform outage, a desk 5xx): resume from
+   * their cursor. Called by every reconcile, so a failed backfill is never left behind.
+   */
   resumeUnfinished(): Promise<BackfillOutcome[]> {
     const rows = [...this.d.store.listBackfills('running'), ...this.d.store.listBackfills('failed')];
     return Promise.all(rows.map((b) => this.request(b.platform, b.channelKey, b.ref)));
@@ -124,14 +144,32 @@ export class Backfiller {
     try {
       await runner(ctx);
       store.putBackfill({ ...row, state: 'completed', completedAt: now(), error: undefined });
+      this.retries.delete(channelKey);
       log.info('backfill_completed', { platform, channel_key: channelKey, imported: row.imported });
       return 'completed';
     } catch (e: any) {
       const error = String(e?.message ?? e);
       store.putBackfill({ ...row, state: 'failed', error });
       log.error('backfill_failed', { platform, channel_key: channelKey, imported: row.imported, error });
+      this.scheduleRetry(platform, channelKey, row.ref, error);
       return 'failed';
     }
+  }
+
+  /** After a retryable failure, runs the channel again from its cursor: 30s, then 2m, then 10m. */
+  private scheduleRetry(platform: Platform, channelKey: string, ref: Record<string, unknown>, error: string) {
+    if (!isRetryableError(error)) return;
+    const delays = this.d.retryDelaysMs ?? RETRY_DELAYS_MS;
+    const attempt = this.retries.get(channelKey) ?? 0;
+    if (attempt >= delays.length) {
+      log.warn('backfill_retries_exhausted', { platform, channel_key: channelKey, attempts: attempt });
+      return;
+    }
+    this.retries.set(channelKey, attempt + 1);
+    const ms = delays[attempt];
+    log.info('backfill_retry_scheduled', { platform, channel_key: channelKey, attempt: attempt + 1, in_ms: ms });
+    const schedule = this.d.schedule ?? ((fn, wait) => setTimeout(fn, wait).unref());
+    schedule(() => void this.request(platform, channelKey, ref).catch(() => undefined), ms);
   }
 }
 

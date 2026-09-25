@@ -13,7 +13,6 @@ import { vOnClickOutside } from '@vueuse/components';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 import { useWindowSize, useEventListener } from '@vueuse/core';
 
-import Button from 'dashboard/components-next/button/Button.vue';
 import SidebarGroup from './SidebarGroup.vue';
 import SidebarProfileMenu from './SidebarProfileMenu.vue';
 import SidebarChangelogCard from './SidebarChangelogCard.vue';
@@ -24,6 +23,7 @@ import EmojiIcon from 'next/emoji-icon-picker/EmojiIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
 import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
 import KitaNotificationBell from 'dashboard/components-next/kita/KitaNotificationBell.vue';
+import { myCustomerItems } from 'dashboard/helper/kitaSidebar';
 import {
   SIDEBAR_SORT_SECTIONS,
   getSidebarSortOptions,
@@ -278,8 +278,30 @@ watch(
 );
 onUnmounted(() => clearInterval(needsReplyTimer));
 
-// Kita: saved views (Chatwoot custom views) as children under Inbox
 const route = useRoute();
+
+// Kita: MY CUSTOMERS, the linked customers I own (up to 8), under the nav
+const myCustomers = useMapGetter('kitaCustomers/getMyCustomers');
+watch(
+  accountId,
+  id => {
+    if (id) store.dispatch('kitaCustomers/get', { mine: true }).catch(() => {});
+  },
+  { immediate: true }
+);
+const myCustomerLinks = computed(() =>
+  myCustomerItems(myCustomers.value).map(customer => ({
+    ...customer,
+    to: {
+      name: 'kita_inbox_customer',
+      params: { accountId: accountId.value, customerId: customer.id },
+      query: { scope: 'all' },
+    },
+    active: String(route.params.customerId) === customer.id,
+  }))
+);
+
+// Kita: saved views (Chatwoot custom views) as children under Inbox
 const savedViewLinks = computed(() =>
   conversationCustomViews.value.map(view => ({
     id: view.id,
@@ -1067,27 +1089,28 @@ const settingsMenuItem = computed(() => findMenuItem('Settings'));
   >
     <section
       class="grid"
-      :class="isEffectivelyCollapsed ? 'mt-3 mb-6 gap-4' : 'mt-1 mb-4 gap-2'"
+      :class="
+        isEffectivelyCollapsed ? 'mt-3 mb-6 gap-4' : 'px-4 pt-6 mb-6 gap-4'
+      "
     >
+      <!-- One gutter (Paper S03): 16px to every box, 12px more to content -->
       <RouterLink
         v-if="!isEffectivelyCollapsed"
         :to="accountScopedRoute('kita_inbox')"
-        class="px-2 pt-4 pb-2 w-fit"
+        class="block ps-3 pb-2 w-fit"
+        data-test="kita-sidebar-logo"
       >
         <img
           :src="KITA_LOGO_DARK"
           :alt="t('SIDEBAR.KITA_INBOX')"
-          class="w-auto h-8"
+          class="w-[7.5rem] h-auto"
         />
       </RouterLink>
       <!-- One account: the logo already says Kita, so the account name would repeat it. -->
       <div
         v-if="isEffectivelyCollapsed || userAccounts.length > 1"
         class="flex gap-2 items-center min-w-0"
-        :class="{
-          'justify-center px-1': isEffectivelyCollapsed,
-          'px-2': !isEffectivelyCollapsed,
-        }"
+        :class="{ 'justify-center px-1': isEffectivelyCollapsed }"
       >
         <template v-if="isEffectivelyCollapsed">
           <SidebarAccountSwitcher
@@ -1097,53 +1120,50 @@ const settingsMenuItem = computed(() => findMenuItem('Settings'));
         </template>
         <template v-else>
           <SidebarAccountSwitcher
-            class="flex-grow -mx-1 min-w-0"
+            class="flex-grow min-w-0"
             @show-create-account-modal="emit('showCreateAccountModal')"
           />
         </template>
       </div>
       <div
-        class="flex gap-2"
-        :class="isEffectivelyCollapsed ? 'flex-col items-center' : 'px-2'"
+        class="flex items-center gap-1"
+        :class="{ 'flex-col': isEffectivelyCollapsed }"
+        data-test="kita-sidebar-search-row"
       >
         <RouterLink
           v-if="!isEffectivelyCollapsed"
           :to="{ name: 'search' }"
-          class="flex gap-2 items-center px-2 py-1 w-full h-7 rounded-lg outline outline-1 outline-n-weak bg-n-button-color transition-all duration-100 ease-out"
+          class="flex items-center flex-1 min-w-0 gap-2 px-3 border rounded-lg h-9 me-1 bg-white/[0.08] border-white/[0.12] text-white/60 hover:bg-white/[0.12]"
         >
-          <span class="flex-shrink-0 i-lucide-search size-4 text-n-slate-10" />
-          <span class="flex-grow text-start text-n-slate-10">
+          <span class="flex-shrink-0 i-lucide-search size-4" />
+          <span class="flex-grow truncate text-start">
             {{ t('COMBOBOX.SEARCH_PLACEHOLDER') }}
           </span>
-          <span
-            class="hidden tracking-wide pointer-events-none select-none text-n-slate-10"
-          >
+          <span class="hidden tracking-wide pointer-events-none select-none">
             {{ searchShortcut }}
           </span>
         </RouterLink>
         <RouterLink
           v-else
           :to="{ name: 'search' }"
-          class="flex items-center justify-center size-8 rounded-lg outline outline-1 outline-n-weak bg-n-button-color transition-all duration-100 ease-out hover:bg-n-alpha-2 dark:hover:bg-n-slate-9/30"
+          class="grid rounded-lg size-9 place-content-center text-white/80 hover:bg-white/10 hover:text-white"
           :title="t('COMBOBOX.SEARCH_PLACEHOLDER')"
         >
-          <span class="i-lucide-search size-4 text-n-slate-11" />
+          <span class="i-lucide-search size-[1.125rem]" />
         </RouterLink>
-        <KitaNotificationBell :is-collapsed="isEffectivelyCollapsed" />
+        <KitaNotificationBell />
         <ComposeConversation align="start">
           <template #trigger="{ isOpen }">
-            <Button
-              icon="i-lucide-pen-line"
-              color="slate"
-              size="sm"
-              class="dark:hover:!bg-n-slate-9/30"
-              :class="[
-                isEffectivelyCollapsed
-                  ? '!size-8 !outline-n-weak !text-n-slate-11'
-                  : '!h-7 !outline-n-weak !text-n-slate-11',
-                { '!bg-n-alpha-2 dark:!bg-n-slate-9/30': isOpen },
-              ]"
-            />
+            <button
+              type="button"
+              data-test="kita-sidebar-compose"
+              class="grid rounded-lg size-9 place-content-center text-white/80 hover:bg-white/10 hover:text-white"
+              :class="{ 'bg-white/10 text-white': isOpen }"
+              :title="t('SIDEBAR.NEW_CONVERSATION')"
+              :aria-label="t('SIDEBAR.NEW_CONVERSATION')"
+            >
+              <span class="i-lucide-pen-line size-[1.125rem]" />
+            </button>
           </template>
         </ComposeConversation>
       </div>
@@ -1186,6 +1206,31 @@ const settingsMenuItem = computed(() => findMenuItem('Settings'));
           </li>
         </template>
       </ul>
+      <template v-if="myCustomerLinks.length && !isEffectivelyCollapsed">
+        <p
+          class="px-3 pt-6 pb-2 m-0 text-[0.6875rem] leading-[0.875rem] font-bold tracking-[0.12em] uppercase text-white/50"
+        >
+          {{ t('SIDEBAR.MY_CUSTOMERS') }}
+        </p>
+        <ul
+          data-test="kita-my-customers"
+          class="flex flex-col gap-0.5 m-0 list-none min-w-0"
+        >
+          <li v-for="customer in myCustomerLinks" :key="customer.id">
+            <RouterLink
+              :to="customer.to"
+              class="flex items-center h-8 px-3 text-sm truncate rounded-lg"
+              :class="
+                customer.active
+                  ? 'bg-white/[0.12] text-white'
+                  : 'text-white/[0.72] hover:bg-white/5 hover:text-white'
+              "
+            >
+              <span class="truncate">{{ customer.name }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+      </template>
     </nav>
     <section
       class="flex relative flex-col flex-shrink-0 gap-1 justify-between items-center"
@@ -1196,8 +1241,8 @@ const settingsMenuItem = computed(() => findMenuItem('Settings'));
       <ul
         v-if="settingsMenuItem"
         data-test="kita-settings-menu"
-        class="flex flex-col w-full gap-1 px-2 pb-1 m-0 list-none min-w-0"
-        :class="{ 'items-center px-1': isEffectivelyCollapsed }"
+        class="flex flex-col w-full gap-1 px-4 pb-3 m-0 list-none min-w-0"
+        :class="{ 'items-center !px-1': isEffectivelyCollapsed }"
       >
         <SidebarGroup v-bind="settingsMenuItem" />
       </ul>
@@ -1216,8 +1261,8 @@ const settingsMenuItem = computed(() => findMenuItem('Settings'));
         "
       />
       <div
-        class="px-1 py-1.5 flex-shrink-0 flex w-full z-50 gap-2 items-center border-t border-n-weak shadow-[0px_-2px_4px_0px_rgba(27,28,29,0.02)]"
-        :class="isEffectivelyCollapsed ? 'justify-center' : 'justify-between'"
+        class="flex z-50 items-center flex-shrink-0 w-full gap-2 py-3 border-t border-white/10"
+        :class="isEffectivelyCollapsed ? 'justify-center px-1' : 'px-4'"
       >
         <SidebarProfileMenu
           :is-collapsed="isEffectivelyCollapsed"

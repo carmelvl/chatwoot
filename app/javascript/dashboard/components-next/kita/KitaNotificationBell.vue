@@ -14,10 +14,6 @@ import {
 // Kita: mentions and assignment notifications (Chatwoot's notifications) in
 // the sidebar header. Each opens its conversation in the unified view; the
 // Mentions filter also opens the Inbox on mentioned conversations.
-defineProps({
-  isCollapsed: { type: Boolean, default: false },
-});
-
 const { t } = useI18n();
 const store = useStore();
 const router = useRouter();
@@ -79,17 +75,16 @@ const mentionsRoute = computed(() => ({
   >
     <button
       type="button"
-      class="relative flex items-center justify-center rounded-lg outline outline-1 outline-n-weak bg-n-button-color hover:bg-n-alpha-2 dark:hover:bg-n-slate-9/30"
-      :class="isCollapsed ? 'size-8' : 'size-7'"
+      class="relative grid rounded-lg size-9 place-content-center text-white/80 hover:bg-white/10 hover:text-white"
       :title="t('KITA_BELL.TITLE')"
       :aria-label="t('KITA_BELL.TITLE')"
       @click="toggle"
     >
-      <span class="i-lucide-bell size-4 text-n-slate-11" />
+      <span class="i-lucide-bell size-[1.125rem]" />
       <span
         v-if="unreadCount"
         data-test="kita-bell-count"
-        class="absolute -top-1.5 -end-1.5 grid px-1 text-[0.625rem] font-semibold text-white rounded-full min-w-4 h-4 place-content-center bg-n-ruby-9"
+        class="absolute top-0.5 end-0.5 grid px-1 text-[0.625rem] font-bold rounded-full min-w-4 h-4 place-content-center bg-white text-woot-800"
       >
         {{ unreadCount > 99 ? '99+' : unreadCount }}
       </span>

@@ -14,6 +14,7 @@ export const state = {
 
 export const getters = {
   getCustomers: $state => scope => $state.records[scope] || [],
+  getMyCustomers: $state => $state.records.mine,
   // The freshest copy: fetched on its own, else from a list already loaded
   getCustomer: ($state, _getters, _rootState, rootGetters) => id =>
     $state.byId[id] ??

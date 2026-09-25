@@ -86,10 +86,10 @@ const backfillSlack = (channel: string) => backfiller?.request('slack', `slack:$
 /** Every channel the bot is in with no backfill recorded yet (joined while the bridge was down, or before this feature). */
 const reconcileSlack = async () => {
   if (!backfiller || !slackHistory) return;
-  await backfiller.resumeUnfinished();
+  const resumed = await backfiller.resumeUnfinished();
   const channels = (await slackHistory.memberChannels()).filter((c) => !cfg.slack.allowedChannels.length || cfg.slack.allowedChannels.includes(c));
   const missing = channels.filter((c) => !backfiller!.known(`slack:${c}`));
-  log.info('slack_backfill_reconcile', { member_of: channels.length, missing: missing.length });
+  log.info('slack_backfill_reconcile', { member_of: channels.length, missing: missing.length, resumed: resumed.length });
   for (const c of missing) await backfillSlack(c);
 };
 const onSlackJoin = async (channel: string, user: string, self?: boolean) => {
