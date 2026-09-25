@@ -654,7 +654,9 @@ provideMessageContext({
     :class="[
       {
         'group-with-next mb-1': shouldGroupWithNext,
-        'mb-4': !shouldGroupWithNext,
+        'mb-4': !shouldGroupWithNext && !isFlat,
+        // Slack/Teams groups breathe like a channel (Paper S03: 28px)
+        'mb-7': !shouldGroupWithNext && isFlat,
         'bg-n-alpha-1': showBackgroundHighlight,
         'bg-woot-25 dark:bg-n-alpha-2 rounded-xl px-4 py-3.5': isOpenThreadRoot,
       },
@@ -777,7 +779,6 @@ provideMessageContext({
         >
           {{ mirrorFooter }}
         </p>
-
       </div>
     </div>
     <MessageStrip

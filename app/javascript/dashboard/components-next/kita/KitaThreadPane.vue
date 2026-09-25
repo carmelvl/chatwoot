@@ -148,11 +148,17 @@ const sendReply = async () => {
     class="flex flex-col h-full overflow-hidden fixed top-0 z-40 w-full max-w-sm ltr:right-0 rtl:left-0 md:static md:max-w-none md:w-[400px] md:min-w-[400px] ltr:border-l rtl:border-r border-n-weak bg-n-surface-2 shadow-lg md:shadow-none"
     data-test-id="kita-thread-pane"
   >
-    <div class="flex flex-col gap-4 px-7 pt-7 pb-6 border-b border-n-weak">
+    <div
+      class="flex flex-col gap-4 px-7 pt-[1.625rem] pb-[1.375rem] border-b border-n-weak"
+    >
       <div class="flex items-start gap-2">
         <div class="flex flex-col flex-1 min-w-0 gap-3">
-          <span class="text-sm truncate text-n-slate-11">{{ location }}</span>
-          <h3 class="m-0 text-2xl font-bold font-interDisplay text-n-slate-12">
+          <span class="text-[0.8125rem] leading-4 truncate text-n-slate-11">
+            {{ location }}
+          </span>
+          <h3
+            class="m-0 text-[1.375rem] leading-7 tracking-[-0.02em] font-bold font-interDisplay text-n-slate-12"
+          >
             {{ title }}
           </h3>
         </div>
@@ -168,13 +174,15 @@ const sendReply = async () => {
       <div
         v-if="ticket"
         data-test="kita-ticket-card"
-        class="flex flex-col gap-3 px-4 py-3 rounded-lg border-s-4 bg-n-surface-1 shadow-sm"
+        class="flex flex-col gap-2.5 px-4 py-3.5 rounded-lg border-s-[3px] bg-n-surface-1"
         :class="
           isPressingTicket(ticket) ? 'border-n-ruby-9' : 'border-n-amber-9'
         "
       >
-        <div class="flex items-center justify-between gap-2 text-sm">
-          <span class="font-medium text-n-slate-12">
+        <div class="flex items-baseline justify-between gap-2">
+          <span
+            class="text-[0.8125rem] leading-4 font-semibold text-n-slate-12"
+          >
             {{
               ticket.display_id
                 ? t('KITA_THREADS.TICKET_WITH_ID', { id: ticket.display_id })
@@ -183,7 +191,7 @@ const sendReply = async () => {
           </span>
           <span
             v-if="ticket.priority"
-            class="font-medium"
+            class="text-xs font-semibold"
             :class="
               isPressingTicket(ticket) ? 'text-n-ruby-11' : 'text-n-amber-11'
             "
@@ -191,17 +199,21 @@ const sendReply = async () => {
             {{ t(`KITA_THREADS.PRIORITY.${ticket.priority}`) }}
           </span>
         </div>
-        <dl v-if="ticketFields.length" class="flex gap-6 m-0 text-sm">
+        <dl v-if="ticketFields.length" class="flex gap-6 m-0">
           <div v-for="field in ticketFields" :key="field.key">
             <dt class="text-xs text-n-slate-11">
               {{ t(`KITA_THREADS.TICKET_CARD.${field.key}`) }}
             </dt>
-            <dd class="m-0 mt-1 text-n-slate-12">{{ field.value }}</dd>
+            <dd
+              class="m-0 mt-0.5 text-[0.8125rem] leading-4 font-medium text-n-slate-12"
+            >
+              {{ field.value }}
+            </dd>
           </div>
         </dl>
       </div>
     </div>
-    <ul class="flex-1 min-h-0 px-7 py-5 m-0 overflow-y-auto">
+    <ul class="flex-1 min-h-0 px-7 py-6 m-0 overflow-y-auto">
       <li v-if="!root" class="py-2 text-xs text-n-slate-11">
         {{ t('KITA_THREADS.NOT_LOADED') }}
       </li>
@@ -239,10 +251,11 @@ const sendReply = async () => {
       :platform="platform"
       :reason="replyBlock"
       :show-note-action="false"
+      class="!mx-7 !mb-3"
     />
     <div v-else class="px-7 pt-3">
       <div
-        class="flex items-end gap-2 p-2 rounded-xl outline outline-1 outline-n-weak bg-n-surface-1"
+        class="flex items-end gap-2 py-2 ps-3.5 pe-2 rounded-xl outline outline-1 outline-n-weak bg-n-surface-1"
       >
         <TextArea
           v-model="reply"
@@ -262,12 +275,14 @@ const sendReply = async () => {
         />
       </div>
     </div>
-    <div class="flex items-center justify-between gap-2 px-7 pt-3 pb-5 text-sm">
+    <div
+      class="flex items-center justify-between gap-2 px-7 pt-3 pb-6 text-[0.8125rem] font-medium"
+    >
       <button
         v-if="thread"
         type="button"
         data-test="kita-thread-status-action"
-        class="font-medium text-n-blue-11 hover:underline"
+        class="text-n-brand hover:underline"
         @click="toggleStatus"
       >
         {{ statusActionLabel }}
@@ -277,7 +292,7 @@ const sendReply = async () => {
         :href="ticket.url"
         target="_blank"
         rel="noopener noreferrer"
-        class="flex items-center gap-1 ms-auto text-n-slate-12 hover:underline"
+        class="flex items-center gap-1 ms-auto text-n-slate-11 hover:underline"
       >
         {{ t('KITA_THREADS.OPEN_IN_GRIP') }}
         <span class="i-lucide-arrow-up-right size-3.5" />

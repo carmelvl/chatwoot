@@ -125,7 +125,7 @@ const onMenu = ({ action }) => {
     data-test="kita-inbox-row"
     role="button"
     tabindex="0"
-    class="relative flex flex-col gap-1 px-3 py-3 cursor-pointer group rounded-xl kita-inbox-row"
+    class="relative flex flex-col gap-1 p-3 cursor-pointer group rounded-[0.625rem] kita-inbox-row"
     :class="[
       active
         ? 'bg-woot-25 dark:bg-n-alpha-2 active'
@@ -148,7 +148,9 @@ const onMenu = ({ action }) => {
         v-if="selected"
         class="i-lucide-check-square size-3.5 shrink-0 text-n-brand"
       />
-      <span class="text-sm font-semibold truncate text-n-slate-12">
+      <span
+        class="text-sm leading-[1.125rem] font-semibold truncate text-n-slate-12"
+      >
         {{ row.name || t('KITA_INBOX.UNNAMED') }}
       </span>
       <span
@@ -179,7 +181,8 @@ const onMenu = ({ action }) => {
         />
       </span>
       <span
-        class="text-sm truncate text-n-slate-11"
+        class="text-[0.8125rem] leading-[1.1875rem] truncate"
+        :class="active ? 'text-n-slate-12' : 'text-n-slate-11'"
         data-test="kita-inbox-preview"
       >
         {{ preview }}

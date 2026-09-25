@@ -502,6 +502,10 @@ export default {
       return {
         'is-private': this.isPrivate,
         'is-focused': this.isFocused || this.hasAttachments,
+        // Kita customer conversations (Paper S03): inset like the messages;
+        // a gated composer is just the gate panel
+        'is-kita': !!this.currentChat?.custom_attributes?.channel,
+        'is-gated': this.kitaReplyGated,
       };
     },
     hasAttachments() {
@@ -1728,6 +1732,14 @@ export default {
 
   &.is-private {
     @apply bg-n-solid-amber dark:border-n-amber-3/10 border-n-amber-12/5;
+  }
+
+  &.is-kita {
+    @apply mx-10 mb-6 shadow-sm;
+  }
+
+  &.is-gated {
+    @apply border-0 bg-transparent shadow-none;
   }
 }
 

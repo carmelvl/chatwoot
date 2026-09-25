@@ -86,13 +86,13 @@ export const kitaBubbleClass = ({ style, orientation, variant }) => {
   if (![LAYOUT_STYLES.FLAT, LAYOUT_STYLES.MIRROR].includes(style)) return null;
   const isRight = orientation === ORIENTATION.RIGHT;
   if (isRight) {
-    return 'kita-bubble-own right-bubble px-3.5 py-2.5 rounded-[1.125rem] ltr:rounded-br-md rtl:rounded-bl-md bg-n-brand text-white [&_.prose]:!text-white [&_a]:!text-white';
+    return 'kita-bubble-own right-bubble !text-[0.9375rem] !leading-[1.375rem] px-3.5 py-2.5 rounded-[1.125rem] ltr:rounded-br-md rtl:rounded-bl-md bg-n-brand text-white [&_.prose]:!text-white [&_a]:!text-white';
   }
   const tone =
     variant === MESSAGE_VARIANTS.TEAMMATE
       ? 'kita-bubble-teammate bg-woot-50 dark:bg-woot-800/60'
       : 'kita-bubble-external bg-n-slate-3';
-  return `left-bubble px-3.5 py-2.5 rounded-[1.125rem] ltr:rounded-bl-md rtl:rounded-br-md text-n-slate-12 ${tone}`;
+  return `left-bubble !text-[0.9375rem] !leading-[1.375rem] px-3.5 py-2.5 rounded-[1.125rem] ltr:rounded-bl-md rtl:rounded-br-md text-n-slate-12 ${tone}`;
 };
 
 export const getMessageLayout = ({

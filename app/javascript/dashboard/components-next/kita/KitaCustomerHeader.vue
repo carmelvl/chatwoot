@@ -77,6 +77,7 @@ const subline = computed(() => {
   }
   const count = tabs.value.length;
   return [
+    customer.stage,
     customer.dri_name || customer.dri_email
       ? t('KITA_CUSTOMERS.OWNED_BY', { name: driLabel(customer) })
       : null,
@@ -140,35 +141,30 @@ const linkModal = ref(null);
 
 <template>
   <header
-    class="px-10 pt-7 border-b border-n-weak"
+    class="px-10 pt-[1.625rem] border-b border-n-weak"
     data-test-id="kita-customer-header"
   >
     <div class="flex items-start justify-between gap-4">
-      <div class="min-w-0">
-        <div class="flex items-center gap-3 min-w-0">
-          <h2
-            class="m-0 text-3xl font-bold truncate font-interDisplay text-n-slate-12"
-          >
-            {{ customer?.name || '' }}
-          </h2>
-          <span
-            v-if="customer?.stage"
-            class="px-2 py-0.5 text-xs font-medium rounded-full bg-woot-50 text-woot-700 dark:bg-n-alpha-2 dark:text-n-slate-12 shrink-0"
-          >
-            {{ customer.stage }}
-          </span>
-        </div>
-        <p v-if="subline" class="mt-1 mb-0 text-sm text-n-slate-11">
+      <div class="flex flex-col min-w-0 gap-1.5">
+        <h2
+          class="m-0 text-[1.75rem] leading-8 tracking-[-0.025em] font-bold truncate font-interDisplay text-n-slate-12"
+        >
+          {{ customer?.name || '' }}
+        </h2>
+        <p
+          v-if="subline"
+          class="m-0 text-[0.8125rem] leading-4 whitespace-pre-wrap text-n-slate-11"
+        >
           {{ subline }}
         </p>
       </div>
-      <div class="flex items-center gap-3 shrink-0">
+      <div class="flex items-center gap-2 shrink-0">
         <a
           v-if="gripUrl"
           :href="gripUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-sm font-medium text-n-slate-12 hover:underline"
+          class="flex items-center h-9 px-3.5 text-sm font-medium rounded-lg text-n-slate-12 hover:bg-n-alpha-1"
         >
           {{ t('KITA_CUSTOMERS.OPEN_IN_GRIP') }}
         </a>
@@ -200,6 +196,9 @@ const linkModal = ref(null);
           v-if="hasOpenConversation"
           :label="t('KITA_INBOX.RESOLVE_ALL')"
           size="sm"
+          variant="outline"
+          color="slate"
+          class="!h-9 !px-4 font-semibold"
           data-test-id="kita-resolve-all"
           @click="resolveAll"
         />
@@ -217,7 +216,7 @@ const linkModal = ref(null);
         />
       </div>
     </div>
-    <nav class="flex gap-7 mt-5 -mb-px overflow-x-auto no-scrollbar">
+    <nav class="flex gap-7 mt-[1.125rem] -mb-px overflow-x-auto no-scrollbar">
       <button
         v-for="item in tabs"
         :key="item.key"
@@ -226,7 +225,7 @@ const linkModal = ref(null);
         class="flex items-center gap-1.5 pb-3 text-sm border-b-2 shrink-0"
         :class="
           item.key === tab
-            ? 'font-medium text-n-slate-12 border-n-slate-12'
+            ? 'font-semibold text-n-slate-12 border-n-slate-12'
             : 'text-n-slate-11 border-transparent hover:text-n-slate-12'
         "
         @click="openTab(item.key)"
@@ -242,7 +241,10 @@ const linkModal = ref(null);
           class="size-4 text-n-slate-11"
         />
         <span>{{ item.title }}</span>
-        <span v-if="item.detail" class="font-normal text-n-slate-11">
+        <span
+          v-if="item.detail"
+          class="text-[0.8125rem] font-normal text-n-slate-11"
+        >
           {{ item.detail }}
         </span>
         <span
@@ -259,7 +261,7 @@ const linkModal = ref(null);
         class="flex items-center gap-1.5 pb-3 text-sm border-b-2 shrink-0"
         :class="
           tab === TICKETS_TAB
-            ? 'font-medium text-n-slate-12 border-n-slate-12'
+            ? 'font-semibold text-n-slate-12 border-n-slate-12'
             : 'text-n-slate-11 border-transparent hover:text-n-slate-12'
         "
         @click="openTab(TICKETS_TAB)"

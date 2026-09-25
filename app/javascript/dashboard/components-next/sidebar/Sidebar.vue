@@ -1150,10 +1150,10 @@ const settingsMenuItem = computed(() => findMenuItem('Settings'));
     </section>
     <nav
       class="grid content-start overflow-y-scroll flex-grow gap-2 pb-5 no-scrollbar min-w-0"
-      :class="isEffectivelyCollapsed ? 'px-1' : 'px-2'"
+      :class="isEffectivelyCollapsed ? 'px-1' : 'px-4'"
     >
       <ul
-        class="flex flex-col gap-1 m-0 list-none min-w-0"
+        class="flex flex-col gap-0.5 m-0 list-none min-w-0"
         :class="{ 'items-center': isEffectivelyCollapsed }"
       >
         <template v-for="item in primaryMenuItems" :key="item.name">
@@ -1172,11 +1172,11 @@ const settingsMenuItem = computed(() => findMenuItem('Settings'));
               <li v-for="view in savedViewLinks" :key="view.id">
                 <RouterLink
                   :to="view.to"
-                  class="flex items-center h-7 px-2 text-sm truncate rounded-lg"
+                  class="flex items-center h-8 px-3 text-sm truncate rounded-lg"
                   :class="
                     view.active
-                      ? 'bg-n-alpha-2 text-n-slate-12 font-medium'
-                      : 'text-n-slate-11 hover:bg-n-alpha-1 hover:text-n-slate-12'
+                      ? 'bg-white/10 text-white'
+                      : 'text-white/70 hover:bg-white/5 hover:text-white'
                   "
                 >
                   {{ view.name }}

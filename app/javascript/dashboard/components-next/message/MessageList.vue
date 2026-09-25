@@ -1,7 +1,9 @@
 <script setup>
 import { computed, reactive, watch } from 'vue';
 import Message from './Message.vue';
+import { useI18n } from 'vue-i18n';
 import { groupsWithPrevious } from './helpers/messageLayout';
+import { dayDivider } from './helpers/dayDivider';
 import { useCamelCase } from 'dashboard/composables/useTransformKeys';
 import { useMapGetter } from 'dashboard/composables/store.js';
 import MessageApi from 'dashboard/api/inbox/message.js';
@@ -47,6 +49,12 @@ const props = defineProps({
 const emit = defineEmits(['retry']);
 
 const currentChat = useMapGetter('getSelectedChat');
+const { t } = useI18n();
+const dayLabel = divider =>
+  divider.key === 'date'
+    ? divider.date
+    : t(`CONVERSATION.KITA_DAY.${divider.key.toUpperCase()}`);
+
 const conversationChannel = computed(
   () => currentChat.value?.custom_attributes?.channel ?? null
 );
@@ -168,9 +176,27 @@ const getInReplyToMessage = parentMessage => {
 </script>
 
 <template>
-  <ul class="px-4 bg-n-surface-1">
+  <ul
+    class="bg-n-surface-1"
+    :class="conversationChannel ? 'px-10 py-7' : 'px-4'"
+  >
     <slot name="beforeAll" />
     <template v-for="(message, index) in allMessages" :key="message.id">
+      <li
+        v-if="
+          conversationChannel && dayDivider(message, allMessages[index - 1])
+        "
+        data-test="message-day-divider"
+        class="flex items-center gap-3 mb-7 list-none"
+      >
+        <span class="flex-1 h-px bg-n-weak" />
+        <span
+          class="text-[0.6875rem] leading-[0.875rem] font-bold tracking-[0.12em] uppercase text-n-slate-11"
+        >
+          {{ dayLabel(dayDivider(message, allMessages[index - 1])) }}
+        </span>
+        <span class="flex-1 h-px bg-n-weak" />
+      </li>
       <slot
         v-if="firstUnreadId && message.id === firstUnreadId"
         name="unreadBadge"

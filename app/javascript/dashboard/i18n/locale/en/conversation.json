@@ -448,6 +448,10 @@
         "chat": "channel or chat"
       },
       "MIRROR": "{platform} is a mirror — reply from your phone. Nothing typed here is sent to the customer."
+    },
+    "KITA_DAY": {
+      "TODAY": "Today",
+      "YESTERDAY": "Yesterday"
     }
   },
   "EMAIL_TRANSCRIPT": {
