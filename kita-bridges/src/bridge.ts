@@ -142,9 +142,20 @@ export class Bridge {
   private async staffInbound(msg: InboundMessage): Promise<InboundResult> {
     const { store, app } = this.d;
     if (this.isOurEcho(msg)) return 'duplicate';
-    const conv = store.getByThread(msg.platform, msg.threadKey);
-    if (!conv || !app) return 'ignored';
-    if (conv.status === 'resolved' && msg.newConversationIfResolved) return 'ignored';
+    if (!app) return 'ignored';
+    let conv = store.getByThread(msg.platform, msg.threadKey);
+    if (!conv || (conv.status === 'resolved' && msg.newConversationIfResolved)) {
+      // Kita started this thread: still a customer conversation. Its contact is the customer channel
+      // itself (e.g. "#kita-tala"), so Grip links it to the account and later customer replies join it.
+      const channelKey = msg.conversationAttributes?.channel_key ?? msg.threadKey;
+      const label = msg.conversationAttributes?.channel_label ?? channelKey;
+      ({ conv } = await this.ensureConversation({
+        ...msg,
+        userKey: `channel:${channelKey}`,
+        userName: label,
+        contactIdentifier: `${msg.platform}-channel:${channelKey}`,
+      }));
+    }
     const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
     const content = composeInboundText(msg.text, `${msg.userName ?? msg.userKey} (in ${PLATFORM_NAME[msg.platform]})`, failed.map((f) => f.url));
     const created = await app.createMessage(conv.conversationId, { content, private: false, files });

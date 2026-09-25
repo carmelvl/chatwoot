@@ -216,6 +216,23 @@ export class SlackSender implements Sender {
       return undefined;
     }
   }
+
+  private channels = new Map<string, string>();
+  /** Best-effort "#channel-name" (channels:read / groups:read); undefined when unknown. */
+  async channelName(channelId: string): Promise<string | undefined> {
+    if (this.channels.has(channelId)) return this.channels.get(channelId);
+    try {
+      const res = await this.fetchImpl(`https://slack.com/api/conversations.info?channel=${encodeURIComponent(channelId)}`, {
+        headers: { authorization: `Bearer ${this.token}` },
+      });
+      const j: any = await res.json();
+      const name = j.channel?.name ? `#${j.channel.name}` : undefined;
+      if (name) this.channels.set(channelId, name);
+      return name;
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 /** Scopes an agent grants so replies post as them (user token). */

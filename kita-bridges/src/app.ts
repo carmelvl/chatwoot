@@ -166,7 +166,11 @@ export function createHandler(d: AppDeps) {
         if (parsed.kind === 'message') {
           const m = parsed.message;
           if (bridge.outOfScope(m)) return; // before the Slack user lookup or any Chatwoot call
-          background('slack_inbound', (async () => bridge.inbound({ ...m, userName: (await d.slack?.userName(m.userKey)) ?? m.userKey }))());
+          background('slack_inbound', (async () => {
+            const channelLabel = await d.slack?.channelName(String(m.replyRef.channel ?? ''));
+            const attrs = channelLabel ? { ...m.conversationAttributes, channel_label: channelLabel } : m.conversationAttributes;
+            return bridge.inbound({ ...m, conversationAttributes: attrs, userName: (await d.slack?.userName(m.userKey)) ?? m.userKey });
+          })());
         }
         return;
       }

@@ -189,8 +189,15 @@ test('staff typing directly in a mapped thread is mirrored as an outgoing agent 
   // never echoed back: marker + its id pre-marked
   assert.equal(await bridge.outbound('slack', { ...agentReply(), id: 5001, content_attributes: { kita_bridge_origin: true } }), 'skip:external_echo');
   assert.equal(await bridge.outbound('slack', { ...agentReply(), id: 5001 }), 'skip:duplicate');
-  // staff chatter in an unmapped thread is ignored
-  assert.equal(await bridge.inbound({ ...slackMsg('slack_internal_staff.json'), eventId: 'x:1', threadKey: 'C9:1.0' }), 'ignored');
+  // a thread Kita starts is still a customer conversation: the channel becomes its contact
+  const before = cw.calls.filter((c) => c.path.endsWith('/contacts')).length;
+  const staffMsg = slackMsg('slack_internal_staff.json');
+  const attrs = { ...staffMsg.conversationAttributes, channel_label: '#kita-tala' };
+  assert.equal(await bridge.inbound({ ...staffMsg, eventId: 'x:1', threadKey: 'C9:1.0', conversationAttributes: attrs }), 'staff_synced');
+  const newContact = cw.calls.filter((c) => c.path.endsWith('/contacts'));
+  assert.equal(newContact.length, before + 1);
+  assert.equal(newContact.at(-1)!.body.name, '#kita-tala');
+  assert.equal(posts.at(-1)!.body.message_type, 'outgoing');
 });
 
 test('loop safety: our own post from the agent account (echo id, fingerprint race, file ids) is never re-ingested', async () => {
