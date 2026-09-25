@@ -19,9 +19,9 @@ class Kita::Customers
   end
 
   def rows
-    @conversations.reorder(nil).group(Arel.sql("conversations.custom_attributes->>'grip_account'")).pluck(*columns).map do |values|
-      row(*values)
-    end.sort_by { |r| [r[:id] == UNLINKED_ID ? 1 : 0, -r[:last_activity_at].to_i] }
+    grouped = @conversations.reorder(nil).group(Arel.sql("conversations.custom_attributes->>'grip_account'"))
+    rows = grouped.pluck(*columns).map { |values| row(values) }
+    rows.sort_by { |r| [r[:id] == UNLINKED_ID ? 1 : 0, -r[:last_activity_at].to_i] }
   end
 
   private
@@ -39,7 +39,8 @@ class Kita::Customers
     ].map { |sql| Arel.sql(sql) }
   end
 
-  def row(name, dri_name, dri_email, platforms, open_count, waiting_on_us, last_activity_at)
+  def row(values)
+    name, dri_name, dri_email, platforms, open_count, waiting_on_us, last_activity_at = values
     {
       id: name.presence || UNLINKED_ID, name: name.presence, dri_name: dri_name, dri_email: dri_email,
       platforms: platforms.sort, open_count: open_count, waiting_on_us: waiting_on_us, last_activity_at: last_activity_at&.to_i

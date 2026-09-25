@@ -20,7 +20,8 @@ class Api::V1::Accounts::Kita::CustomersController < Api::V1::Accounts::BaseCont
 
   # Chatwoot filters only custom attributes that have a definition (grip-sync normally creates it).
   def ensure_owner_email_attribute
-    Current.account.custom_attribute_definitions.find_or_create_by!(attribute_key: 'account_owner_email', attribute_model: :conversation_attribute) do |d|
+    definitions = Current.account.custom_attribute_definitions
+    definitions.find_or_create_by!(attribute_key: 'account_owner_email', attribute_model: :conversation_attribute) do |d|
       d.attribute_display_name = 'Account owner email'
       d.attribute_display_type = :text
     end

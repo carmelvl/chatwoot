@@ -63,8 +63,8 @@ RSpec.describe 'Kita customers', type: :request do
     expect(view).to have_attributes(user: agent, name: 'My customers', filter_type: 'conversation')
     expect(view.query['payload'].pluck('values')).to eq([['suraaj@kita.ai'], ['suraaj@usekita.com']])
 
-    post "/api/v1/accounts/#{account.id}/conversations/filter", params: { payload: view.query['payload'] },
-                                                                  headers: agent.create_new_auth_token, as: :json
+    post "/api/v1/accounts/#{account.id}/conversations/filter",
+         params: { payload: view.query['payload'] }, headers: agent.create_new_auth_token, as: :json
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body['payload'].map { |c| c['custom_attributes']['grip_account'] }.uniq).to eq(['Tala'])
   end
