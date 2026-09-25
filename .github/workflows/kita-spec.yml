@@ -40,6 +40,9 @@ jobs:
           app/javascript/dashboard/helper/kitaConnect.js
           app/javascript/dashboard/helper/specs/kitaConnect.spec.js
           app/javascript/dashboard/components-next/kita/*.vue
+          app/javascript/dashboard/components-next/kita/specs/*.js
+          app/javascript/dashboard/composables/useKitaConnections.js
+          app/javascript/dashboard/components/widgets/conversation/ReplyBox.vue
           app/javascript/dashboard/components-next/message/Message.vue
           app/javascript/dashboard/components-next/message/MessageList.vue
           app/javascript/dashboard/components-next/message/MessageSenderAvatar.vue
@@ -48,7 +51,8 @@ jobs:
           app/javascript/dashboard/routes/dashboard/Dashboard.vue
           app/javascript/shared/constants/busEvents.js
           && pnpm exec vitest run app/javascript/dashboard/helper/specs/kitaConnect.spec.js
-          app/javascript/dashboard/components-next/message
+          app/javascript/dashboard/components-next/message app/javascript/dashboard/components-next/kita
+          app/javascript/dashboard/components/widgets/conversation
       - name: Bridge tests
         run: cd kita-bridges && npm test
       - uses: ruby/setup-ruby@v1

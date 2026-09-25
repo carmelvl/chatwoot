@@ -1126,9 +1126,8 @@
   },
   "KITA_CONNECT": {
     "TITLE": "Connect your accounts",
-    "DESCRIPTION": "Link your Slack and Teams accounts so replies you send from Kita go out under your own name.",
+    "DESCRIPTION": "Connect Slack and Teams to reply there. Replies go out under your own name, and nothing is sent until you connect.",
     "CONNECT": "Connect",
-    "SKIP": "Skip for now",
     "CLOSE": "Close",
     "STATUS_UNAVAILABLE": "Connection status is unavailable right now. Try again in a moment.",
     "PLATFORMS": {
@@ -1144,7 +1143,12 @@
     },
     "WHATSAPP_DESCRIPTION": "Your WhatsApp Business number is linked by an admin (QR scan).",
     "WHATSAPP_NOT_LINKED": "Not linked",
-    "VIBER_DESCRIPTION": "Replies go out through the Kita Viber bot with your name. There's no personal link.",
-    "SENT_VIA": "Sent via {platform}"
+    "VIBER_DESCRIPTION": "Replies go out through the Kita Viber bot. Viber has no personal accounts for businesses, so there's no personal link.",
+    "SENT_VIA": "Sent via {platform}",
+    "REPLY_GATE": {
+      "TITLE": "Connect your {platform} account to reply here",
+      "UNAVAILABLE": "{platform} replies aren't available yet",
+      "DESCRIPTION": "Replies are only ever sent from your own account. Private notes still work."
+    }
   }
 }

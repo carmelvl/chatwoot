@@ -16,6 +16,9 @@ import ArticleSearchPopover from 'dashboard/routes/dashboard/helpcenter/componen
 import CopilotEditorSection from './CopilotEditorSection.vue';
 import MessageSignatureMissingAlert from './MessageSignatureMissingAlert.vue';
 import ReplyBoxBanner from './ReplyBoxBanner.vue';
+import KitaReplyGate from 'dashboard/components-next/kita/KitaReplyGate.vue';
+import { useKitaConnections } from 'dashboard/composables/useKitaConnections';
+import { kitaReplyBlock } from 'dashboard/helper/kitaConnect';
 import QuotedEmailPreview from './QuotedEmailPreview.vue';
 import { REPLY_EDITOR_MODES } from 'dashboard/components/widgets/WootWriter/constants';
 import WootMessageEditor from 'dashboard/components/widgets/WootWriter/Editor.vue';
@@ -71,6 +74,7 @@ export default {
     AttachmentPreview,
     AudioRecorder,
     ReplyBoxBanner,
+    KitaReplyGate,
     EmojiIconPicker,
     MessageSignatureMissingAlert,
     ReplyBottomPanel,
@@ -96,6 +100,7 @@ export default {
 
     const messageEditor = useTemplateRef('messageEditor');
     const copilot = useCopilotReply();
+    const { status: kitaConnections } = useKitaConnections();
     const macroExecution = useMacroExecution();
     const shortcutKey = useKbd(['$mod', '+', 'enter']);
 
@@ -158,6 +163,7 @@ export default {
       copilot,
       shortcutKey,
       macroExecution,
+      kitaConnections,
     };
   },
   data() {
@@ -249,6 +255,16 @@ export default {
         !this.isBotOwnedPendingConversation &&
         !this.isInstagramReplyRestricted
       );
+    },
+    // Kita: Slack/Teams public replies need the agent's own connected account
+    kitaReplyBlockReason() {
+      return kitaReplyBlock(
+        this.kitaConnections,
+        this.currentChat?.custom_attributes?.channel
+      );
+    },
+    kitaReplyGated() {
+      return !!this.kitaReplyBlockReason && !this.isOnPrivateNote;
     },
     isInstagramReplyRestricted() {
       return this.isMetaMessageSendingDisabled && this.isAnInstagramChannel;
@@ -954,6 +970,7 @@ export default {
           });
     },
     async onSendReply() {
+      if (this.kitaReplyGated) return;
       const undefinedVariables = getUndefinedVariablesInMessage({
         message: this.message,
         variables: this.messageVariables,
@@ -1360,7 +1377,13 @@ export default {
       @insert="handleInsert"
       @close="onSearchPopoverClose"
     />
+    <KitaReplyGate
+      v-if="kitaReplyGated"
+      :platform="currentChat.custom_attributes.channel"
+      :reason="kitaReplyBlockReason"
+    />
     <Transition
+      v-else
       mode="out-in"
       enter-active-class="transition-all duration-300 ease-out"
       enter-from-class="opacity-0 translate-y-2 scale-[0.98]"
@@ -1480,6 +1503,7 @@ export default {
     </Transition>
 
     <Transition
+      v-if="!kitaReplyGated"
       mode="out-in"
       enter-active-class="transition-all duration-300 ease-out"
       enter-from-class="opacity-0 translate-y-2 scale-[0.98]"

@@ -1,33 +1,31 @@
 export const KITA_CONNECT_URL = '/kita/connect';
-export const KITA_CONNECT_SKIP_KEY = 'kita_connect_prompt_skipped_at';
 export const KITA_PLATFORMS = ['slack', 'teams', 'whatsapp', 'viber'];
-
-const REPROMPT_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
-const LINKABLE_STATES = ['connected', 'not_connected'];
+// Platforms where agents can only reply as themselves (their own connected account)
+export const KITA_PERSONAL_PLATFORMS = ['slack', 'teams'];
 
 export const openKitaConnect = () =>
   window.open(KITA_CONNECT_URL, '_blank', 'noopener');
 
 /**
- * Decides whether the one-time "Connect your accounts" prompt should show.
+ * The "Connect your accounts" prompt shows on every login while any configured
+ * platform (Slack, Teams) is not connected. It can be closed but not skipped.
  * @param {Object|null} status - Response of GET /api/v1/kita/connections
- * @param {string|undefined} skippedAt - ISO timestamp from ui_settings
- * @param {number} now - Current time in ms
  * @returns {boolean}
  */
-export const shouldPromptKitaConnect = (
-  status,
-  skippedAt,
-  now = Date.now()
-) => {
-  if (!status) return false;
+export const shouldPromptKitaConnect = status =>
+  !!status &&
+  KITA_PERSONAL_PLATFORMS.some(platform => status[platform] === 'not_connected');
 
-  const linkable = [status.slack, status.teams].filter(state =>
-    LINKABLE_STATES.includes(state)
-  );
-  if (!linkable.includes('not_connected')) return false;
-  if (!skippedAt) return true;
-  if (linkable.includes('connected')) return false;
-
-  return now - new Date(skippedAt).getTime() >= REPROMPT_AFTER_MS;
+/**
+ * Public replies in a Slack/Teams conversation are blocked until the agent has
+ * connected that platform (the bridge never posts from a shared identity).
+ * @param {Object|null} status - Response of GET /api/v1/kita/connections
+ * @param {string|null} channel - Conversation custom_attributes.channel
+ * @returns {'not_connected'|'unavailable'|null} Why replies are blocked, or null
+ */
+export const kitaReplyBlock = (status, channel) => {
+  if (!status || !KITA_PERSONAL_PLATFORMS.includes(channel)) return null;
+  const state = status[channel];
+  if (state === 'not_connected' || state === 'unavailable') return state;
+  return null;
 };

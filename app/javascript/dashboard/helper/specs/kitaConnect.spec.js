@@ -1,47 +1,71 @@
 import { describe, it, expect } from 'vitest';
-import { shouldPromptKitaConnect } from '../kitaConnect';
-
-const DAY = 24 * 60 * 60 * 1000;
-const now = new Date('2026-09-24T00:00:00Z').getTime();
-const daysAgo = days => new Date(now - days * DAY).toISOString();
+import { kitaReplyBlock, shouldPromptKitaConnect } from '../kitaConnect';
 
 describe('shouldPromptKitaConnect', () => {
   it('does not prompt when the status call failed', () => {
-    expect(shouldPromptKitaConnect(null, undefined, now)).toBe(false);
+    expect(shouldPromptKitaConnect(null)).toBe(false);
   });
 
   it('does not prompt when slack and teams are both unavailable', () => {
-    const status = { slack: 'unavailable', teams: 'unavailable' };
-    expect(shouldPromptKitaConnect(status, undefined, now)).toBe(false);
+    expect(
+      shouldPromptKitaConnect({ slack: 'unavailable', teams: 'unavailable' })
+    ).toBe(false);
   });
 
-  it('prompts when an available platform is not connected', () => {
-    const status = { slack: 'not_connected', teams: 'unavailable' };
-    expect(shouldPromptKitaConnect(status, undefined, now)).toBe(true);
+  it('prompts (every login, not skippable) while a configured platform is not connected', () => {
+    expect(
+      shouldPromptKitaConnect({ slack: 'not_connected', teams: 'unavailable' })
+    ).toBe(true);
+    expect(
+      shouldPromptKitaConnect({ slack: 'connected', teams: 'not_connected' })
+    ).toBe(true);
   });
 
-  it('does not prompt when every available platform is connected', () => {
-    const status = { slack: 'connected', teams: 'unavailable' };
-    expect(shouldPromptKitaConnect(status, undefined, now)).toBe(false);
+  it('stops prompting once every configured platform is connected', () => {
+    expect(
+      shouldPromptKitaConnect({ slack: 'connected', teams: 'unavailable' })
+    ).toBe(false);
+    expect(
+      shouldPromptKitaConnect({ slack: 'connected', teams: 'connected' })
+    ).toBe(false);
+  });
+});
+
+describe('kitaReplyBlock (composer gate per platform)', () => {
+  const status = {
+    slack: 'not_connected',
+    teams: 'connected',
+    whatsapp: 'none',
+    viber: 'not_applicable',
+  };
+
+  it('gates a Slack conversation until Slack is connected', () => {
+    expect(kitaReplyBlock(status, 'slack')).toBe('not_connected');
+    expect(kitaReplyBlock({ ...status, slack: 'connected' }, 'slack')).toBe(
+      null
+    );
   });
 
-  it('prompts when one of two available platforms is still missing', () => {
-    const status = { slack: 'connected', teams: 'not_connected' };
-    expect(shouldPromptKitaConnect(status, undefined, now)).toBe(true);
+  it('gates Teams independently of Slack', () => {
+    expect(kitaReplyBlock(status, 'teams')).toBe(null);
+    expect(kitaReplyBlock({ ...status, teams: 'not_connected' }, 'teams')).toBe(
+      'not_connected'
+    );
   });
 
-  it('stays quiet within 7 days of skipping', () => {
-    const status = { slack: 'not_connected', teams: 'not_connected' };
-    expect(shouldPromptKitaConnect(status, daysAgo(6), now)).toBe(false);
+  it('gates a platform that is not configured yet', () => {
+    expect(kitaReplyBlock({ ...status, teams: 'unavailable' }, 'teams')).toBe(
+      'unavailable'
+    );
   });
 
-  it('prompts again 7+ days after skipping when nothing is connected', () => {
-    const status = { slack: 'not_connected', teams: 'not_connected' };
-    expect(shouldPromptKitaConnect(status, daysAgo(7), now)).toBe(true);
+  it('never gates Viber, WhatsApp or non-bridge conversations', () => {
+    expect(kitaReplyBlock(status, 'viber')).toBe(null);
+    expect(kitaReplyBlock(status, 'whatsapp')).toBe(null);
+    expect(kitaReplyBlock(status, undefined)).toBe(null);
   });
 
-  it('never re-prompts after skipping once something is connected', () => {
-    const status = { slack: 'connected', teams: 'not_connected' };
-    expect(shouldPromptKitaConnect(status, daysAgo(30), now)).toBe(false);
+  it('does not gate when the status is unknown', () => {
+    expect(kitaReplyBlock(null, 'slack')).toBe(null);
   });
 });
