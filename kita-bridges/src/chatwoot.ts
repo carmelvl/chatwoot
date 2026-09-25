@@ -48,7 +48,11 @@ export function toOutbound(payload: any): OutboundDecision {
       ? { id: Number(s.id), name: String(s.name ?? s.available_name ?? '').trim(), firstName: String(s.available_name ?? s.name ?? '').trim().split(/\s+/)[0], email: s.email }
       : undefined;
   const inReplyTo = Number(payload.content_attributes?.in_reply_to) || undefined;
-  return { send: true, message: { messageId: Number(payload.id), conversationId, text, attachments, ...(agent?.name ? { agent } : {}), ...(inReplyTo ? { inReplyTo } : {}) } };
+  const channelKey = typeof payload.content_attributes?.kita_channel_key === 'string' && payload.content_attributes.kita_channel_key ? String(payload.content_attributes.kita_channel_key) : undefined;
+  return {
+    send: true,
+    message: { messageId: Number(payload.id), conversationId, text, attachments, ...(agent?.name ? { agent } : {}), ...(inReplyTo ? { inReplyTo } : {}), ...(channelKey ? { channelKey } : {}) },
+  };
 }
 
 /** Thin client for Chatwoot's public (inbox-identifier) client API. No agent token required. */
@@ -107,6 +111,9 @@ export class ChatwootClient {
 /** What the bridge records on every message it creates (see Kita::Bridge.message_attributes in the desk). */
 export interface MessageAttributes {
   external_source?: string;
+  /** Human label of the channel: "#kita-tala", "+63 917…", Teams channel/chat name. */
+  external_channel?: string;
+  external_channel_key?: string;
   external_thread?: { root: string };
   in_reply_to?: number;
   kita_bridge_origin?: boolean;
@@ -186,6 +193,15 @@ export class ChatwootAppClient {
     return Array.isArray(list) ? list : [];
   }
 
+  /** conversations#custom_attributes with merge=true: only the keys sent change (grip-sync's keys are kept). */
+  async updateCustomAttributes(conversationId: number, attrs: Record<string, string>): Promise<void> {
+    const res = await this.fetchImpl(`${this.base}/conversations/${conversationId}/custom_attributes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'api-access-token': this.token },
+      body: JSON.stringify({ custom_attributes: attrs, merge: true }),
+    });
+    if (!res.ok) throw new Error(`chatwoot app api custom_attributes -> ${res.status}`);
+  }
 }
 
 /** Who a staff message is from: matched to a desk agent by email, else shown as themselves (Kita staff contact). */
@@ -208,8 +224,11 @@ export class KitaDeskClient {
   private secret: string;
   private fetchImpl: typeof fetch;
 
+  private base: string;
+
   constructor(baseUrl: string, secret: string, fetchImpl: typeof fetch = fetch) {
-    this.url = `${baseUrl}/api/v1/kita/staff_messages`;
+    this.base = `${baseUrl}/api/v1/kita`;
+    this.url = `${this.base}/staff_messages`;
     this.secret = secret;
     this.fetchImpl = fetchImpl;
   }
@@ -230,5 +249,20 @@ export class KitaDeskClient {
     if (!res.ok) throw new Error(`kita desk staff_messages -> ${res.status}`);
     const j: any = await res.json();
     return { id: Number(j.id) };
+  }
+
+  /**
+   * Moves every message of `from` into `to` (display ids, same inbox), marks `from` merged_into and
+   * resolves it. Idempotent on the desk side.
+   */
+  async mergeConversations(fromConversationId: number, toConversationId: number): Promise<{ moved: number }> {
+    const res = await this.fetchImpl(`${this.base}/conversation_merges`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-kita-bridge-secret': this.secret },
+      body: JSON.stringify({ from_conversation_id: fromConversationId, to_conversation_id: toConversationId }),
+    });
+    if (!res.ok) throw new Error(`kita desk conversation_merges -> ${res.status}`);
+    const j: any = await res.json().catch(() => ({}));
+    return { moved: Number(j.moved ?? 0) };
   }
 }

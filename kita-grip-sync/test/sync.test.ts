@@ -5,6 +5,9 @@ import { fixture, ISSUE, msg, NOT_ISSUE, world } from './helpers.ts';
 
 const SEC = 1000;
 const customer = (id: number, content: string, at = '2026-09-24T02:00:00Z') => msg('message_incoming_slack.json', { id, content, created_at: at });
+/** A customer reply in the thread rooted at desk message `root` (content_attributes.in_reply_to, as kita-bridges sets it). */
+const reply = (id: number, content: string, root = 5001) =>
+  msg('message_incoming_slack.json', { id, content, created_at: '2026-09-24T02:00:00Z', content_attributes: { in_reply_to: root, external_thread: { root: '1790301480.000100' } } });
 
 test('conversation upsert: fields, bearer key, waiting_on flips with each side', async () => {
   const w = world();
@@ -66,9 +69,9 @@ test('debounce: a burst of customer messages is classified once, 60s after the l
   w.classifications.push(ISSUE);
   w.sync.ingest(customer(5001, 'first'), 'a');
   w.advance(20 * SEC);
-  w.sync.ingest(customer(5002, 'second'), 'b');
+  w.sync.ingest(reply(5002, 'second'), 'b');
   w.advance(20 * SEC);
-  w.sync.ingest(customer(5003, 'third'), 'c');
+  w.sync.ingest(reply(5003, 'third'), 'c');
   w.advance(59 * SEC);
   await w.drain();
   assert.equal(w.of('anthropic').length, 0, 'still inside the debounce window');
@@ -80,7 +83,7 @@ test('debounce: a burst of customer messages is classified once, 60s after the l
   assert.equal(claude[0].headers['anthropic-version'], '2023-06-01');
   assert.equal(claude[0].body.model, 'claude-sonnet-5');
   assert.equal(claude[0].body.output_config.format.type, 'json_schema');
-  assert.deepEqual(claude[0].body.output_config.format.schema.required, ['is_issue', 'is_new_issue', 'title', 'priority', 'summary']);
+  assert.deepEqual(claude[0].body.output_config.format.schema.required, ['is_issue', 'is_new_issue', 'title', 'priority', 'summary', 'thread_title']);
   const prompt = claude[0].body.messages[0].content as string;
   assert.ok(prompt.includes('first') && prompt.includes('second') && prompt.includes('third'));
   // Nothing new since: another tick costs nothing.
@@ -93,7 +96,7 @@ test('debounce: a conversation that never pauses is still classified after the m
   const w = world();
   w.classifications.push(NOT_ISSUE);
   for (let i = 0; i < 12; i++) {
-    w.sync.ingest(customer(6000 + i, `msg ${i}`), `m${i}`);
+    w.sync.ingest(i === 0 ? customer(6000, 'msg 0') : reply(6000 + i, `msg ${i}`, 6000), `m${i}`);
     w.advance(30 * SEC);
     await w.drain();
   }
@@ -110,6 +113,7 @@ test('tickets: created once with private note + label, then updated/escalated th
 
   const [create] = w.of('grip', 'POST', '/api/v1/support/tickets');
   assert.equal(create.body.chatwoot_conversation_id, 42);
+  assert.equal(create.body.issue_key, '5001', 'issue_key = thread root desk message id');
   assert.equal(create.body.title, ISSUE.title);
   assert.equal(create.body.priority, 'high');
   assert.equal(create.body.chatwoot_url, 'https://support.internal.kita.ai/app/accounts/1/conversations/42');
@@ -122,11 +126,11 @@ test('tickets: created once with private note + label, then updated/escalated th
 
   // Later message: escalates to urgent, same ticket, one escalation note.
   w.classifications.push({ ...ISSUE, priority: 'urgent', summary: 'Still down; they are missing disbursement cut-off.' });
-  w.sync.ingest(customer(5010, 'still broken, we will miss the cut-off!'), 'd2');
+  w.sync.ingest(reply(5010, 'still broken, we will miss the cut-off!'), 'd2');
   w.advance(60 * SEC);
   await w.drain();
   assert.equal(w.tickets.size, 1);
-  assert.equal(w.tickets.get(42).priority, 'urgent');
+  assert.equal(w.tickets.get('42:5001').priority, 'urgent');
   assert.equal(w.of('grip', 'POST', '/api/v1/support/tickets').length, 2);
   const allNotes = w.of('rails', 'POST', /\/messages$/);
   assert.equal(allNotes.length, 2);
@@ -135,10 +139,10 @@ test('tickets: created once with private note + label, then updated/escalated th
 
   // Classifier later says "medium": priority is never auto-downgraded, and no new note.
   w.classifications.push({ ...ISSUE, priority: 'medium', summary: 'Still down; they are missing disbursement cut-off.' });
-  w.sync.ingest(customer(5011, 'any update?'), 'd3');
+  w.sync.ingest(reply(5011, 'any update?'), 'd3');
   w.advance(60 * SEC);
   await w.drain();
-  assert.equal(w.tickets.get(42).priority, 'urgent');
+  assert.equal(w.tickets.get('42:5001').priority, 'urgent');
   assert.equal(w.of('rails', 'POST', /\/messages$/).length, 2);
   assert.equal(w.tickets.size, 1);
   assert.equal(w.of('rails', 'POST', /\/labels$/).length, 1, 'label added once');
@@ -169,7 +173,7 @@ test('resolve -> ticket done; a bare reopen leaves it done; conversations withou
   w.sync.ingest(fixture('conversation_resolved.json'), 'r1');
   await w.drain();
   let patches = w.of('grip', 'PATCH');
-  assert.deepEqual(patches.map((p) => [p.path, p.body.status]), [['/api/v1/support/tickets/42', 'done']]);
+  assert.deepEqual(patches.map((p) => [p.path, p.body]), [['/api/v1/support/tickets/42', { status: 'done', all: true }]]);
   w.sync.ingest(fixture('conversation_resolved.json'), 'r1-replay-other-delivery');
   await w.drain();
   assert.equal(w.of('grip', 'PATCH').length, 1, 'already done: no repeat PATCH');
@@ -178,7 +182,7 @@ test('resolve -> ticket done; a bare reopen leaves it done; conversations withou
   w.sync.ingest({ ...fixture('conversation_resolved.json'), status: 'open' }, 'r2');
   await w.drain();
   assert.equal(w.of('grip', 'PATCH').length, 1);
-  assert.equal(w.tickets.get(42).status, 'done');
+  assert.equal(w.tickets.get('42:5001').status, 'done');
 });
 
 test('reopen by a new customer message: an issue overwrites the done ticket, resets priority, and sets it back to todo', async () => {
@@ -189,23 +193,23 @@ test('reopen by a new customer message: an issue overwrites the done ticket, res
   await w.drain();
   w.sync.ingest(fixture('conversation_resolved.json'), 'r1');
   await w.drain();
-  assert.equal(w.tickets.get(42).status, 'done');
+  assert.equal(w.tickets.get('42:5001').status, 'done');
 
   // Next message in the same per-channel conversation: small talk. Ticket stays done, untouched.
   w.classifications.push(NOT_ISSUE);
-  w.sync.ingest({ ...customer(5100, 'thanks all!'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open' } }, 'd2');
+  w.sync.ingest({ ...reply(5100, 'thanks all!'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open' } }, 'd2');
   w.advance(60 * SEC);
   await w.drain();
-  assert.equal(w.tickets.get(42).status, 'done');
+  assert.equal(w.tickets.get('42:5001').status, 'done');
   assert.equal(w.of('grip', 'POST', '/api/v1/support/tickets').length, 1);
-  assert.ok(w.of('anthropic').at(-1)!.body.messages[0].content.includes('Existing ticket for this conversation (resolved)'));
+  assert.ok(w.of('anthropic').at(-1)!.body.messages[0].content.includes('Existing ticket for this thread (resolved)'));
 
   // Then a real new issue: same ticket row, new title/summary, its own (lower) priority, back to todo, one note.
   w.classifications.push({ is_issue: true, is_new_issue: true, title: 'Add two users to the LOS', priority: 'medium', summary: 'Needs access for two new loan officers.' });
-  w.sync.ingest(customer(5101, 'can you add two new users?'), 'd3');
+  w.sync.ingest(reply(5101, 'can you add two new users?'), 'd3');
   w.advance(60 * SEC);
   await w.drain();
-  const t = w.tickets.get(42);
+  const t = w.tickets.get('42:5001');
   assert.deepEqual([t.title, t.priority, t.status], ['Add two users to the LOS', 'medium', 'todo']);
   assert.equal(w.tickets.size, 1);
   const notes = w.of('rails', 'POST', /\/messages$/);
@@ -220,10 +224,10 @@ test('new distinct issue on an open ticket: title/summary move to the latest iss
   w.advance(60 * SEC);
   await w.drain();
   w.classifications.push({ is_issue: true, is_new_issue: true, title: 'Export CSV of decisions', priority: 'low', summary: 'Wants a CSV export.' });
-  w.sync.ingest(customer(5200, 'separately, can we get a CSV export?'), 'd2');
+  w.sync.ingest(reply(5200, 'separately, can we get a CSV export?'), 'd2');
   w.advance(60 * SEC);
   await w.drain();
-  const t = w.tickets.get(42);
+  const t = w.tickets.get('42:5001');
   assert.deepEqual([t.title, t.priority, t.status], ['Export CSV of decisions', 'low', 'todo']);
   assert.equal(w.of('grip', 'PATCH').length, 0);
   assert.ok(w.of('rails', 'POST', /\/messages$/).at(-1)!.body.content.includes('now tracks a new issue'));
@@ -252,8 +256,8 @@ test('not-a-ticket: ticket dismissed, dismissal logged, conversation never auto-
   await w.drain();
   w.sync.ingest(fixture('conversation_labeled_not_a_ticket.json'), 'l1');
   await w.drain();
-  assert.deepEqual(w.of('grip', 'PATCH').map((p) => p.body.status), ['dismissed']);
-  assert.equal(w.tickets.get(42).status, 'dismissed');
+  assert.deepEqual(w.of('grip', 'PATCH').map((p) => p.body), [{ status: 'dismissed', all: true }]);
+  assert.equal(w.tickets.get('42:5001').status, 'dismissed');
   const [d] = w.store.dismissals();
   assert.equal(d.conversation_id, 42);
   assert.equal(d.title, ISSUE.title);
@@ -293,7 +297,7 @@ test('loop safety: our own private note and label changes never count or trigger
   // Chatwoot echoes the note we posted and the label we added back to us as webhooks.
   assert.equal(w.sync.ingest(fixture('message_private_note_self.json'), 'echo-note'), 'ok');
   assert.equal(w.sync.ingest({ ...fixture('conversation_labeled_not_a_ticket.json'), labels: ['ticket'] }, 'echo-label'), 'ok');
-  assert.equal(w.store.getJob('classify:42'), undefined);
+  assert.equal(w.store.getJob('classify:42:5001'), undefined);
   w.advance(10 * 60 * SEC);
   await w.drain();
   assert.equal(w.of('anthropic').length, 1);
@@ -364,13 +368,13 @@ test('retries: Claude 429 and a failed ticket POST retry without duplicating tic
   // Label step fails after the note was posted: the retry adds the label without a second note.
   const w2 = world();
   w2.classifications.push(ISSUE);
-  w2.fail.rails.push(0, 503); // 0 = pass: note POST ok, then labels GET fails
+  w2.fail.rails.push(0, 0, 503); // 0 = pass: thread title POST ok, note POST ok, then labels GET fails
   w2.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
   w2.advance(60 * SEC);
   await w2.drain();
   assert.equal(w2.of('rails', 'POST', /\/messages$/).length, 1);
   assert.equal(w2.labels.get(42), undefined);
-  assert.equal(w2.store.getTicket(42)!.notePosted, true);
+  assert.equal(w2.store.getTicket(42, '5001')!.notePosted, true);
   w2.advance(60 * SEC);
   await w2.drain();
   assert.deepEqual(w2.labels.get(42), ['ticket']);
@@ -385,10 +389,10 @@ test('out of scope: resolved via toggle_status + label out-of-scope (existing la
   w.grip.inScope = false;
   w.labels.set(42, ['vip']);
   w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
-  assert.ok(w.store.getJob('classify:42'), 'classification armed before Grip has answered');
+  assert.ok(w.store.getJob('classify:42:5001'), 'classification armed before Grip has answered');
   await w.drain();
   assert.equal(w.store.getConversation(42)!.outOfScope, true);
-  assert.equal(w.store.getJob('classify:42'), undefined, 'pending classification cancelled');
+  assert.equal(w.store.getJob('classify:42:5001'), undefined, 'pending classification cancelled');
   const [toggle] = w.of('rails', 'POST', '/api/v1/accounts/1/conversations/42/toggle_status');
   assert.deepEqual(toggle.body, { status: 'resolved' });
   assert.equal(toggle.headers['api-access-token'], 'cw-bot-token');
@@ -410,7 +414,7 @@ test('out of scope: done once per conversation; later messages and our own statu
   w.sync.ingest(fixture('conversation_resolved.json'), 'echo-status');
   w.sync.ingest({ ...fixture('conversation_labeled_not_a_ticket.json'), labels: ['out-of-scope'] }, 'echo-label');
   w.sync.ingest({ ...customer(5040, 'anyone there?'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open', labels: ['out-of-scope'] } }, 'd2');
-  assert.equal(w.store.getJob('classify:42'), undefined, 'no classification is armed while out of scope');
+  assert.equal(w.store.getJob('classify:42:5001'), undefined, 'no classification is armed while out of scope');
   w.advance(10 * 60 * 1000);
   await w.drain();
   assert.equal(w.of('rails', 'POST', /toggle_status$/).length, 1);
@@ -446,7 +450,7 @@ test('out of scope -> back in scope: block lifted, no auto-reopen, new customer 
   await w.drain();
   assert.equal(w.store.getConversation(42)!.outOfScope, false);
   assert.equal(w.of('rails', 'POST', /toggle_status$/).length, 1, 'never toggled back open by us');
-  assert.equal(w.store.getJob('classify:42'), undefined, 'the message that arrived while blocked is not retro-armed');
+  assert.equal(w.store.getJob('classify:42:5001'), undefined, 'the message that arrived while blocked is not retro-armed');
   w.sync.ingest({ ...customer(5051, 'please help'), conversation: { ...fixture('message_incoming_slack.json').conversation, status: 'open' } }, 'd3');
   w.advance(60 * SEC);
   await w.drain();
@@ -490,5 +494,100 @@ test('openai classifier: strict json_schema request, parses the reply', async ()
   const c = new OpenAIClassifier({ apiKey: 'k', model: 'gpt-5-mini' }, fake);
   const r = await c.classify([{ role: 'customer', content: 'export broken', createdAt: '2026-09-25T00:00:00Z' } as any]);
   assert.equal(sent.response_format.json_schema.strict, true);
-  assert.deepEqual(r, { is_issue: true, is_new_issue: false, title: 'Fix export', priority: 'high', summary: 's' });
+  assert.deepEqual(r, { is_issue: true, is_new_issue: false, title: 'Fix export', priority: 'high', summary: 's', thread_title: '' });
+});
+
+// ---------- one ticket per thread (a conversation is one customer: many channels, many threads) ----------
+
+test('per-thread tickets: two threads in one conversation get their own classification, issue_key, note and desk title + ticket link', async () => {
+  const w = world();
+  w.classifications.push(ISSUE, { is_issue: true, is_new_issue: false, title: 'Batch 14 scores missing', priority: 'medium', summary: 'Batch 14 came back without scores.', thread_title: 'Batch 14 scores missing' });
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1'); // root 5001
+  w.sync.ingest(reply(5002, 'same for our Cebu branch'), 'd2'); // reply in 5001
+  w.sync.ingest(customer(5500, 'separately: batch 14 has no scores'), 'd3'); // new top-level thread
+  w.advance(60 * SEC);
+  await w.drain();
+
+  const claude = w.of('anthropic');
+  assert.equal(claude.length, 2, 'one classification per dirty thread');
+  const [p1, p2] = claude.map((c) => c.body.messages[0].content as string);
+  assert.ok(p1.includes('risk score API') && p1.includes('Cebu') && !p1.includes('batch 14'), 'thread 5001 transcript = root + replies only');
+  assert.ok(p2.includes('batch 14') && !p2.includes('Cebu'));
+
+  const posts = w.of('grip', 'POST', '/api/v1/support/tickets');
+  assert.deepEqual(posts.map((p) => p.body.issue_key), ['5001', '5500']);
+  assert.equal(w.tickets.size, 2);
+  assert.equal(w.tickets.get('42:5500').title, 'Batch 14 scores missing');
+  assert.ok(w.tickets.get('42:5500').body.includes('Thread: Batch 14 scores missing'));
+
+  // Desk: title + ticket link per thread, authenticated with the bridge secret.
+  const desk = w.of('rails', 'POST', '/api/v1/kita/threads');
+  assert.ok(desk.length >= 2);
+  assert.ok(desk.every((c) => c.headers['x-kita-bridge-secret'] === 'bridge-secret'));
+  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1' });
+  assert.deepEqual(w.threads.get('42:5500'), { conversation_id: 42, root_message_id: 5500, title: 'Batch 14 scores missing', ticket_id: 't-2', ticket_url: 'https://internal.kita.ai/tasks/t-2' });
+
+  // One private note per ticket, naming its thread; the `ticket` label once.
+  const notes = w.of('rails', 'POST', /\/messages$/);
+  assert.equal(notes.length, 2);
+  assert.ok(notes[0].body.private && notes[0].body.content.includes('for thread "Risk score API down"'));
+  assert.ok(notes[1].body.content.includes('for thread "Batch 14 scores missing"') && notes[1].body.content.includes('/tasks/t-2'));
+  assert.deepEqual(w.labels.get(42), ['ticket']);
+
+  // Resolve the conversation: one PATCH for every ticket.
+  w.sync.ingest(fixture('conversation_resolved.json'), 'r1');
+  await w.drain();
+  assert.deepEqual(w.of('grip', 'PATCH').map((p) => [p.path, p.body]), [['/api/v1/support/tickets/42', { status: 'done', all: true }]]);
+  assert.deepEqual([w.tickets.get('42:5001').status, w.tickets.get('42:5500').status], ['done', 'done']);
+  assert.deepEqual(w.store.tickets(42).map((t) => t.status), ['done', 'done']);
+});
+
+test('thread titles: a non-issue thread still gets a title (no ticket fields); re-posted only when the title changes', async () => {
+  const w = world();
+  w.classifications.push({ ...NOT_ISSUE, thread_title: 'Thanks for yesterday.' });
+  w.sync.ingest(fixture('message_incoming_slack.json'), 'd1');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Thanks for yesterday' }, 'trailing punctuation trimmed');
+  assert.equal(w.of('grip', 'POST', '/api/v1/support/tickets').length, 0);
+
+  // Same title on the next classification: no desk call.
+  w.classifications.push({ ...NOT_ISSUE, thread_title: 'Thanks for yesterday' });
+  w.sync.ingest(reply(5002, 'really appreciated'), 'd2');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.equal(w.of('rails', 'POST', '/api/v1/kita/threads').length, 1);
+
+  // The thread turns into an issue: new title and the ticket link.
+  w.classifications.push(ISSUE);
+  w.sync.ingest(reply(5003, 'but now the risk score API is down'), 'd3');
+  w.advance(60 * SEC);
+  await w.drain();
+  assert.equal(w.of('rails', 'POST', '/api/v1/kita/threads').length, 2, 'title + ticket posted together');
+  assert.deepEqual(w.threads.get('42:5001'), { conversation_id: 42, root_message_id: 5001, title: 'Risk score API down', ticket_id: 't-1', ticket_url: 'https://internal.kita.ai/tasks/t-1' });
+});
+
+test('store: an old one-ticket-per-conversation database migrates in place (ticket kept as the legacy "" issue key)', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { Store } = await import('../src/store.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const path = join(mkdtempSync(join(tmpdir(), 'grip-sync-')), 'old.sqlite');
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE tickets (conversation_id INTEGER PRIMARY KEY, ticket_id TEXT NOT NULL, ticket_url TEXT NOT NULL, title TEXT NOT NULL,
+      priority TEXT NOT NULL, summary TEXT NOT NULL, status TEXT NOT NULL, note_posted INTEGER NOT NULL DEFAULT 0, label_added INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+    CREATE TABLE messages (id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE dismissals (conversation_id INTEGER NOT NULL, ticket_id TEXT, title TEXT, priority TEXT, summary TEXT, thread TEXT, at INTEGER NOT NULL);
+    INSERT INTO tickets VALUES (42, 't-9', 'https://internal.kita.ai/tasks/t-9', 'Old ticket', 'high', 's', 'todo', 1, 1, 0);
+    INSERT INTO messages VALUES (5001, 42, 'customer', 'hello', '2026-09-24T02:00:00Z');`);
+  old.close();
+  const s = new Store(path);
+  assert.equal(s.getTicket(42)!.ticketId, 't-9');
+  assert.equal(s.getTicket(42)!.issueKey, '');
+  assert.equal(s.threadMessages(42, 5001).length, 1, 'old messages become their own thread root');
+  s.putTicket({ ...s.getTicket(42)!, issueKey: '5001', ticketId: 't-10' });
+  assert.deepEqual(s.tickets(42).map((t) => [t.issueKey, t.ticketId]), [['', 't-9'], ['5001', 't-10']]);
+  s.close();
+  new Store(path).close(); // reopening is a no-op
 });

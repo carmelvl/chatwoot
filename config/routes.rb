@@ -297,10 +297,15 @@ Rails.application.routes.draw do
 
           resources :custom_attribute_definitions, only: [:index, :show, :create, :update, :destroy]
           resources :custom_filters, only: [:index, :show, :create, :update, :destroy]
-          # Kita: customers (Grip accounts) derived from conversations, and the "My customers" saved view
+          # Kita: customers (Grip accounts) derived from conversations, the "My customers" saved view, and conversation threads
           namespace :kita do
             resources :customers, only: [:index] do
               post :my_view, on: :collection
+            end
+            resources :conversations, only: [] do
+              resources :threads, only: [:index, :update] do
+                post :read, on: :member
+              end
             end
           end
           resource :branded_email_layout, only: [:show, :update]
@@ -506,10 +511,12 @@ Rails.application.routes.draw do
 
       resource :notification_subscriptions, only: [:create, :destroy]
 
-      # Kita: per-agent channel connections (kita-bridges) and bridge -> desk staff messages
+      # Kita: per-agent channel connections (kita-bridges), bridge -> desk staff messages, conversation merges and thread metadata
       namespace :kita do
         resource :connections, only: [:show]
         resources :staff_messages, only: [:create]
+        resources :conversation_merges, only: [:create]
+        resources :threads, only: [:create]
       end
 
       namespace :widget do

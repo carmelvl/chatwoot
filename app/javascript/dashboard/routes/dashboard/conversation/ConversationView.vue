@@ -15,6 +15,8 @@ import CmdBarConversationSnooze from 'dashboard/routes/dashboard/commands/CmdBar
 import { emitter } from 'shared/helpers/mitt';
 import SidepanelSwitch from 'dashboard/components-next/Conversation/SidepanelSwitch.vue';
 import ConversationSidebar from 'dashboard/components/widgets/conversation/ConversationSidebar.vue';
+import KitaThreadPane from 'dashboard/components-next/kita/KitaThreadPane.vue';
+import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 
 export default {
   components: {
@@ -23,6 +25,7 @@ export default {
     CmdBarConversationSnooze,
     SidepanelSwitch,
     ConversationSidebar,
+    KitaThreadPane,
   },
   beforeRouteLeave(to, from, next) {
     // Clear selected state if navigating away from a conversation to a route without a conversationId to prevent stale data issues
@@ -62,6 +65,7 @@ export default {
     const { uiSettings, updateUISettings, isOnExpandedLayout } =
       useUISettings();
     const { accountId } = useAccount();
+    const { openThread, showThreadsTab } = useKitaThreads();
     provide(
       CONTACT_CONVERSATION_NAVIGATION,
       useContactConversationNavigation()
@@ -72,6 +76,8 @@ export default {
       updateUISettings,
       isOnExpandedLayout,
       accountId,
+      openThread,
+      showThreadsTab,
     };
   },
   data() {
@@ -90,6 +96,13 @@ export default {
     showMessageView() {
       return this.conversationId ? true : !this.isOnExpandedLayout;
     },
+    // Kita: an open thread takes the contact sidebar's place
+    kitaOpenThread() {
+      const thread = this.openThread;
+      return thread && thread.conversationId === this.currentChat.id
+        ? thread
+        : null;
+    },
     shouldShowSidebar() {
       if (!this.currentChat.id) {
         return false;
@@ -102,6 +115,7 @@ export default {
   watch: {
     conversationId() {
       this.fetchConversationIfUnavailable();
+      this.showThreadsTab = false;
     },
   },
 
@@ -215,7 +229,16 @@ export default {
     >
       <SidepanelSwitch v-if="currentChat.id" />
     </ConversationBox>
-    <ConversationSidebar v-if="shouldShowSidebar" :current-chat="currentChat" />
+    <KitaThreadPane
+      v-if="kitaOpenThread"
+      :key="kitaOpenThread.rootId"
+      :conversation-id="kitaOpenThread.conversationId"
+      :root-id="kitaOpenThread.rootId"
+    />
+    <ConversationSidebar
+      v-else-if="shouldShowSidebar"
+      :current-chat="currentChat"
+    />
     <CmdBarConversationSnooze />
   </section>
 </template>

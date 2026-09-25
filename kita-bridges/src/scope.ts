@@ -10,6 +10,21 @@ import { log } from './log.ts';
  */
 export interface ScopeCheck {
   allows(channelKey: string | undefined): boolean;
+  /** Grip's row for a channel (which customer account it belongs to), when known. */
+  channel?(channelKey: string | undefined): ScopeChannel | undefined;
+}
+
+/** One data.channels[] row: the channel's Grip account, DRI and (optionally) stage/health. */
+export interface ScopeChannel {
+  channel_key: string;
+  account_id?: string;
+  account_name?: string;
+  in_scope?: boolean;
+  dri_email?: string;
+  dri_name?: string;
+  sales_owner_email?: string;
+  phase?: string;
+  health?: string;
 }
 
 export interface ScopeOptions {
@@ -31,6 +46,8 @@ export class ScopeCache implements ScopeCheck {
   generatedAt: string | undefined;
   /** Channel keys Grip lists as in scope (in_scope, plus channels[] rows with in_scope: true). */
   inScope: string[] = [];
+  /** channel_key -> Grip row (data.channels[]). Kept from the last good refresh. */
+  channels = new Map<string, ScopeChannel>();
   private o: Partial<ScopeOptions>;
 
   constructor(o: Partial<ScopeOptions> = {}) {
@@ -49,6 +66,10 @@ export class ScopeCache implements ScopeCheck {
     return !this.outOfScope.has(channelKey);
   }
 
+  channel(channelKey: string | undefined): ScopeChannel | undefined {
+    return channelKey ? this.channels.get(channelKey) : undefined;
+  }
+
   /** Fetch the list once. Never throws: on failure the previous list stays in effect. */
   async refresh(): Promise<boolean> {
     if (!this.enabled) return false;
@@ -62,7 +83,18 @@ export class ScopeCache implements ScopeCheck {
       this.outOfScope = new Set(body.out_of_scope.map(String));
       this.generatedAt = body.generated_at;
       const inScope = new Set<string>(Array.isArray(body.in_scope) ? body.in_scope.map(String) : []);
-      for (const c of Array.isArray(body.channels) ? body.channels : []) if (c?.in_scope === true && c.channel_key) inScope.add(String(c.channel_key));
+      const channels = new Map<string, ScopeChannel>();
+      for (const c of Array.isArray(body.channels) ? body.channels : []) {
+        if (!c?.channel_key) continue;
+        const key = String(c.channel_key);
+        if (c.in_scope === true) inScope.add(key);
+        const str = (v: unknown) => (v === undefined || v === null || v === '' ? undefined : String(v));
+        channels.set(key, {
+          channel_key: key, account_id: str(c.account_id), account_name: str(c.account_name), in_scope: typeof c.in_scope === 'boolean' ? c.in_scope : undefined,
+          dri_email: str(c.dri_email), dri_name: str(c.dri_name), sales_owner_email: str(c.sales_owner_email), phase: str(c.phase), health: str(c.health),
+        });
+      }
+      this.channels = channels;
       for (const k of this.outOfScope) inScope.delete(k);
       this.inScope = [...inScope];
       log.info('scope_refreshed', { in_scope: Array.isArray(body.in_scope) ? body.in_scope.length : undefined, out_of_scope: this.outOfScope.size });

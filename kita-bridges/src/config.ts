@@ -10,10 +10,6 @@ export interface PlatformInbox {
 }
 
 export function loadConfig() {
-  const inbox = (p: Platform): PlatformInbox => ({
-    inboxIdentifier: env(`CHATWOOT_${p.toUpperCase()}_INBOX_IDENTIFIER`),
-    webhookSecret: env(`CHATWOOT_${p.toUpperCase()}_WEBHOOK_SECRET`),
-  });
   return {
     port: Number(env('PORT', '8080')),
     publicUrl: env('BRIDGE_PUBLIC_URL', 'https://support.internal.kita.ai/bridges').replace(/\/$/, ''),
@@ -26,8 +22,8 @@ export function loadConfig() {
     /** Signs per-agent connect links. */
     linkSecret: env('BRIDGE_LINK_SECRET'),
     encryptionKey: env('BRIDGE_ENCRYPTION_KEY'),
-    // WhatsApp has one inbox per business number (see whatsapp.numbers), so its entry here is unused.
-    inboxes: { slack: inbox('slack'), teams: inbox('teams'), viber: inbox('viber'), whatsapp: { inboxIdentifier: '', webhookSecret: '' } } as Record<Platform, PlatformInbox>,
+    /** The single "Customers" API inbox: every platform posts here; its webhook is POST /chatwoot/customers. */
+    customers: { inboxIdentifier: env('CHATWOOT_CUSTOMERS_INBOX_IDENTIFIER'), webhookSecret: env('CHATWOOT_CUSTOMERS_WEBHOOK_SECRET') } as PlatformInbox,
     grip: {
       baseUrl: env('GRIP_BASE_URL').replace(/\/$/, ''),
       apiKey: env('GRIP_API_KEY'),
@@ -76,8 +72,8 @@ export function loadConfig() {
 function parseNumbers(json: string): WhatsAppNumber[] {
   const list = JSON.parse(json);
   if (!Array.isArray(list)) throw new Error('WHATSAPP_NUMBERS must be a JSON array');
-  for (const n of list)
-    if (!n.phoneNumberId || !n.inboxIdentifier || !n.webhookSecret || !n.ownerName) throw new Error('each WHATSAPP_NUMBERS entry needs phoneNumberId, inboxIdentifier, webhookSecret, ownerName');
+  // inboxIdentifier / webhookSecret (per-number inboxes, before the Customers inbox) are accepted and ignored.
+  for (const n of list) if (!n.phoneNumberId || !n.ownerName) throw new Error('each WHATSAPP_NUMBERS entry needs phoneNumberId and ownerName');
   return list;
 }
 
@@ -85,11 +81,12 @@ export type Config = ReturnType<typeof loadConfig>;
 
 export function enabledPlatforms(cfg: Config): Platform[] {
   const out: Platform[] = [];
-  const ok = (p: Platform) => cfg.inboxes[p].inboxIdentifier && cfg.inboxes[p].webhookSecret;
-  if (ok('slack') && cfg.slack.signingSecret && cfg.slack.botToken) out.push('slack');
+  // Nothing is bridged without the Customers inbox.
+  if (!cfg.customers.inboxIdentifier || !cfg.customers.webhookSecret) return out;
+  if (cfg.slack.signingSecret && cfg.slack.botToken) out.push('slack');
   const t = cfg.teams;
-  if (ok('teams') && t.tenantId && t.clientId && t.clientSecret && t.kitaUserUpn && t.connectKey.length >= 16 && t.encryptionKey.length >= 16) out.push('teams');
-  if (ok('viber') && cfg.viber.authToken) out.push('viber');
+  if (t.tenantId && t.clientId && t.clientSecret && t.kitaUserUpn && t.connectKey.length >= 16 && t.encryptionKey.length >= 16) out.push('teams');
+  if (cfg.viber.authToken) out.push('viber');
   const w = cfg.whatsapp;
   if (w.numbers.length && w.appSecret && w.verifyToken && w.accessToken) out.push('whatsapp');
   return out;

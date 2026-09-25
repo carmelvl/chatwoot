@@ -12,9 +12,9 @@ export const GRAPH_FB = 'https://graph.facebook.com/v21.0';
 export interface WhatsAppNumber {
   /** Cloud API phone number id (metadata.phone_number_id). */
   phoneNumberId: string;
-  /** Chatwoot API inbox for this number (one inbox per teammate's number). */
-  inboxIdentifier: string;
-  webhookSecret: string;
+  /** Legacy (per-number inboxes): ignored, everything goes to the Customers inbox. */
+  inboxIdentifier?: string;
+  webhookSecret?: string;
   /** Kita team member who owns the phone, e.g. "Carmel Limcaoco". */
   ownerName: string;
   /** Optional: that agent's own Chatwoot access token, so echoes are attributed to them natively. */
@@ -134,13 +134,11 @@ function base(number: WhatsAppNumber, customerWaId: string, id: string, text: st
     userKey: `${number.phoneNumberId}:${customerWaId}`,
     userName: name || e164(customerWaId),
     contactIdentifier: whatsappChannelKey(customerWaId),
-    inboxIdentifier: number.inboxIdentifier,
     threadKey: `${number.phoneNumberId}:${customerWaId}`,
     replyRef: { phoneNumberId: number.phoneNumberId, to: customerWaId },
     text,
     attachments: [],
     conversationAttributes: { channel_key: whatsappChannelKey(customerWaId), whatsapp_business_number: number.phoneNumberId },
-    newConversationIfResolved: true,
   };
 }
 

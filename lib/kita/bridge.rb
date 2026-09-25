@@ -41,11 +41,12 @@ module Kita::Bridge
   end
 
   # Bridge-supplied message metadata: the platform it came through, the desk message it replies to
-  # (thread root, rendered with Chatwoot's native reply UI) and the platform thread it belongs to.
+  # (thread root, rendered with Chatwoot's native reply UI), the platform thread it belongs to and the
+  # platform channel it was posted in (human label + channel key).
   def message_attributes(raw)
     return {} unless raw.respond_to?(:permit)
 
-    attrs = raw.permit(:external_source, :in_reply_to, external_thread: [:root]).to_h
+    attrs = raw.permit(:external_source, :external_channel, :external_channel_key, :in_reply_to, external_thread: [:root]).to_h
     attrs.delete(:external_source) unless EXTERNAL_SOURCES.include?(attrs[:external_source])
     attrs[:in_reply_to] = attrs[:in_reply_to].to_i if attrs[:in_reply_to].present?
     attrs.compact_blank

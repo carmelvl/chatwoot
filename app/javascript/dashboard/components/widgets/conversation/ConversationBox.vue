@@ -4,6 +4,10 @@ import ConversationHeader from './ConversationHeader.vue';
 import DashboardAppFrame from '../DashboardApp/Frame.vue';
 import EmptyState from './EmptyState/EmptyState.vue';
 import MessagesView from './MessagesView.vue';
+import KitaThreadsTabs from 'dashboard/components-next/kita/KitaThreadsTabs.vue';
+import KitaThreadsList from 'dashboard/components-next/kita/KitaThreadsList.vue';
+import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
+import { isBridgeConversation } from 'dashboard/helper/kitaThreads';
 
 export default {
   components: {
@@ -11,6 +15,8 @@ export default {
     DashboardAppFrame,
     EmptyState,
     MessagesView,
+    KitaThreadsTabs,
+    KitaThreadsList,
   },
   props: {
     inboxId: {
@@ -30,6 +36,10 @@ export default {
       type: Boolean,
       default: true,
     },
+  },
+  setup() {
+    const { showThreadsTab } = useKitaThreads();
+    return { showThreadsTab };
   },
   data() {
     return { activeIndex: 0 };
@@ -52,6 +62,12 @@ export default {
           name: dashboardApp.title,
         })),
       ];
+    },
+    isKitaBridge() {
+      return !!this.currentChat.id && isBridgeConversation(this.currentChat);
+    },
+    showKitaThreads() {
+      return this.isKitaBridge && this.showThreadsTab;
     },
     showContactPanel() {
       return this.isContactPanelOpen && this.currentChat.id;
@@ -107,6 +123,10 @@ export default {
         'border-b border-b-n-weak !pt-2': !dashboardApps.length,
       }"
     />
+    <KitaThreadsTabs
+      v-if="isKitaBridge && !activeIndex"
+      :conversation-id="currentChat.id"
+    />
     <woot-tabs
       v-if="dashboardApps.length && currentChat.id"
       :index="activeIndex"
@@ -123,8 +143,13 @@ export default {
       />
     </woot-tabs>
     <div v-show="!activeIndex" class="flex h-full min-h-0 m-0">
+      <KitaThreadsList
+        v-if="showKitaThreads"
+        :conversation-id="currentChat.id"
+      />
       <MessagesView
         v-if="currentChat.id"
+        v-show="!showKitaThreads"
         :inbox-id="inboxId"
         :is-inbox-view="isInboxView"
       />

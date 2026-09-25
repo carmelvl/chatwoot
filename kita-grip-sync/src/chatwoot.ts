@@ -99,3 +99,28 @@ export class ChatwootApi {
     await this.call('POST', accountId, 'custom_attribute_definitions', { custom_attribute_definition: def });
   }
 }
+
+/**
+ * Kita desk endpoints for bridges and grip-sync (not the application API): authenticated by the shared
+ * X-Kita-Bridge-Secret header (BRIDGE_LINK_SECRET), account fixed desk-side (KITA_BRIDGE_ACCOUNT_ID).
+ */
+export class KitaDesk {
+  private baseUrl: string;
+  private secret: string;
+  private fetchImpl: typeof fetch;
+
+  constructor(baseUrl: string, secret: string, fetchImpl: typeof fetch = fetch) {
+    this.baseUrl = baseUrl;
+    this.secret = secret;
+    this.fetchImpl = fetchImpl;
+  }
+
+  /** POST /api/v1/kita/threads: upserts the thread's title and ticket link (kita_threads). */
+  async postThread(body: { conversation_id: number; root_message_id: number; title?: string; ticket_id?: string; ticket_url?: string }): Promise<void> {
+    await requestJson(this.fetchImpl, 'desk POST kita/threads', `${this.baseUrl}/api/v1/kita/threads`, {
+      method: 'POST',
+      headers: { 'x-kita-bridge-secret': this.secret, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+}

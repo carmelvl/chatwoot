@@ -27,6 +27,8 @@ export interface ConversationState {
 
 export interface TicketRow {
   conversationId: number;
+  /** String(thread root desk message id). '' = a legacy conversation-level ticket (created before per-thread tickets; sent without issue_key). */
+  issueKey: string;
   ticketId: string;
   ticketUrl: string;
   title: string;
@@ -46,6 +48,19 @@ export interface ThreadMessage {
   sender?: string | null;
   /** A reply inside a Slack/Teams thread (content_attributes.in_reply_to / external_thread). */
   threadReply?: boolean;
+  /** Desk id of the thread root: content_attributes.in_reply_to for replies, else the message's own id. */
+  rootId?: number;
+}
+
+/** Per-thread state: classification watermark and the title/ticket link last posted to the desk. */
+export interface ThreadState {
+  conversationId: number;
+  rootId: number;
+  lastCustomerMessageId: number;
+  classifiedUpto: number;
+  title: string | null;
+  postedTitle: string | null;
+  postedTicketUrl: string | null;
 }
 
 export interface Job {
@@ -70,6 +85,9 @@ export interface OwnerRow {
   keptManualFor: number | null;
 }
 
+/** Messages kept per conversation (a conversation is a whole customer: many channels and threads). */
+const CONVERSATION_KEEP = 500;
+/** Replies of one thread sent to the classifier (plus the root). */
 const THREAD_KEEP = 40;
 
 /** All service state in one SQLite file: dedupe keys, conversation snapshots, tickets, a durable job queue. */
@@ -91,14 +109,19 @@ export class Store {
         updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL,
-        sender TEXT, thread_reply INTEGER NOT NULL DEFAULT 0);
+        sender TEXT, thread_reply INTEGER NOT NULL DEFAULT 0, root_id INTEGER);
       CREATE INDEX IF NOT EXISTS messages_by_conv ON messages (conversation_id, id);
+      CREATE TABLE IF NOT EXISTS threads (
+        conversation_id INTEGER NOT NULL, root_id INTEGER NOT NULL, last_customer_message_id INTEGER NOT NULL DEFAULT 0,
+        classified_upto INTEGER NOT NULL DEFAULT 0, title TEXT, posted_title TEXT, posted_ticket_url TEXT, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (conversation_id, root_id));
       CREATE TABLE IF NOT EXISTS tickets (
-        conversation_id INTEGER PRIMARY KEY, ticket_id TEXT NOT NULL, ticket_url TEXT NOT NULL, title TEXT NOT NULL,
+        conversation_id INTEGER NOT NULL, issue_key TEXT NOT NULL DEFAULT '', ticket_id TEXT NOT NULL, ticket_url TEXT NOT NULL, title TEXT NOT NULL,
         priority TEXT NOT NULL, summary TEXT NOT NULL, status TEXT NOT NULL,
-        note_posted INTEGER NOT NULL DEFAULT 0, label_added INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+        note_posted INTEGER NOT NULL DEFAULT 0, label_added INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (conversation_id, issue_key));
       CREATE TABLE IF NOT EXISTS dismissals (
-        conversation_id INTEGER NOT NULL, ticket_id TEXT, title TEXT, priority TEXT, summary TEXT, thread TEXT, at INTEGER NOT NULL);
+        conversation_id INTEGER NOT NULL, issue_key TEXT, ticket_id TEXT, title TEXT, priority TEXT, summary TEXT, thread TEXT, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS jobs (
         key TEXT PRIMARY KEY, kind TEXT NOT NULL, conversation_id INTEGER NOT NULL, payload TEXT NOT NULL DEFAULT '{}',
         run_at INTEGER NOT NULL, first_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
@@ -114,6 +137,27 @@ export class Store {
     const mcols = (this.db.prepare('PRAGMA table_info(messages)').all() as any[]).map((c) => c.name);
     if (!mcols.includes('sender')) this.db.exec('ALTER TABLE messages ADD COLUMN sender TEXT');
     if (!mcols.includes('thread_reply')) this.db.exec('ALTER TABLE messages ADD COLUMN thread_reply INTEGER NOT NULL DEFAULT 0');
+    // Per-thread tickets: older rows become their own thread root.
+    if (!mcols.includes('root_id')) this.db.exec('ALTER TABLE messages ADD COLUMN root_id INTEGER; UPDATE messages SET root_id = id');
+    this.db.exec('CREATE INDEX IF NOT EXISTS messages_by_root ON messages (conversation_id, root_id, id)');
+    // Tickets keyed by conversation only (one per conversation) -> (conversation, issue_key). Existing rows keep
+    // issue_key '' (Grip's default ticket for the conversation). Copy-and-swap in one transaction.
+    const tcols = (this.db.prepare('PRAGMA table_info(tickets)').all() as any[]).map((c) => c.name);
+    if (!tcols.includes('issue_key')) {
+      this.db.exec(`BEGIN;
+        CREATE TABLE tickets_v2 (
+          conversation_id INTEGER NOT NULL, issue_key TEXT NOT NULL DEFAULT '', ticket_id TEXT NOT NULL, ticket_url TEXT NOT NULL, title TEXT NOT NULL,
+          priority TEXT NOT NULL, summary TEXT NOT NULL, status TEXT NOT NULL,
+          note_posted INTEGER NOT NULL DEFAULT 0, label_added INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
+          PRIMARY KEY (conversation_id, issue_key));
+        INSERT INTO tickets_v2 (conversation_id, issue_key, ticket_id, ticket_url, title, priority, summary, status, note_posted, label_added, updated_at)
+          SELECT conversation_id, '', ticket_id, ticket_url, title, priority, summary, status, note_posted, label_added, updated_at FROM tickets;
+        DROP TABLE tickets;
+        ALTER TABLE tickets_v2 RENAME TO tickets;
+        COMMIT;`);
+    }
+    const dcols = (this.db.prepare('PRAGMA table_info(dismissals)').all() as any[]).map((c) => c.name);
+    if (!dcols.includes('issue_key')) this.db.exec('ALTER TABLE dismissals ADD COLUMN issue_key TEXT');
   }
 
   // ---- dedupe ----
@@ -148,36 +192,71 @@ export class Store {
 
   // ---- thread (recent public messages, for the classifier) ----
   addMessage(conversationId: number, m: ThreadMessage): void {
-    this.db.prepare('INSERT OR IGNORE INTO messages (id, conversation_id, role, content, created_at, sender, thread_reply) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(m.id, conversationId, m.role, m.content, m.createdAt, m.sender ?? null, m.threadReply ? 1 : 0);
+    this.db.prepare('INSERT OR IGNORE INTO messages (id, conversation_id, role, content, created_at, sender, thread_reply, root_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(m.id, conversationId, m.role, m.content, m.createdAt, m.sender ?? null, m.threadReply ? 1 : 0, m.rootId ?? m.id);
     this.db.prepare(`DELETE FROM messages WHERE conversation_id = ? AND id NOT IN
-        (SELECT id FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ${THREAD_KEEP})`).run(conversationId, conversationId);
+        (SELECT id FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ${CONVERSATION_KEEP})`).run(conversationId, conversationId);
   }
 
+  private msgRow = (r: any): ThreadMessage =>
+    ({ id: Number(r.id), role: r.role, content: r.content, createdAt: r.created_at, sender: r.sender ?? null, threadReply: !!r.thread_reply, rootId: Number(r.root_id ?? r.id) });
+
+  /** Every kept message of the conversation (all threads), oldest first. */
   thread(conversationId: number, upto = Number.MAX_SAFE_INTEGER): ThreadMessage[] {
-    return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND id <= ? ORDER BY id').all(conversationId, upto) as any[])
-      .map((r) => ({ id: Number(r.id), role: r.role, content: r.content, createdAt: r.created_at, sender: r.sender ?? null, threadReply: !!r.thread_reply }));
+    return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND id <= ? ORDER BY id').all(conversationId, upto) as any[]).map(this.msgRow);
+  }
+
+  /** One thread's transcript: the root plus its latest replies, oldest first. */
+  threadMessages(conversationId: number, rootId: number): ThreadMessage[] {
+    const rows = (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND root_id = ? ORDER BY id').all(conversationId, rootId) as any[]).map(this.msgRow);
+    const root = rows.filter((m) => m.id === rootId);
+    const replies = rows.filter((m) => m.id !== rootId);
+    return [...root, ...replies.slice(-THREAD_KEEP)];
+  }
+
+  // ---- threads ----
+  getThread(conversationId: number, rootId: number): ThreadState | undefined {
+    const r = this.db.prepare('SELECT * FROM threads WHERE conversation_id = ? AND root_id = ?').get(conversationId, rootId) as any;
+    if (!r) return undefined;
+    return {
+      conversationId: Number(r.conversation_id), rootId: Number(r.root_id), lastCustomerMessageId: Number(r.last_customer_message_id),
+      classifiedUpto: Number(r.classified_upto), title: r.title ?? null, postedTitle: r.posted_title ?? null, postedTicketUrl: r.posted_ticket_url ?? null,
+    };
+  }
+
+  putThread(t: ThreadState): void {
+    this.db.prepare(`INSERT OR REPLACE INTO threads (conversation_id, root_id, last_customer_message_id, classified_upto, title, posted_title, posted_ticket_url, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(t.conversationId, t.rootId, t.lastCustomerMessageId, t.classifiedUpto, t.title, t.postedTitle, t.postedTicketUrl, Date.now());
   }
 
   // ---- tickets ----
-  getTicket(conversationId: number): TicketRow | undefined {
-    const r = this.db.prepare('SELECT * FROM tickets WHERE conversation_id = ?').get(conversationId) as any;
-    if (!r) return undefined;
+  getTicket(conversationId: number, issueKey = ''): TicketRow | undefined {
+    const r = this.db.prepare('SELECT * FROM tickets WHERE conversation_id = ? AND issue_key = ?').get(conversationId, issueKey) as any;
+    return r ? this.ticketRow(r) : undefined;
+  }
+
+  /** Every ticket of the conversation (one per thread, plus a legacy '' ticket if any). */
+  tickets(conversationId: number): TicketRow[] {
+    return (this.db.prepare('SELECT * FROM tickets WHERE conversation_id = ? ORDER BY issue_key').all(conversationId) as any[]).map((r) => this.ticketRow(r));
+  }
+
+  private ticketRow(r: any): TicketRow {
     return {
-      conversationId: Number(r.conversation_id), ticketId: r.ticket_id, ticketUrl: r.ticket_url, title: r.title, priority: r.priority,
+      conversationId: Number(r.conversation_id), issueKey: r.issue_key ?? '', ticketId: r.ticket_id, ticketUrl: r.ticket_url, title: r.title, priority: r.priority,
       summary: r.summary, status: r.status, notePosted: !!r.note_posted, labelAdded: !!r.label_added,
     };
   }
 
   putTicket(t: TicketRow): void {
-    this.db.prepare(`INSERT OR REPLACE INTO tickets (conversation_id, ticket_id, ticket_url, title, priority, summary, status, note_posted, label_added, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(t.conversationId, t.ticketId, t.ticketUrl, t.title, t.priority, t.summary, t.status, t.notePosted ? 1 : 0, t.labelAdded ? 1 : 0, Date.now());
+    this.db.prepare(`INSERT OR REPLACE INTO tickets (conversation_id, issue_key, ticket_id, ticket_url, title, priority, summary, status, note_posted, label_added, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(t.conversationId, t.issueKey, t.ticketId, t.ticketUrl, t.title, t.priority, t.summary, t.status, t.notePosted ? 1 : 0, t.labelAdded ? 1 : 0, Date.now());
   }
 
   logDismissal(conversationId: number, t: TicketRow | undefined, thread: ThreadMessage[]): void {
-    this.db.prepare('INSERT INTO dismissals (conversation_id, ticket_id, title, priority, summary, thread, at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(conversationId, t?.ticketId ?? null, t?.title ?? null, t?.priority ?? null, t?.summary ?? null, JSON.stringify(thread), Date.now());
+    this.db.prepare('INSERT INTO dismissals (conversation_id, issue_key, ticket_id, title, priority, summary, thread, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(conversationId, t?.issueKey ?? null, t?.ticketId ?? null, t?.title ?? null, t?.priority ?? null, t?.summary ?? null, JSON.stringify(thread), Date.now());
   }
 
   dismissals(): any[] {
@@ -230,6 +309,11 @@ export class Store {
 
   cancelJob(key: string): void {
     this.db.prepare('DELETE FROM jobs WHERE key = ?').run(key);
+  }
+
+  /** Cancels every job whose key starts with `prefix` (e.g. all of a conversation's per-thread classify jobs). */
+  cancelJobs(prefix: string): void {
+    this.db.prepare("DELETE FROM jobs WHERE substr(key, 1, length(?)) = ?").run(prefix, prefix);
   }
 
   getJob(key: string): (Job & { runAt: number; dead: boolean; lastError: string | null }) | undefined {

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { createHandler } from './app.ts';
-import { ChatwootApi } from './chatwoot.ts';
+import { ChatwootApi, KitaDesk } from './chatwoot.ts';
 import { ClaudeClassifier, OpenAIClassifier } from './claude.ts';
 import { capabilities, loadConfig } from './config.ts';
 import { GripClient } from './grip.ts';
@@ -21,6 +21,7 @@ const sync = new Sync({
   owners,
   grip: caps.grip ? new GripClient(cfg.gripBaseUrl, cfg.gripApiKey) : undefined,
   chatwoot: caps.tickets ? botApi : undefined,
+  desk: caps.threads ? new KitaDesk(cfg.chatwootBaseUrl, cfg.bridgeLinkSecret) : undefined,
   // Anthropic when its key is set, otherwise OpenAI.
   claude: !caps.tickets
     ? undefined

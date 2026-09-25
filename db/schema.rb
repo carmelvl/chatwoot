@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_09_17_000000) do
+ActiveRecord::Schema[7.1].define(version: 2026_09_24_000000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1183,6 +1183,32 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_17_000000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "settings", default: {}
+  end
+
+  create_table "kita_thread_reads", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "conversation_id", null: false
+    t.bigint "root_message_id", null: false
+    t.datetime "last_read_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id"], name: "index_kita_thread_reads_on_conversation_id"
+    t.index ["user_id", "root_message_id"], name: "index_kita_thread_reads_on_user_id_and_root_message_id", unique: true
+  end
+
+  create_table "kita_threads", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "conversation_id", null: false
+    t.bigint "root_message_id", null: false
+    t.string "title"
+    t.integer "status", default: 0, null: false
+    t.string "ticket_id"
+    t.string "ticket_url"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_kita_threads_on_account_id"
+    t.index ["conversation_id"], name: "index_kita_threads_on_conversation_id"
+    t.index ["root_message_id"], name: "index_kita_threads_on_root_message_id", unique: true
   end
 
   create_table "labels", force: :cascade do |t|

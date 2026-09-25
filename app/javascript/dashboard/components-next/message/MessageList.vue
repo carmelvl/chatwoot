@@ -1,10 +1,15 @@
 <script setup>
-import { computed, reactive } from 'vue';
+import { computed, reactive, watch } from 'vue';
 import Message from './Message.vue';
 import { MESSAGE_TYPES } from './constants.js';
 import { useCamelCase } from 'dashboard/composables/useTransformKeys';
 import { useMapGetter } from 'dashboard/composables/store.js';
 import MessageApi from 'dashboard/api/inbox/message.js';
+import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
+import {
+  isBridgeConversation,
+  isHiddenThreadReply,
+} from 'dashboard/helper/kitaThreads';
 
 /**
  * Props definition for the component
@@ -41,32 +46,44 @@ const props = defineProps({
 
 const emit = defineEmits(['retry']);
 
+const currentChat = useMapGetter('getSelectedChat');
+const conversationChannel = computed(
+  () => currentChat.value?.custom_attributes?.channel ?? null
+);
+const isBridge = computed(() => isBridgeConversation(currentChat.value));
+
+// Bridge conversations show only top-level messages; replies live in threads
 const allMessages = computed(() => {
-  return useCamelCase(props.messages, {
+  const messages = useCamelCase(props.messages, {
     deep: true,
     stopPaths: [
       'content_attributes.translations',
       'content_attributes.whatsapp_flow_response.response_json',
     ],
   });
+  return messages.filter(
+    message => !isHiddenThreadReply(message, isBridge.value)
+  );
 });
 
-const currentChat = useMapGetter('getSelectedChat');
-const conversationChannel = computed(
-  () => currentChat.value?.custom_attributes?.channel ?? null
+const { threadsByConversation, fetchThreads } = useKitaThreads();
+
+// Thread metadata keyed by root message id
+const threadsByRoot = computed(() => {
+  const threads = threadsByConversation[currentChat.value?.id] || [];
+  return Object.fromEntries(
+    threads.map(thread => [thread.root_message_id, thread])
+  );
+});
+
+// Refetch when the conversation changes or a message arrives
+watch(
+  () => [currentChat.value?.id, currentChat.value?.messages?.length],
+  ([conversationId]) => {
+    if (conversationId && isBridge.value) fetchThreads(conversationId);
+  },
+  { immediate: true }
 );
-
-// Thread replies loaded in view, keyed by root message id
-const threadReplies = computed(() => {
-  const replies = {};
-  allMessages.value.forEach(message => {
-    const rootId = message.contentAttributes?.inReplyTo;
-    if (!rootId) return;
-    replies[rootId] ??= { count: 0, firstReplyId: message.id };
-    replies[rootId].count += 1;
-  });
-  return replies;
-});
 
 // Cache for fetched reply messages to avoid duplicate API calls
 const fetchedReplyMessages = reactive(new Map());
@@ -200,7 +217,7 @@ const getInReplyToMessage = parentMessage => {
           index > 0 && shouldGroupWithNext(index - 1, allMessages)
         "
         :conversation-channel="conversationChannel"
-        :thread-replies="threadReplies[message.id]"
+        :kita-thread="threadsByRoot[message.id]"
         :inbox-supports-reply-to="inboxSupportsReplyTo"
         :current-user-id="currentUserId"
         data-clarity-mask="True"

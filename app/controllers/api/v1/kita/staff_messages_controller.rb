@@ -5,8 +5,7 @@
 # - A teammate with no desk account is posted as themselves: a Kita-staff contact (their platform name
 #   and avatar, custom_attributes.kita_staff), never the shared bridge user.
 class Api::V1::Kita::StaffMessagesController < ApplicationController
-  skip_before_action :set_current_user
-  before_action :authenticate_bridge!
+  include ::Kita::BridgeRequest
 
   def create
     conversation = account.conversations.find_by!(display_id: params.require(:conversation_id))
@@ -17,14 +16,6 @@ class Api::V1::Kita::StaffMessagesController < ApplicationController
   end
 
   private
-
-  def authenticate_bridge!
-    head :unauthorized unless ::Kita::Bridge.valid_secret?(request.headers['X-Kita-Bridge-Secret'])
-  end
-
-  def account
-    @account ||= Account.find(ENV.fetch('KITA_BRIDGE_ACCOUNT_ID', '1'))
-  end
 
   def matching_agent
     return if params[:email].blank?

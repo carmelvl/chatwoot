@@ -42,8 +42,6 @@ export interface InboundMessage {
   author?: 'customer' | 'staff';
   /** Extra ids that identify this message as one the bridge itself posted (e.g. Slack file ids). */
   echoKeys?: string[];
-  /** Per-message inbox (WhatsApp: one inbox per business number). Defaults to the platform's inbox. */
-  inboxIdentifier?: string;
   /** Contact identifier override (WhatsApp: whatsapp:+E164, shared across numbers). */
   contactIdentifier?: string;
 }
@@ -85,7 +83,14 @@ export interface OutboundMessage {
   agent?: AgentIdentity;
   /** Desk message this reply answers (Chatwoot "Reply to"): posted into that message's platform thread. */
   inReplyTo?: number;
+  /** Channel picked in the desk composer ("Replying in #x"): content_attributes.kita_channel_key. */
+  channelKey?: string;
 }
+
+/** Mirror platforms: the desk never sends there (people reply in the apps themselves). */
+export const MIRROR_PLATFORMS: readonly Platform[] = ['whatsapp', 'viber'];
+/** Platforms the desk can post into (as the agent). */
+export const SENDABLE_PLATFORMS: readonly Platform[] = ['slack', 'teams'];
 
 export interface Sender {
   send(replyRef: Record<string, unknown>, msg: OutboundMessage): Promise<SendResult | void>;
