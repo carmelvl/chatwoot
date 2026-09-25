@@ -2,10 +2,13 @@
 # conversations.custom_attributes (grip_account, account_owner, account_owner_email, channel; set by
 # grip-sync and kita-bridges). A customer has one conversation per platform (Tala on Slack, Tala on WhatsApp),
 # so rows group by grip_account_id (falling back to the grip_account name when only grip-sync has set it).
-# A conversation with neither is an unlinked channel: its own row (id "unlinked-<display id>", unlinked: true,
-# channel_key), listed last, named by its channel label.
-# Row shape: {id, name, dri_name, dri_email, platforms[], open_count, waiting_on_us, last_activity_at,
-#   grip_account_id, conversations[{id, platform, label, status, unread_count, last_activity_at}] (most recent first),
+# A bridge conversation (custom_attributes.channel set) with neither is an unlinked channel: its own row
+# (id "unlinked-<display id>", kind "unlinked", channel_key), named by its channel label. Any other conversation
+# (a website, email or API inbox) is a row of its own too (id "conversation-<display id>", kind "conversation"),
+# named by its contact. Both are listed after the customers.
+# Row shape: {id, kind (customer|unlinked|conversation), name, stage, dri_name, dri_email, platforms[], open_count,
+#   waiting_on_us, last_activity_at, grip_account_id, unread_count, open_tickets,
+#   conversations[{id, platform, label, status, unread_count, last_activity_at, inbox_id, channel_type}] (most recent first),
 #   last_message {content, sender_name, platform, message_type, created_at}|nil (latest public message),
 #   urgent_ticket (an open urgent Grip ticket on one of its threads)};
 # the source can later become Grip's full customer list without changing it.
@@ -25,6 +28,14 @@ class Kita::Customers
   end
 
   CUSTOMER_KEY = "COALESCE(conversations.custom_attributes->>'grip_account_id', conversations.custom_attributes->>'grip_account')".freeze
+  # The row id of a conversation, in SQL: its customer, else its own unlinked-/conversation- row.
+  ROW_KEY = <<~SQL.squish.freeze
+    COALESCE(NULLIF(conversations.custom_attributes->>'grip_account_id', ''), NULLIF(conversations.custom_attributes->>'grip_account', ''),
+             CASE WHEN COALESCE(conversations.custom_attributes->>'channel', '') = '' THEN 'conversation-' ELSE 'unlinked-' END
+             || conversations.display_id)
+  SQL
+  OPEN_TICKET = "kita_threads.ticket_id IS NOT NULL AND " \
+                "(kita_threads.ticket_status IS NULL OR kita_threads.ticket_status NOT IN ('resolved', 'dismissed'))".freeze
 
   # Placeholder labels older bridges stored: a raw "platform:id" key is never shown.
   RAW_KEY = /\A(slack|teams|whatsapp|viber):/
@@ -53,21 +64,33 @@ class Kita::Customers
     (attrs['grip_account_id'].presence || attrs['grip_account'].presence || UNLINKED_ID).to_s
   end
 
+  # The row id of a conversation (ROW_KEY in Ruby)
+  def self.row_id(conversation)
+    attrs = conversation.custom_attributes || {}
+    key = attrs['grip_account_id'].presence || attrs['grip_account'].presence
+    return key.to_s if key
+
+    "#{attrs['channel'].present? ? 'unlinked' : 'conversation'}-#{conversation.display_id}"
+  end
+
   # Per-customer conversations (the header tabs), latest public message and urgent tickets, in three queries.
   def attach_details(rows)
-    conversations = @conversations.reorder(nil).includes(:contact).to_a
+    conversations = @conversations.reorder(nil).includes(:contact, :inbox).to_a
     ids = conversations.map(&:id)
     @latest = latest_messages(ids)
     @unread = unread_counts(ids)
     @urgent = urgent_conversation_ids(ids)
+    @tickets = open_ticket_counts(ids)
     @by_key = conversations.group_by { |conversation| customer_key(conversation) }
     rows.each { |row| row.merge!(details((@by_key[row[:id]] || []).sort_by { |c| -c.last_activity_at.to_i })) }
   end
 
   def unlinked_row(conversation)
     attrs = conversation.custom_attributes || {}
+    bridge = attrs['channel'].present?
     {
-      id: "unlinked-#{conversation.display_id}", name: channel_label(conversation), unlinked: true, channel_key: attrs['channel_key'],
+      id: self.class.row_id(conversation), kind: bridge ? 'unlinked' : 'conversation', unlinked: bridge, channel_key: attrs['channel_key'],
+      name: bridge ? channel_label(conversation) : conversation.contact&.name.presence || conversation.inbox&.name, stage: nil,
       dri_name: nil, dri_email: nil, platforms: [attrs['channel']].compact, open_count: conversation.open? ? 1 : 0,
       waiting_on_us: conversation.open? && @latest[conversation.id]&.incoming? == true,
       last_activity_at: conversation.last_activity_at&.to_i
@@ -79,7 +102,9 @@ class Kita::Customers
       grip_account_id: list.first&.custom_attributes&.dig('grip_account_id'),
       conversations: list.map { |c| conversation_row(c, @unread[c.id]) },
       last_message: latest_message_row(list),
-      urgent_ticket: list.any? { |c| @urgent.include?(c.id) }
+      urgent_ticket: list.any? { |c| @urgent.include?(c.id) },
+      unread_count: list.sum { |c| @unread[c.id].to_i },
+      open_tickets: list.sum { |c| @tickets[c.id].to_i }
     }
   end
 
@@ -92,7 +117,8 @@ class Kita::Customers
     attrs = conversation.custom_attributes || {}
     {
       id: conversation.display_id, platform: attrs['channel'], label: channel_label(conversation), status: conversation.status,
-      unread_count: unread_count.to_i, last_activity_at: conversation.last_activity_at&.to_i
+      unread_count: unread_count.to_i, last_activity_at: conversation.last_activity_at&.to_i,
+      inbox_id: conversation.inbox_id, channel_type: conversation.inbox&.channel_type
     }
   end
 
@@ -144,11 +170,16 @@ class Kita::Customers
                          .distinct.pluck(:conversation_id).to_set
   end
 
+  def open_ticket_counts(ids)
+    ::Kita::MessageThread.where(conversation_id: ids).where(OPEN_TICKET).group(:conversation_id).count
+  end
+
   def columns
     open = Conversation.statuses[:open]
     [
       CUSTOMER_KEY,
       "MAX(conversations.custom_attributes->>'grip_account')",
+      "MAX(conversations.custom_attributes->>'grip_stage')",
       "MAX(conversations.custom_attributes->>'account_owner')",
       "MAX(conversations.custom_attributes->>'account_owner_email')",
       "ARRAY_REMOVE(ARRAY_AGG(DISTINCT conversations.custom_attributes->>'channel'), NULL)",
@@ -159,9 +190,9 @@ class Kita::Customers
   end
 
   def row(values)
-    key, name, dri_name, dri_email, platforms, open_count, waiting_on_us, last_activity_at = values
+    key, name, stage, dri_name, dri_email, platforms, open_count, waiting_on_us, last_activity_at = values
     {
-      id: key.presence || UNLINKED_ID, name: name.presence, dri_name: dri_name, dri_email: dri_email,
+      id: key.presence || UNLINKED_ID, kind: 'customer', name: name.presence, stage: stage.presence, dri_name: dri_name, dri_email: dri_email,
       platforms: platforms.sort, open_count: open_count, waiting_on_us: waiting_on_us, last_activity_at: last_activity_at&.to_i
     }
   end

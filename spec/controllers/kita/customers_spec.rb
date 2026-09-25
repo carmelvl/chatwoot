@@ -106,6 +106,22 @@ RSpec.describe 'Kita customers', type: :request do
     expect(response.parsed_body['payload'].find { |r| r['id'] == "unlinked-#{teams.display_id}" }['name']).to eq('Acme › Support')
   end
 
+  it 'leaves conversations from other inboxes out of the directory and serves any row on its own' do
+    website = conversation_for({})
+    get path, headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body['payload'].pluck('kind').uniq).to contain_exactly('customer', 'unlinked')
+
+    get "#{path}/Tala", headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body).to include('id' => 'Tala', 'kind' => 'customer', 'open_count' => 2, 'open_tickets' => 0)
+    expect(response.parsed_body['conversations'].size).to eq(2)
+
+    get "#{path}/conversation-#{website.display_id}", headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body).to include('kind' => 'conversation', 'name' => website.contact.name)
+
+    get "#{path}/Hidden%20Co", headers: agent.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:not_found)
+  end
+
   it 'creates one "My customers" saved view per agent that filters conversations by account_owner_email' do
     post "#{path}/my_view", headers: agent.create_new_auth_token, as: :json
     first_id = response.parsed_body['id']
