@@ -42,6 +42,11 @@ export interface InboundMessage {
   author?: 'customer' | 'staff';
   /** Extra ids that identify this message as one the bridge itself posted (e.g. Slack file ids). */
   echoKeys?: string[];
+  /**
+   * Slack files the event listed without a download URL (file_access "check_file_info", or still
+   * uploading): resolved through files.info before delivery, so a file-only message is never empty.
+   */
+  pendingFileIds?: string[];
   /** Contact identifier override (WhatsApp: whatsapp:+E164, shared across numbers). */
   contactIdentifier?: string;
   /** When the platform says it was sent (unix seconds). The desk keeps it as created_at for imported history. */

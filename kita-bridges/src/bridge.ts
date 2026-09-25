@@ -3,7 +3,7 @@ import { type ChatwootAppClient, type ChatwootClient, downloadAttachments, toOut
 import { log } from './log.ts';
 import type { ScopeChannel, ScopeCheck } from './scope.ts';
 import { CUSTOMERS, type ChannelRow, type ConversationRow, type Store } from './store.ts';
-import { MIRROR_PLATFORMS, SENDABLE_PLATFORMS, type AgentIdentity, type RefusalReason, type InboundMessage, type OutboundAttachment, type OutboundMessage, type Platform, type Sender } from './types.ts';
+import { MIRROR_PLATFORMS, SENDABLE_PLATFORMS, type AgentIdentity, type RefusalReason, type InboundAttachment, type InboundMessage, type OutboundAttachment, type OutboundMessage, type Platform, type Sender } from './types.ts';
 
 export interface BridgeDeps {
   store: Store;
@@ -24,6 +24,8 @@ export interface BridgeDeps {
   scope?: ScopeCheck;
   /** Resolves a human channel label the message itself doesn't carry (Teams: Graph). Optional. */
   labeler?: (platform: Platform, replyRef: Record<string, unknown>) => Promise<string | undefined>;
+  /** Slack files.info: a file the event listed without a download URL. Optional. */
+  slackFile?: (fileId: string) => Promise<InboundAttachment | undefined>;
 }
 
 export type InboundResult = 'duplicate' | 'created' | 'appended' | 'staff_synced' | 'ignored' | 'out_of_scope';
@@ -126,8 +128,21 @@ export class Bridge {
     const { store } = this.d;
     if (this.outOfScope(msg)) return 'out_of_scope';
     const seenKey = `in:${msg.platform}:${msg.eventId}`;
-    if (this.known(msg)) return 'duplicate';
-    if (!store.markSeen(seenKey)) return 'duplicate';
+    const known = this.known(msg);
+    if (known) {
+      // Reason only, never content: a skipped message is never silent
+      log.info('inbound_duplicate', { platform: msg.platform, reason: known, files: msg.attachments.length + (msg.pendingFileIds?.length ?? 0) });
+      return 'duplicate';
+    }
+    if (!store.markSeen(seenKey)) {
+      log.info('inbound_duplicate', { platform: msg.platform, reason: 'in_flight' });
+      return 'duplicate';
+    }
+    msg = await this.withPendingFiles(msg);
+    if (!msg.text.trim() && !msg.attachments.length) {
+      log.info('inbound_ignored', { platform: msg.platform, reason: 'empty_after_file_lookup' });
+      return 'ignored';
+    }
     try {
       return msg.author === 'staff' ? await this.staffInbound(msg) : await this.customerInbound(msg);
     } catch (e) {
@@ -140,10 +155,25 @@ export class Bridge {
    * Already in the desk: an echo of our own post (file ids), or a message imported before. `seen` keys are
    * pruned after 7 days, so the permanent message map is checked too (live vs history import never duplicate).
    */
-  private known(msg: InboundMessage): boolean {
+  private known(msg: InboundMessage): 'imported' | 'own_file_echo' | false {
     const { store } = this.d;
-    if (store.getMessageByExt(msg.platform, msg.eventId)) return true;
-    return !!msg.echoKeys?.some((k) => store.isSeen(`in:${msg.platform}:${k}`) || store.getMessageByExt(msg.platform, k));
+    if (store.getMessageByExt(msg.platform, msg.eventId)) return 'imported';
+    const echo = msg.echoKeys?.some((k) => store.isSeen(`in:${msg.platform}:${k}`) || store.getMessageByExt(msg.platform, k));
+    return echo ? 'own_file_echo' : false;
+  }
+
+  /** Resolves Slack files listed without a URL (files.info) into attachments. */
+  private async withPendingFiles(msg: InboundMessage): Promise<InboundMessage> {
+    if (!msg.pendingFileIds?.length) return msg;
+    const resolved: InboundAttachment[] = [];
+    for (const id of msg.pendingFileIds) {
+      const a = await this.d.slackFile?.(id);
+      if (a) resolved.push(a);
+    }
+    if (resolved.length < msg.pendingFileIds.length) {
+      log.warn('inbound_files_unresolved', { platform: msg.platform, missing: msg.pendingFileIds.length - resolved.length });
+    }
+    return { ...msg, attachments: [...msg.attachments, ...resolved], pendingFileIds: undefined };
   }
 
   /** Desk contact in the Customers inbox, created on first sight; returns its source_id. */
@@ -351,6 +381,13 @@ export class Bridge {
     };
   }
 
+  /** Downloads the message's files; a file that can't be fetched becomes a link in the text, and is logged. */
+  private async download(msg: InboundMessage) {
+    const result = await downloadAttachments(msg.attachments, this.d.fetchImpl);
+    for (const f of result.failed) log.warn('attachment_download_failed', { platform: msg.platform, reason: f.error ?? 'unknown' });
+    return result;
+  }
+
   private remember(msg: InboundMessage, deskId: number, channelKey: string) {
     this.d.store.putMessage(msg.platform, msg.eventId, deskId, msg.thread?.root ?? msg.eventId, channelKey);
   }
@@ -361,7 +398,7 @@ export class Bridge {
     // The conversation belongs to the company (or channel); the message is authored by the person who wrote it.
     const senderIdentifier = msg.contactIdentifier ?? contactIdentifier(msg.platform, msg.userKey);
     await this.ensureContact({ identifier: senderIdentifier, name: msg.userName || msg.userKey, avatarUrl: msg.userAvatarUrl, customAttributes: { channel: msg.platform } });
-    const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
+    const { files, failed } = await this.download(msg);
     const content = composeInboundText(msg.text, failed.map((f) => f.url));
     const deskId = await chatwoot.createMessage(inbox, conv.sourceId, conv.conversationId, content, files, `${msg.platform}:${msg.eventId}`, {
       senderIdentifier,
@@ -380,10 +417,16 @@ export class Bridge {
    */
   private async staffInbound(msg: InboundMessage): Promise<InboundResult> {
     const { store, desk } = this.d;
-    if (this.isOurEcho(msg)) return 'duplicate';
-    if (!desk) return 'ignored';
+    if (this.isOurEcho(msg)) {
+      log.info('inbound_duplicate', { platform: msg.platform, reason: 'own_text_echo' });
+      return 'duplicate';
+    }
+    if (!desk) {
+      log.warn('inbound_ignored', { platform: msg.platform, reason: 'no_desk_client' });
+      return 'ignored';
+    }
     const { conv, channelKey, label } = await this.ensureConversation(msg);
-    const { files, failed } = await downloadAttachments(msg.attachments, this.d.fetchImpl);
+    const { files, failed } = await this.download(msg);
     const who = { email: msg.userEmail, staffKey: `${msg.platform}:${msg.userKey}`, name: msg.userName || msg.userKey, avatarUrl: msg.userAvatarUrl };
     const created = await desk.staffMessage(conv.conversationId, who, {
       content: composeInboundText(msg.text, failed.map((f) => f.url)),
@@ -392,7 +435,7 @@ export class Bridge {
     });
     store.markSeen(`out:${created.id}`);
     this.remember(msg, created.id, channelKey);
-    log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId });
+    log.info('staff_synced', { platform: msg.platform, conversation: conv.conversationId, files: files.length });
     return 'staff_synced';
   }
 

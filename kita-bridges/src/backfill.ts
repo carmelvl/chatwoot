@@ -76,12 +76,17 @@ export class Backfiller {
    * Queues a backfill of `channelKey` unless it already completed (use `force` to run it again).
    * Returns when it has run. A channel already queued shares the pending run.
    */
-  request(platform: Platform, channelKey: string, ref: Record<string, unknown>, o: { force?: boolean } = {}): Promise<BackfillOutcome> {
+  request(
+    platform: Platform,
+    channelKey: string,
+    ref: Record<string, unknown>,
+    o: { force?: boolean; onlyFiles?: boolean } = {},
+  ): Promise<BackfillOutcome> {
     const row = this.d.store.getBackfill(channelKey);
     if (row?.state === 'completed' && !o.force) return Promise.resolve('completed');
     const queued = this.pending.get(channelKey);
     if (queued) return queued;
-    const p = this.tail.then(() => this.run(platform, channelKey, ref, o.force)).finally(() => this.pending.delete(channelKey));
+    const p = this.tail.then(() => this.run(platform, channelKey, ref, o.force, o.onlyFiles)).finally(() => this.pending.delete(channelKey));
     this.pending.set(channelKey, p);
     this.tail = p.catch(() => undefined);
     return p;
@@ -102,12 +107,22 @@ export class Backfiller {
     return Promise.all(rows.map((b) => this.request(b.platform, b.channelKey, b.ref)));
   }
 
+  /**
+   * Repair: re-reads the history of every completed channel of `platform` and imports the messages with
+   * files that never reached the desk (text messages and anything already imported are skipped without a
+   * desk call). For file messages an earlier bridge dropped.
+   */
+  rescanFiles(platform: Platform): Promise<BackfillOutcome[]> {
+    const rows = this.d.store.listBackfills('completed').filter((b) => b.platform === platform);
+    return Promise.all(rows.map((b) => this.request(b.platform, b.channelKey, b.ref, { force: true, onlyFiles: true })));
+  }
+
   /** True when the channel has a backfill row in any state (reconciliation only starts unknown channels). */
   known(channelKey: string): boolean {
     return !!this.d.store.getBackfill(channelKey);
   }
 
-  private async run(platform: Platform, channelKey: string, ref: Record<string, unknown>, force?: boolean): Promise<BackfillOutcome> {
+  private async run(platform: Platform, channelKey: string, ref: Record<string, unknown>, force?: boolean, onlyFiles?: boolean): Promise<BackfillOutcome> {
     const { store } = this.d;
     const runner = this.d.runners[platform];
     if (!runner) return 'no_runner';
@@ -135,6 +150,7 @@ export class Backfiller {
       import: async (msg, position) => {
         // Strictly older than the cursor was imported before; the cursor itself is re-offered and deduped.
         if (resumeFrom && position < resumeFrom) return;
+        if (onlyFiles && !msg.attachments.length && !msg.pendingFileIds?.length) return;
         const result = await this.d.deliver({ ...msg, backfill: true });
         if (result === 'created' || result === 'appended' || result === 'staff_synced') row.imported++;
         row.cursor = position;

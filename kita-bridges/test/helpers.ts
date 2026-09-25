@@ -55,7 +55,18 @@ export function staticScope(links: Record<string, Partial<ScopeChannel>> = {}) {
   return { map, allows: () => true, channel: (k?: string) => (k ? map.get(k) : undefined), link: (k: string, v: Partial<ScopeChannel>) => map.set(k, { channel_key: k, ...v }) };
 }
 
-export function makeBridge(o: { scope?: ScopeCheck; labeler?: BridgeDeps['labeler']; appStatus?: (path: string) => number } = {}) {
+/** JSON body, or a multipart body as { files: names, ...fields }. */
+const bodyOf = (init: any) => {
+  if (!(init.body instanceof FormData)) return JSON.parse(init.body);
+  const form: FormData = init.body;
+  const body: any = { files: form.getAll('attachments[]').map((f: any) => f.name) };
+  for (const [k, v] of form.entries()) if (k !== 'attachments[]') body[k] = v;
+  return body;
+};
+
+export function makeBridge(
+  o: { scope?: ScopeCheck; labeler?: BridgeDeps['labeler']; appStatus?: (path: string) => number; slackFile?: BridgeDeps['slackFile'] } = {},
+) {
   const cw = fakeChatwoot();
   const store = new Store(':memory:');
   const senders = { slack: new RecordingSender(), teams: new RecordingSender(), viber: new RecordingSender() };
@@ -69,9 +80,9 @@ export function makeBridge(o: { scope?: ScopeCheck; labeler?: BridgeDeps['labele
   const deskCalls: { path: string; body: any }[] = [];
   const desk = new KitaDeskClient('http://rails:3000', 'link-secret', (async (u: any, init: any) => {
     const path = new URL(String(u)).pathname;
-    deskCalls.push({ path, body: JSON.parse(init.body) });
+    deskCalls.push({ path, body: bodyOf(init) });
     return Response.json(path.endsWith('/conversation_merges') ? { moved: 2 } : { id: next++ });
   }) as typeof fetch);
-  const bridge = new Bridge({ store, chatwoot: cw.client, inbox: 'IN_CUSTOMERS', senders, publicUrl: PUBLIC_URL, fetchImpl: cw.fetchImpl, app, desk, scope: o.scope, labeler: o.labeler });
+  const bridge = new Bridge({ store, chatwoot: cw.client, inbox: 'IN_CUSTOMERS', senders, publicUrl: PUBLIC_URL, fetchImpl: cw.fetchImpl, app, desk, scope: o.scope, labeler: o.labeler, slackFile: o.slackFile });
   return { bridge, store, cw, senders, appCalls, deskCalls };
 }

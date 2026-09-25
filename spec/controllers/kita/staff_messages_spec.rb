@@ -42,6 +42,19 @@ RSpec.describe 'Kita bridge staff messages', type: :request do
     expect(response.body).not_to include('access_token')
   end
 
+  it 'posts a file-only staff message (no text) with its images and files as desk attachments' do
+    image = Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/avatar.png'), 'image/png')
+    pdf = Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.pdf'), 'application/pdf')
+    post '/api/v1/kita/staff_messages', params: params.merge(content: '', attachments: [image, pdf]),
+                                        headers: { 'X-Kita-Bridge-Secret' => secret }
+
+    expect(response).to have_http_status(:ok)
+    message = conversation.messages.outgoing.last
+    expect(message.content).to be_blank
+    expect(message.attachments.map(&:file_type)).to eq(%w[image file])
+    expect(message.attachments.map { |a| a.file.attached? }).to eq([true, true])
+  end
+
   it 'matches across Kita email domain aliases (usekita.com is kita.ai)' do
     post '/api/v1/kita/staff_messages', params: params.merge(email: 'SAM.LEE@usekita.com'), headers: { 'X-Kita-Bridge-Secret' => secret }
     expect(conversation.messages.outgoing.last.sender).to eq(agent)

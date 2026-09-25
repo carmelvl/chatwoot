@@ -152,7 +152,7 @@ const MAX_ATTACHMENT_BYTES = 40 * 1024 * 1024;
 /** Downloads platform attachments; failures degrade to a link in the text rather than dropping the message. */
 export async function downloadAttachments(atts: InboundAttachment[], fetchImpl: typeof fetch = fetch) {
   const files: { blob: Blob; name: string }[] = [];
-  const failed: InboundAttachment[] = [];
+  const failed: (InboundAttachment & { error?: string })[] = [];
   for (const a of atts) {
     try {
       const res = await fetchImpl(a.url, { headers: a.headers, redirect: 'follow' });
@@ -160,8 +160,8 @@ export async function downloadAttachments(atts: InboundAttachment[], fetchImpl: 
       const buf = await res.arrayBuffer();
       if (buf.byteLength > MAX_ATTACHMENT_BYTES) throw new Error('too_large');
       files.push({ blob: new Blob([buf], { type: a.contentType ?? res.headers.get('content-type') ?? 'application/octet-stream' }), name: a.name });
-    } catch {
-      failed.push(a);
+    } catch (e: any) {
+      failed.push({ ...a, error: String(e?.message ?? e) });
     }
   }
   return { files, failed };

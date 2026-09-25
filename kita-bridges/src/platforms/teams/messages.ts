@@ -142,13 +142,16 @@ export function parseGraphMessage(m: any, loc: MessageLocation, sender: SenderKi
   const attachments: InboundAttachment[] = [];
   if (html) {
     // Inline images are hostedContents, fetched with the Kita user's token (headers added by the caller).
-    for (const [, src] of String(m.body.content).matchAll(/<img[^>]+src="(https:\/\/graph\.microsoft\.com\/[^"]+\/hostedContents\/[^"]+)"/gi))
+    for (const [, src] of String(m.body.content).matchAll(/<img[^>]+src=["'](https:\/\/graph\.microsoft\.com\/[^"']+\/hostedContents\/[^"']+)["']/gi))
       attachments.push({ url: src.replace(/&amp;/g, '&'), name: `image-${m.id}-${attachments.length + 1}.png`, contentType: 'image/png' });
   }
   for (const a of m.attachments ?? []) {
     // Files live in the sender's SharePoint/OneDrive; the bridge can't always read them (cross-tenant),
     // in which case the agent gets the link.
     if (a.contentType === 'reference' && a.contentUrl) attachments.push({ url: a.contentUrl, name: a.name ?? 'file' });
+    // Images/files attached directly (not a SharePoint reference, not a card or a quoted message)
+    else if (a.contentUrl && /^(image|video|audio|application)\//.test(String(a.contentType ?? '')) && !String(a.contentType).includes('vnd.microsoft'))
+      attachments.push({ url: a.contentUrl, name: a.name ?? 'file', contentType: a.contentType });
   }
   if (!text && attachments.length === 0) return { kind: 'ignore', reason: 'empty' };
 

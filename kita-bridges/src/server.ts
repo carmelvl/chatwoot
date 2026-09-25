@@ -64,7 +64,8 @@ const desk = cfg.linkSecret ? new KitaDeskClient(cfg.chatwootBaseUrl, cfg.linkSe
 const labeler = teams
   ? (platform: Platform, ref: Record<string, unknown>) => (platform === 'teams' ? teamsLabel(teams.graph, ref, cfg.teams.kitaUserUpn) : Promise.resolve(undefined))
   : undefined;
-bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope, labeler });
+bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope, labeler,
+  ...(slack ? { slackFile: (id: string) => slack.fileAttachment(id) } : {}) });
 // History import when the Kita bot/user joins a channel or chat (Slack, Teams). WhatsApp history comes from Meta's
 // one-time `history` webhook (processed in app.ts).
 const slackHistory = slack
@@ -91,6 +92,12 @@ const reconcileSlack = async () => {
   const missing = channels.filter((c) => !backfiller!.known(`slack:${c}`));
   log.info('slack_backfill_reconcile', { member_of: channels.length, missing: missing.length, resumed: resumed.length });
   for (const c of missing) await backfillSlack(c);
+  // One-time repair: file messages an earlier bridge dropped (flag in the store, so it runs once)
+  if (!store.getKv('repair:slack_files_v1')) {
+    const outcomes = await backfiller.rescanFiles('slack');
+    store.putKv('repair:slack_files_v1', new Date().toISOString());
+    log.info('slack_files_rescanned', { channels: outcomes.length });
+  }
 };
 const onSlackJoin = async (channel: string, user: string, self?: boolean) => {
   const isBot = self ?? (user === (await slackHistory?.botUserId()));

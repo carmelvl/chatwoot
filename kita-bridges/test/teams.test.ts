@@ -301,3 +301,17 @@ test('connect flow: only the Kita user is accepted; refresh token is stored encr
   await auth.accessToken(); // expired (expires_in: 1) -> refresh grant -> rotated token stored
   assert.notEqual(store.getKv('teams.refresh_token'), sealed);
 });
+
+test('image-only messages and single-quoted inline images and direct image attachments are kept', () => {
+  const loc = parseResource(fixture('graph_notification_channel.json').value[0].resource)!;
+  const base = fixture('graph_channel_reply_external.json');
+  const p = parseGraphMessage({
+    ...base,
+    body: { contentType: 'html', content: "<p><img alt='x' src='https://graph.microsoft.com/v1.0/teams/t/channels/c/messages/1/hostedContents/abc/$value'></p>" },
+    attachments: [{ id: 'a1', contentType: 'image/png', contentUrl: 'https://example.com/photo.png', name: 'photo.png' }],
+  }, loc, 'customer');
+  assert.equal(p.kind, 'message');
+  if (p.kind !== 'message') return;
+  assert.equal(p.message.text, '');
+  assert.deepEqual(p.message.attachments.map((a) => a.name), [`image-${base.id}-1.png`, 'photo.png']);
+});

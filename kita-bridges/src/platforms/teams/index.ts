@@ -118,6 +118,7 @@ export class TeamsIntegration {
       try {
         const parsed = await resolveNotification(this.graph, this.classifier, n);
         if (parsed.kind === 'message') await deliver(parsed.message);
+        else log.info('teams_event_ignored', { reason: parsed.reason });
       } catch (e) {
         log.error('teams_inbound_failed', { error: String((e as Error).message) });
       }

@@ -208,10 +208,12 @@ export function createHandler(d: AppDeps) {
         const parsed = parseSlackEvent(JSON.parse(raw), { botToken: cfg.slack.botToken, internalTeamIds: cfg.slack.internalTeamIds, allowedChannels: cfg.slack.allowedChannels });
         if (parsed.kind === 'challenge') return send(res, 200, { challenge: parsed.challenge });
         send(res, 200); // Slack requires an ack within 3s
+        // Reason only, never content: an ignored event is never silent
+        if (parsed.kind === 'ignore') log.info('slack_event_ignored', { reason: parsed.reason });
         if (parsed.kind === 'joined' && d.onSlackJoin) background('slack_join', d.onSlackJoin(parsed.channel, parsed.user, parsed.self));
         if (parsed.kind === 'message') {
           const m = parsed.message;
-          if (bridge.outOfScope(m)) return; // before the Slack user lookup or any Chatwoot call
+          if (bridge.outOfScope(m)) return; // before the Slack user lookup or any Chatwoot call (logged there)
           background('slack_inbound', (async () => {
             const channelLabel = await d.slack?.channelName(String(m.replyRef.channel ?? ''));
             const attrs = channelLabel ? { ...m.conversationAttributes, channel_label: channelLabel } : m.conversationAttributes;

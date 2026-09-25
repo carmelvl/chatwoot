@@ -71,3 +71,31 @@ test('a non-retryable failure is not retried in-process', async () => {
   assert.equal(await s.backfiller.request('slack', 'slack:C1', { channel: 'C1' }), 'failed');
   assert.equal(s.scheduled.length, 0);
 });
+
+test('rescanFiles re-reads completed channels and imports only file messages', async () => {
+  const store = new Store(':memory:');
+  const delivered: string[] = [];
+  const history = [
+    { eventId: 'C1:1', text: 'hello', attachments: [] },
+    { eventId: 'C1:2', text: '', attachments: [{ url: 'https://files.slack.com/x/image.png', name: 'image.png' }] },
+  ];
+  const backfiller = new Backfiller({
+    store,
+    deliver: async (m) => {
+      delivered.push(m.eventId);
+      return 'created';
+    },
+    runners: {
+      slack: async (ctx) => {
+        for (const [i, m] of history.entries()) await ctx.import({ platform: 'slack', ...m } as any, String(i));
+      },
+    },
+    schedule: () => undefined,
+  });
+  await backfiller.request('slack', 'slack:C1', { channel: 'C1' });
+  assert.deepEqual(delivered, ['C1:1', 'C1:2']);
+
+  delivered.length = 0;
+  assert.deepEqual(await backfiller.rescanFiles('slack'), ['completed']);
+  assert.deepEqual(delivered, ['C1:2']);
+});

@@ -3,7 +3,7 @@ import { seal, unseal } from '../crypto.ts';
 import { normalizeEmail } from '../email.ts';
 import { log } from '../log.ts';
 import type { Store } from '../store.ts';
-import type { InboundMessage, OutboundMessage, Sender, SendResult } from '../types.ts';
+import type { InboundAttachment, InboundMessage, OutboundMessage, Sender, SendResult } from '../types.ts';
 
 const MAX_SKEW_S = 300;
 
@@ -35,6 +35,13 @@ export type SlackParsed =
 
 const ALLOWED_SUBTYPES = new Set([undefined, 'file_share', 'thread_broadcast']);
 
+/** Slack file object -> inbound attachment (downloaded with the bot token), or undefined without a URL. */
+export function slackAttachment(f: any, botToken: string): InboundAttachment | undefined {
+  const url = f?.url_private_download ?? f?.url_private;
+  if (!url) return undefined;
+  return { url, name: f.name ?? f.title ?? 'file', contentType: f.mimetype, headers: { authorization: `Bearer ${botToken}` } };
+}
+
 /**
  * Slack Events API payload -> normalised customer message.
  * Mapping: one desk conversation per channel. Threads are surfaced per message: every message
@@ -52,6 +59,13 @@ export function parseSlackEvent(payload: any, opts: SlackParseOptions): SlackPar
     return { kind: 'joined', channel: ev.channel, user: ev.user, self: botUserIds.length ? botUserIds.includes(ev.user) : undefined };
   }
   if (ev.type !== 'message') return { kind: 'ignore', reason: `event:${ev.type}` };
+  // A file upload can land as an edit once Slack has processed the files: import the edited message
+  // (deduped on channel:ts if its first event already came through).
+  if (ev.subtype === 'message_changed') {
+    const inner = ev.message ?? {};
+    if (!inner.files?.length) return { kind: 'ignore', reason: 'subtype:message_changed' };
+    return parseSlackMessage({ ...inner, channel: ev.channel, subtype: inner.subtype === 'file_share' ? 'file_share' : undefined }, opts, botUserIds);
+  }
   return parseSlackMessage(ev, opts, botUserIds);
 }
 
@@ -71,14 +85,10 @@ export function parseSlackMessage(ev: any, opts: SlackParseOptions, botUserIds: 
   if (opts.allowedChannels.length && !opts.allowedChannels.includes(ev.channel)) return { kind: 'ignore', reason: 'channel_not_allowed' };
 
   const rootTs: string = ev.thread_ts ?? ev.ts;
-  const attachments = (ev.files ?? [])
-    .filter((f: any) => f?.url_private_download || f?.url_private)
-    .map((f: any) => ({
-      url: f.url_private_download ?? f.url_private,
-      name: f.name ?? f.title ?? 'file',
-      contentType: f.mimetype,
-      headers: { authorization: `Bearer ${opts.botToken}` },
-    }));
+  const files: any[] = (ev.files ?? []).filter((f: any) => f?.id || f?.url_private);
+  const attachments = files.map((f) => slackAttachment(f, opts.botToken)).filter((a): a is InboundAttachment => !!a);
+  const pendingFileIds = files.filter((f) => !slackAttachment(f, opts.botToken) && f.id).map((f) => String(f.id));
+  if (!String(ev.text ?? '').trim() && !attachments.length && !pendingFileIds.length) return { kind: 'ignore', reason: 'empty' };
   return {
     kind: 'message',
     message: {
@@ -94,6 +104,7 @@ export function parseSlackMessage(ev: any, opts: SlackParseOptions, botUserIds: 
       channelConversation: true,
       text: slackToMarkdown(ev.text ?? ''),
       attachments,
+      ...(pendingFileIds.length ? { pendingFileIds } : {}),
       createdAt: Number(ev.ts),
       conversationAttributes: { channel_key: `slack:${ev.channel}`, slack_channel: ev.channel, slack_team: String(userTeam ?? '') },
     },
@@ -234,6 +245,24 @@ export class SlackSender implements Sender {
     }
   }
 
+
+  /** files.info (files:read) for a file the event listed without a URL; undefined when unavailable. */
+  async fileAttachment(fileId: string): Promise<InboundAttachment | undefined> {
+    try {
+      const res = await this.fetchImpl(`https://slack.com/api/files.info?file=${encodeURIComponent(fileId)}`, {
+        headers: { authorization: `Bearer ${this.token}` },
+      });
+      const j: any = await res.json();
+      if (!j.ok) {
+        log.warn('slack_file_info_failed', { reason: String(j.error ?? res.status) });
+        return undefined;
+      }
+      return slackAttachment(j.file, this.token);
+    } catch (e: any) {
+      log.warn('slack_file_info_failed', { reason: String(e?.message ?? e) });
+      return undefined;
+    }
+  }
 
   private channels = new Map<string, string>();
   /** Best-effort "#channel-name" (channels:read / groups:read); undefined when unknown. */
