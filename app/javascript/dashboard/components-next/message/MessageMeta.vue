@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { messageTimestamp } from 'shared/helpers/timeHelper';
+import { messageStamp, messageTimestamp } from 'shared/helpers/timeHelper';
 import { useExactTimestamp } from 'shared/composables/useExactTimestamp';
 
 import MessageStatus from './MessageStatus.vue';
@@ -9,6 +9,11 @@ import { useInbox } from 'dashboard/composables/useInbox';
 import { useMessageContext } from './provider.js';
 
 import { MESSAGE_STATUS, MESSAGE_TYPES } from './constants';
+
+// Compact meta sits in the message header: time only, full date on hover
+const props = defineProps({
+  compact: { type: Boolean, default: false },
+});
 
 const exactTimestamp = useExactTimestamp();
 
@@ -36,7 +41,9 @@ const {
 } = useMessageContext();
 
 const readableTime = computed(() =>
-  messageTimestamp(createdAt.value, 'LLL d, h:mm a')
+  props.compact
+    ? messageStamp(createdAt.value)
+    : messageTimestamp(createdAt.value, 'LLL d, h:mm a')
 );
 
 const exactTime = computed(() => exactTimestamp(createdAt.value));

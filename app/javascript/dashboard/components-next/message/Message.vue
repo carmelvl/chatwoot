@@ -23,7 +23,9 @@ import {
 } from './constants';
 
 import MessageSenderAvatar from './MessageSenderAvatar.vue';
+import MessageMeta from './MessageMeta.vue';
 import { getMessageOrientation, isKitaTeammate } from './helpers/messageSide';
+import { getMessageLayout } from './helpers/messageLayout';
 import { KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
 
 import TextBubble from './bubbles/Text/Index.vue';
@@ -251,63 +253,25 @@ const sourcePlatform = computed(() => {
     : null;
 });
 
-// Left-side messages carry avatar + name, except email bubbles (full width)
-const showLeftAvatar = computed(
-  () =>
-    orientation.value === ORIENTATION.LEFT &&
-    variant.value !== MESSAGE_VARIANTS.EMAIL
+const layout = computed(() =>
+  getMessageLayout({
+    orientation: orientation.value,
+    variant: variant.value,
+    groupWithPrevious: props.groupWithPrevious,
+  })
 );
 
-const showSenderName = computed(
-  () =>
-    (showLeftAvatar.value ||
-      (!!sourcePlatform.value && orientation.value === ORIENTATION.RIGHT)) &&
-    !props.groupWithPrevious
-);
-
-const gridClass = computed(() => {
-  if (showLeftAvatar.value) {
-    return 'grid grid-cols-[24px_1fr]';
-  }
-  const map = {
-    [ORIENTATION.LEFT]: 'grid grid-cols-1fr',
-    [ORIENTATION.RIGHT]: 'grid grid-cols-[1fr_24px]',
-  };
-
-  return map[orientation.value];
-});
-
-const gridTemplate = computed(() => {
-  if (showLeftAvatar.value) {
-    const nameRow = showSenderName.value ? '"spacer name"' : '';
-    return `${nameRow} "avatar bubble" "spacer meta"`;
-  }
-  const map = {
-    [ORIENTATION.LEFT]: `
-      "bubble"
-      "meta"
-    `,
-    [ORIENTATION.RIGHT]: `
-      ${showSenderName.value ? '"name spacer"' : ''}
-      "bubble avatar"
-      "meta spacer"
-    `,
-  };
-
-  return map[orientation.value];
+const columnClass = computed(() => {
+  if (variant.value === MESSAGE_VARIANTS.EMAIL) return 'w-full';
+  return orientation.value === ORIENTATION.RIGHT
+    ? 'max-w-[70%] items-end'
+    : 'max-w-[70%] items-start';
 });
 
 const shouldGroupWithNext = computed(() => {
   if (props.status === MESSAGE_STATUS.FAILED) return false;
 
   return props.groupWithNext;
-});
-
-const shouldShowAvatar = computed(() => {
-  if (props.messageType === MESSAGE_TYPES.ACTIVITY) return false;
-  if (orientation.value === ORIENTATION.LEFT) return showLeftAvatar.value;
-
-  return true;
 });
 
 const componentToRender = computed(() => {
@@ -559,6 +523,7 @@ provideMessageContext({
   orientation,
   isBotOrAgentMessage,
   shouldGroupWithNext,
+  timeInHeader: computed(() => layout.value.timeInHeader),
 });
 </script>
 
@@ -567,12 +532,13 @@ provideMessageContext({
   <div
     v-if="shouldRenderMessage"
     :id="`message${props.id}`"
-    class="flex w-full mb-2 message-bubble-container"
+    class="flex w-full message-bubble-container"
     :data-message-id="props.id"
     :class="[
       flexOrientationClass,
       {
-        'group-with-next': shouldGroupWithNext,
+        'group-with-next mb-1': shouldGroupWithNext,
+        'mb-4': !shouldGroupWithNext,
         'bg-n-alpha-1': showBackgroundHighlight,
       },
     ]"
@@ -582,70 +548,76 @@ provideMessageContext({
     </div>
     <div
       v-else
-      :class="[
-        gridClass,
-        {
-          'gap-y-2': contentAttributes.externalError,
-          'w-full': variant === MESSAGE_VARIANTS.EMAIL,
-        },
-      ]"
-      class="gap-x-2"
-      :style="{
-        gridTemplateAreas: gridTemplate,
-      }"
+      data-test="message-row"
+      class="flex w-full min-w-0 gap-2"
+      :class="flexOrientationClass"
     >
       <div
-        v-if="!shouldGroupWithNext && shouldShowAvatar"
-        v-tooltip.left-end="avatarTooltip"
-        class="[grid-area:avatar] flex items-end"
+        v-if="layout.avatarColumn"
+        data-test="message-avatar-column"
+        class="w-8 shrink-0"
       >
-        <MessageSenderAvatar v-bind="avatarInfo" :platform="sourcePlatform" />
+        <div v-if="layout.showAvatar" v-tooltip.left-end="avatarTooltip">
+          <MessageSenderAvatar v-bind="avatarInfo" :platform="sourcePlatform" />
+        </div>
       </div>
       <div
-        v-if="showSenderName && avatarInfo.name"
-        class="[grid-area:name] flex items-center gap-1 min-w-0 mb-1"
-        :class="{ 'justify-end': orientation === ORIENTATION.RIGHT }"
+        data-test="message-column"
+        class="flex flex-col min-w-0"
+        :class="[columnClass, { 'gap-y-2': contentAttributes.externalError }]"
       >
-        <span class="text-xs font-medium truncate text-n-slate-11">
-          {{ avatarInfo.name }}
-        </span>
-        <span
-          v-if="isTeammateMessage"
-          class="px-1 text-xs font-medium rounded shrink-0 bg-n-blue-4 text-n-blue-11"
+        <div
+          v-if="layout.showHeader"
+          data-test="message-header"
+          class="flex items-center min-w-0 gap-1.5 mb-1"
         >
-          {{ t('CONVERSATION.KITA_TEAMMATE_TAG') }}
-        </span>
-      </div>
-      <div
-        class="[grid-area:bubble] flex min-w-0"
-        :class="{
-          'ltr:ml-8 rtl:mr-8 justify-end': orientation === ORIENTATION.RIGHT,
-          'ltr:mr-8 rtl:ml-8': orientation === ORIENTATION.LEFT,
-          'flex-col items-start gap-2': shouldShowWhatsappReferral,
-          'flex-col gap-1': kitaThread,
-          'items-end': kitaThread && orientation === ORIENTATION.RIGHT,
-          'items-start': kitaThread && orientation === ORIENTATION.LEFT,
-        }"
-        @contextmenu="openContextMenu($event)"
-      >
-        <WhatsappReferral
-          v-if="shouldShowWhatsappReferral"
-          :referral="contentAttributes.referral"
+          <template v-if="orientation === ORIENTATION.LEFT">
+            <span
+              v-if="avatarInfo.name"
+              class="text-sm font-semibold truncate text-n-slate-12"
+            >
+              {{ avatarInfo.name }}
+            </span>
+            <span
+              v-if="isTeammateMessage"
+              class="px-1 text-xs font-medium rounded shrink-0 bg-n-blue-4 text-n-blue-11"
+            >
+              {{ t('CONVERSATION.KITA_TEAMMATE_TAG') }}
+            </span>
+          </template>
+          <MessageMeta compact class="shrink-0 text-n-slate-11" />
+        </div>
+        <div
+          data-test="message-bubble"
+          class="flex max-w-full min-w-0"
+          :class="{
+            'justify-end': orientation === ORIENTATION.RIGHT,
+            'w-full': variant === MESSAGE_VARIANTS.EMAIL,
+            'flex-col items-start gap-2': shouldShowWhatsappReferral,
+            'flex-col gap-1': kitaThread,
+            'items-end': kitaThread && orientation === ORIENTATION.RIGHT,
+            'items-start': kitaThread && orientation === ORIENTATION.LEFT,
+          }"
+          @contextmenu="openContextMenu($event)"
+        >
+          <WhatsappReferral
+            v-if="shouldShowWhatsappReferral"
+            :referral="contentAttributes.referral"
+          />
+          <Component :is="componentToRender" />
+          <KitaThreadFooter
+            v-if="kitaThread"
+            :thread="kitaThread"
+            :conversation-id="conversationId"
+          />
+        </div>
+        <MessageError
+          v-if="contentAttributes.externalError"
+          :class="flexOrientationClass"
+          :error="contentAttributes.externalError"
+          @retry="emit('retry')"
         />
-        <Component :is="componentToRender" />
-        <KitaThreadFooter
-          v-if="kitaThread"
-          :thread="kitaThread"
-          :conversation-id="conversationId"
-        />
       </div>
-      <MessageError
-        v-if="contentAttributes.externalError"
-        class="[grid-area:meta]"
-        :class="flexOrientationClass"
-        :error="contentAttributes.externalError"
-        @retry="emit('retry')"
-      />
     </div>
     <div v-if="shouldShowContextMenu" class="context-menu-wrap">
       <ContextMenu
