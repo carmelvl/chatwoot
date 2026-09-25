@@ -75,10 +75,25 @@ services:
     volumes:
       - grip_sync_data:/data
 
+  # WhatsApp groups via a dedicated linked-device number (see kita-wa-groups/README.md). Secrets in kita-wa-groups/.env.
+  wa-groups:
+    build: ./kita-wa-groups
+    restart: unless-stopped
+    depends_on: [bridges]
+    env_file:
+      - path: kita-wa-groups/.env
+        required: false # refuses to start until BRIDGE_LINK_SECRET / BRIDGE_ENCRYPTION_KEY are configured
+    environment:
+      - WA_GROUPS_DATA_DIR=/data
+      - BRIDGES_INTERNAL_URL=http://bridges:8080
+      - WA_GROUPS_INTERNAL_URL=http://wa-groups:8090
+    volumes:
+      - wa_groups_data:/data
+
   caddy:
     image: caddy:2
     restart: unless-stopped
-    depends_on: [rails, bridges, grip-sync]
+    depends_on: [rails, bridges, grip-sync, wa-groups]
     ports: ['80:80', '443:443']
     volumes:
       - ./Caddyfile.kita:/etc/caddy/Caddyfile:ro
@@ -91,3 +106,4 @@ volumes:
   redis_data:
   bridges_data:
   grip_sync_data:
+  wa_groups_data:

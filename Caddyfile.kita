@@ -7,6 +7,12 @@ support.internal.kita.ai {
 	handle_path /grip-sync/* {
 		reverse_proxy grip-sync:8080
 	}
+	# WhatsApp groups (pair page, health); prefix kept, the service accepts it. /internal/* is server-to-server only.
+	handle /wa-groups/* {
+		@waGroupsInternal path /wa-groups/internal/*
+		respond @waGroupsInternal 404
+		reverse_proxy wa-groups:8090
+	}
 	handle {
 		reverse_proxy rails:3000
 	}
