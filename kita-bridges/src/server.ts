@@ -11,6 +11,8 @@ import { signConnectLink } from './links.ts';
 import { TeamsIntegration } from './platforms/teams/index.ts';
 import { SYNC_INTERVAL_MS } from './platforms/teams/subscriptions.ts';
 import { ScopeCache } from './scope.ts';
+import { GripLinks } from './griplinks.ts';
+import { teamsLabel } from './platforms/teams/labels.ts';
 import { Store } from './store.ts';
 import { parseTeamSyncMode, rosterSource, SlackMembership, TeamSync, TeamsMembership } from './teamsync.ts';
 import type { Platform, Sender } from './types.ts';
@@ -51,7 +53,16 @@ const scope = new ScopeCache({
 });
 // Staff typing in Slack/Teams are posted by the desk as the matching agent; merges (shared BRIDGE_LINK_SECRET).
 const desk = cfg.linkSecret ? new KitaDeskClient(cfg.chatwootBaseUrl, cfg.linkSecret) : undefined;
-bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope });
+// Teams channels/chats get "Team › Channel" / topic / members labels from Graph (service account token).
+const labeler = teams
+  ? (platform: Platform, ref: Record<string, unknown>) => (platform === 'teams' ? teamsLabel(teams.graph, ref, cfg.teams.kitaUserUpn) : Promise.resolve(undefined))
+  : undefined;
+bridge = new Bridge({ store, chatwoot: new ChatwootClient(cfg.chatwootBaseUrl), inbox: cfg.customers.inboxIdentifier, senders, publicUrl: cfg.publicUrl, app, desk, connectLink, scope, labeler });
+// Desk "Link to customer": Grip link, then refresh scope (which runs linkChannels) right away.
+const linkRefresh = async () => {
+  if (!(await scope.refresh())) await bridge!.linkChannels();
+};
+const gripLinks = new GripLinks({ baseUrl: cfg.grip.baseUrl, apiKey: cfg.grip.apiKey, refresh: linkRefresh });
 void scope.start();
 const connect = cfg.linkSecret
   ? new AgentConnect({ linkSecret: cfg.linkSecret, teams, slack: slackOAuth, whatsappNumbers: cfg.whatsapp.numbers, deskUrl: cfg.chatwootBaseUrl })
@@ -61,7 +72,7 @@ const whatsappOwnerApps = new Map(
     .filter((n) => n.agentAccessToken && cfg.chatwootAccountId)
     .map((n) => [n.phoneNumberId, new ChatwootAppClient(cfg.chatwootBaseUrl, n.agentAccessToken!, cfg.chatwootAccountId)] as const),
 );
-const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, connect, whatsappOwnerApps }));
+const server = createServer(createHandler({ cfg, store, bridge, enabled, slack, teams, connect, whatsappOwnerApps, gripLinks, linkRefresh }));
 
 // Keep Graph subscriptions alive (renewed well before the 3-day cap) and pick up newly joined channels.
 if (teams) {

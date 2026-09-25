@@ -4,7 +4,8 @@ class Api::V1::Accounts::Kita::CustomersController < Api::V1::Accounts::BaseCont
 
   def index
     rows = ::Kita::Customers.new(accessible_conversations).rows
-    rows = rows.select { |row| mine?(row[:dri_email]) } if ActiveModel::Type::Boolean.new.cast(params[:mine])
+    # Unlinked channels are nobody's yet, so they show under Mine too (to be linked)
+    rows = rows.select { |row| row[:unlinked] || mine?(row[:dri_email]) } if ActiveModel::Type::Boolean.new.cast(params[:mine])
     render json: { payload: rows }
   end
 

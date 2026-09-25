@@ -22,6 +22,8 @@ export interface BridgeDeps {
   fetchImpl?: typeof fetch;
   /** Grip scope: drops out-of-scope channels and maps channels to customer accounts. Absent = allow all, no accounts. */
   scope?: ScopeCheck;
+  /** Resolves a human channel label the message itself doesn't carry (Teams: Graph). Optional. */
+  labeler?: (platform: Platform, replyRef: Record<string, unknown>) => Promise<string | undefined>;
 }
 
 export type InboundResult = 'duplicate' | 'created' | 'appended' | 'staff_synced' | 'ignored' | 'out_of_scope';
@@ -41,14 +43,26 @@ export const MIRROR_NOTE: Record<'whatsapp' | 'viber', string> = {
 /** channel_key of a message (every parser stamps it; the fallback is only for hand-built messages). */
 export const channelKeyOf = (msg: InboundMessage) => msg.conversationAttributes?.channel_key || `${msg.platform}:${msg.threadKey}`;
 
-/** Human label of a channel: "#kita-tala", "+63 917…", the Viber user's name; else the key itself. */
-function labelOf(msg: InboundMessage, channelKey: string, previous?: string): string {
-  const explicit = msg.conversationAttributes?.channel_label;
+/** Label used while nothing better is known. A raw `platform:id` key is never shown. */
+export const fallbackLabel = (platform: Platform) => `${PLATFORM_NAME[platform]} ${platform === 'teams' ? 'chat' : 'channel'}`;
+
+/** True for labels that are only placeholders: empty, a raw `platform:id` key, or the fallback. */
+export const isPlaceholderLabel = (label: string | undefined, platform: Platform) =>
+  !label || /^(slack|teams|whatsapp|viber):/.test(label) || label === fallbackLabel(platform);
+
+/**
+ * Human label of a channel: "#kita-tala", "Acme › Support" (resolved), the WhatsApp profile name
+ * (else the number), the Viber user's name. Better labels replace placeholders as they become known.
+ */
+export function labelOf(msg: InboundMessage, channelKey: string, previous?: string, resolved?: string): string {
+  const explicit = msg.conversationAttributes?.channel_label || resolved;
   if (explicit) return explicit;
-  if (previous && previous !== channelKey) return previous;
+  // A customer's WhatsApp profile name / Viber name (never a staff echo, never a bare number)
+  const person = msg.author !== 'staff' && ['whatsapp', 'viber'].includes(msg.platform) ? msg.userName : undefined;
+  if (person && !/^\+?[\d\s]+$/.test(person)) return person;
+  if (!isPlaceholderLabel(previous, msg.platform)) return previous!;
   if (msg.platform === 'whatsapp') return channelKey.replace(/^whatsapp:/, '');
-  if (msg.platform === 'viber' && msg.userName) return msg.userName;
-  return channelKey;
+  return fallbackLabel(msg.platform);
 }
 
 /** Conversation key: one per Grip account, else one per (not yet linked) channel. */
@@ -152,9 +166,10 @@ export class Bridge {
 
   private accountOwner(sc: ScopeChannel, platform: string): Owner {
     const name = sc.account_name || `Account ${sc.account_id}`;
+    // The desk shows the platform as an icon, so the contact is just the customer's name
     return {
       identifier: `grip-account:${sc.account_id}:${platform}`,
-      name: `${name} · ${PLATFORM_NAME[platform as keyof typeof PLATFORM_NAME] ?? platform}`,
+      name,
       customAttributes: { grip_account_id: String(sc.account_id), channel: platform },
     };
   }
@@ -168,7 +183,7 @@ export class Bridge {
     const { store } = this.d;
     const channelKey = channelKeyOf(msg);
     const prev = store.getChannel(channelKey);
-    const label = labelOf(msg, channelKey, prev?.label);
+    const label = labelOf(msg, channelKey, prev?.label, await this.resolvedLabel(msg.platform, channelKey, { ...prev?.replyRef, ...msg.replyRef }));
     const sc = this.scopeChannel(channelKey);
     if (sc?.account_id) await this.mergeChannel(channelKey, sc);
     const threadKey = conversationKey(channelKey, sc, msg.platform);
@@ -187,8 +202,55 @@ export class Bridge {
       result = 'created';
     }
     store.putChannel(channel(conv.conversationId));
+    if (result !== 'created' && !sc?.account_id && prev?.label !== label) await this.renameContact(`${msg.platform}-channel:${channelKey}`, label);
     await this.syncAttributes(conv.conversationId, sc);
     return { conv, channelKey, label, result };
+  }
+
+  /** Label from the labeler (Teams via Graph), cached per channel; only successes are cached. */
+  private async resolvedLabel(platform: Platform, channelKey: string, replyRef: Record<string, unknown>, fresh = false): Promise<string | undefined> {
+    const { labeler, store } = this.d;
+    const cached = store.getKv(`label:${channelKey}`);
+    if (cached && !fresh) return cached;
+    if (!labeler) return cached ?? undefined;
+    try {
+      const label = await labeler(platform, replyRef);
+      if (label) store.putKv(`label:${channelKey}`, label);
+      return label ?? cached ?? undefined;
+    } catch (e: any) {
+      log.warn('channel_label_failed', { platform, channel_key: channelKey, error: String(e?.message ?? e) });
+      return cached ?? undefined;
+    }
+  }
+
+  /** Renames a desk contact the bridge created (public API), once per new name. Best effort. */
+  private async renameContact(identifier: string, name: string) {
+    const { store, inbox, chatwoot } = this.d;
+    const sourceId = store.getContactSourceId(inbox, identifier);
+    if (!sourceId || store.getKv(`contact-name:${identifier}`) === name) return;
+    try {
+      await chatwoot.updateContact(inbox, sourceId, { name });
+      store.putKv(`contact-name:${identifier}`, name);
+    } catch (e: any) {
+      log.warn('contact_rename_failed', { error: String(e?.message ?? e) });
+    }
+  }
+
+  /**
+   * Replaces placeholder labels (raw keys, "Microsoft Teams chat") with resolved ones and renames the
+   * desk contacts to match: unlinked channels by label, customer conversations by account name.
+   */
+  private async refreshLabels() {
+    const { store } = this.d;
+    for (const conv of [...store.listConversations(CUSTOMERS, 'channel:'), ...store.listConversations(CUSTOMERS, 'account:')]) {
+      for (const c of store.channelsFor(conv.conversationId)) {
+        if (!isPlaceholderLabel(c.label, c.platform)) continue;
+        const label = await this.resolvedLabel(c.platform, c.channelKey, c.replyRef, true);
+        if (!label || label === c.label) continue;
+        store.putChannel({ ...c, label });
+        if (conv.threadKey.startsWith('channel:')) await this.renameContact(`${c.platform}-channel:${c.channelKey}`, label);
+      }
+    }
   }
 
   /**
@@ -219,6 +281,7 @@ export class Bridge {
   async linkChannels(): Promise<number> {
     const { store } = this.d;
     let merged = 0;
+    await this.refreshLabels();
     for (const conv of store.listConversations(CUSTOMERS, 'channel:')) {
       const key = conv.threadKey.slice('channel:'.length);
       const sc = this.scopeChannel(key);
@@ -230,9 +293,15 @@ export class Bridge {
       }
     }
     for (const conv of store.listConversations(CUSTOMERS, 'account:')) {
-      const sc = store.channelsFor(conv.conversationId).map((c) => this.scopeChannel(c.channelKey)).find((x) => x?.account_id);
+      const channels = store.channelsFor(conv.conversationId);
+      const sc = channels.map((c) => this.scopeChannel(c.channelKey)).find((x) => x?.account_id);
+      if (sc?.account_id && channels[0]) {
+        const owner = this.accountOwner(sc, channels[0].platform);
+        await this.renameContact(owner.identifier, owner.name);
+      }
       await this.syncAttributes(conv.conversationId, sc);
     }
+    for (const conv of store.listConversations(CUSTOMERS, 'channel:')) await this.syncAttributes(conv.conversationId);
     return merged;
   }
 
@@ -452,6 +521,7 @@ export function conversationAttributes(channels: ChannelRow[], sc?: ScopeChannel
   }
   const primary = channels.find((c) => SENDABLE_PLATFORMS.includes(c.platform)) ?? channels[0];
   put('channel_key', primary?.channelKey);
+  put('channel_label', primary?.label);
   // One conversation per customer per platform: the desk's badges, gating and Customers view read this.
   put('channel', primary?.platform);
   out.kita_channels = JSON.stringify(channels.map((c) => ({ key: c.channelKey, platform: c.platform, label: c.label, sendable: SENDABLE_PLATFORMS.includes(c.platform) })));

@@ -2,6 +2,7 @@
 import { frontendURL } from '../../../helper/URLHelper';
 import store from '../../../store';
 import ConversationView from './ConversationView.vue';
+import { landOnCustomers } from 'dashboard/helper/kitaLanding';
 
 const CONVERSATION_PERMISSIONS = [
   'administrator',
@@ -50,6 +51,7 @@ export default {
       meta: {
         permissions: CONVERSATION_PERMISSIONS,
       },
+      beforeEnter: landOnCustomers,
       component: ConversationView,
       props: () => {
         return { inboxId: 0 };

@@ -86,6 +86,11 @@ export class ChatwootClient {
     return r.source_id;
   }
 
+  /** Renames a contact of the inbox (public API contacts#update). */
+  async updateContact(inbox: string, sourceId: string, contact: { name: string }): Promise<void> {
+    await this.call(`${inbox}/contacts/${sourceId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(contact) });
+  }
+
   async createConversation(inbox: string, sourceId: string, customAttributes: Record<string, string> = {}): Promise<number> {
     const r = await this.call(`${inbox}/contacts/${sourceId}/conversations`, this.json({ custom_attributes: customAttributes }));
     return Number(r.id);

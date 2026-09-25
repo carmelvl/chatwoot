@@ -12,6 +12,9 @@ import UnreadBadge from 'dashboard/components-next/Conversation/ConversationCard
 import SLACardLabel from './components/SLACardLabel.vue';
 import VoiceCallStatus from './VoiceCallStatus.vue';
 import Checkbox from 'dashboard/components-next/checkbox/Checkbox.vue';
+import PlatformLogo from 'dashboard/components-next/kita/PlatformLogo.vue';
+import { kitaConversationTitle } from 'dashboard/helper/kitaConnect';
+import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
 
 const props = defineProps({
   chat: { type: Object, required: true },
@@ -35,6 +38,18 @@ const emit = defineEmits([
 
 const hovered = ref(false);
 
+// Kita customer conversations: "Tala" + platform icon; the Customers inbox name is noise
+const platformName = useKitaPlatformName();
+const kitaTitle = computed(() =>
+  kitaConversationTitle(props.chat, props.currentContact?.name)
+);
+const displayName = computed(
+  () => kitaTitle.value.title ?? platformName(kitaTitle.value.platform)
+);
+const showInbox = computed(
+  () => props.showInboxName && !kitaTitle.value.platform
+);
+
 const unreadCount = computed(() => props.chat.unread_count);
 const hasUnread = computed(() => unreadCount.value > 0);
 const lastMessageInChat = computed(() => getLastMessage(props.chat));
@@ -52,7 +67,7 @@ const voiceCallData = computed(() => {
 
 const showMetaSection = computed(() => {
   return (
-    props.showInboxName ||
+    showInbox.value ||
     (props.showAssignee && props.assignee.name) ||
     props.chat.priority
   );
@@ -127,11 +142,11 @@ watch(
     >
       <Avatar
         v-if="!hideThumbnail"
-        :name="currentContact.name"
+        :name="displayName"
         :src="currentContact.thumbnail"
         :size="32"
         :status="currentContact.availability_status"
-        :class="!showInboxName ? 'mt-4' : 'mt-8'"
+        :class="!showInbox ? 'mt-4' : 'mt-8'"
         hide-offline-status
       >
         <template #overlay="{ size }">
@@ -155,11 +170,11 @@ watch(
           'mx-2': compact,
         }"
       >
-        <InboxName v-if="showInboxName" :inbox="inbox" class="flex-1 min-w-0" />
+        <InboxName v-if="showInbox" :inbox="inbox" class="flex-1 min-w-0" />
         <div
           class="flex items-baseline gap-2 flex-shrink-0"
           :class="{
-            'flex-1 justify-between': !showInboxName,
+            'flex-1 justify-between': !showInbox,
           }"
         >
           <span
@@ -182,7 +197,19 @@ watch(
         class="conversation--user text-sm my-0 mx-2 pt-0.5 text-ellipsis overflow-hidden whitespace-nowrap flex-1 min-w-0 ltr:pr-16 rtl:pl-16 text-n-slate-12"
         :class="hasUnread ? 'font-semibold' : 'font-medium'"
       >
-        {{ currentContact.name }}
+        <span
+          v-if="kitaTitle.platform"
+          class="inline-flex items-center max-w-full gap-1.5 align-middle"
+          data-test="kita-conversation-title"
+        >
+          <span class="truncate">{{ displayName }}</span>
+          <PlatformLogo
+            :platform="kitaTitle.platform"
+            :title="platformName(kitaTitle.platform)"
+            class="size-3.5 shrink-0"
+          />
+        </span>
+        <template v-else>{{ currentContact.name }}</template>
       </h4>
       <VoiceCallStatus
         v-if="voiceCallData.status"

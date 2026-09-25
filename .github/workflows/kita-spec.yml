@@ -72,8 +72,15 @@ jobs:
           app/javascript/dashboard/store/modules/kitaCustomers.js
           app/javascript/dashboard/store/index.js
           app/javascript/dashboard/components-next/message/bubbles/Text/Index.vue
+          app/javascript/dashboard/api/kitaChannelLinks.js
+          app/javascript/dashboard/helper/kitaLanding.js
+          app/javascript/dashboard/helper/specs/kitaLanding.spec.js
+          app/javascript/dashboard/routes/dashboard/conversation/conversation.routes.js
+          app/javascript/dashboard/components/widgets/conversation/ConversationCard.vue
+          app/javascript/dashboard/components/widgets/conversation/ConversationHeader.vue
           && pnpm exec vitest run app/javascript/dashboard/helper/specs/kitaConnect.spec.js
           app/javascript/dashboard/helper/specs/kitaThreads.spec.js
+          app/javascript/dashboard/helper/specs/kitaLanding.spec.js
           app/javascript/dashboard/components-next/message app/javascript/dashboard/components-next/kita
           app/javascript/dashboard/components/widgets/conversation
       - name: Bridge tests

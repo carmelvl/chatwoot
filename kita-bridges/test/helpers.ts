@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { Bridge } from '../src/bridge.ts';
+import { Bridge, type BridgeDeps } from '../src/bridge.ts';
 import { ChatwootAppClient, ChatwootClient, KitaDeskClient } from '../src/chatwoot.ts';
 import type { ScopeChannel, ScopeCheck } from '../src/scope.ts';
 import { Store } from '../src/store.ts';
@@ -30,6 +30,7 @@ export function fakeChatwoot() {
       if (!contacts.has(body.identifier)) contacts.set(body.identifier, `src-${contacts.size + 1}`);
       return Response.json({ source_id: contacts.get(body.identifier) });
     }
+    if (init.method === 'PATCH' && /\/contacts\/[^/]+$/.test(p)) return Response.json({});
     if (/\/conversations$/.test(p)) return Response.json({ id: nextConv++ });
     if (/\/messages$/.test(p)) return Response.json({ id: nextMessage++ });
     // attachment downloads
@@ -54,7 +55,7 @@ export function staticScope(links: Record<string, Partial<ScopeChannel>> = {}) {
   return { map, allows: () => true, channel: (k?: string) => (k ? map.get(k) : undefined), link: (k: string, v: Partial<ScopeChannel>) => map.set(k, { channel_key: k, ...v }) };
 }
 
-export function makeBridge(o: { scope?: ScopeCheck } = {}) {
+export function makeBridge(o: { scope?: ScopeCheck; labeler?: BridgeDeps['labeler'] } = {}) {
   const cw = fakeChatwoot();
   const store = new Store(':memory:');
   const senders = { slack: new RecordingSender(), teams: new RecordingSender(), viber: new RecordingSender() };
@@ -70,6 +71,6 @@ export function makeBridge(o: { scope?: ScopeCheck } = {}) {
     deskCalls.push({ path, body: JSON.parse(init.body) });
     return Response.json(path.endsWith('/conversation_merges') ? { moved: 2 } : { id: next++ });
   }) as typeof fetch);
-  const bridge = new Bridge({ store, chatwoot: cw.client, inbox: 'IN_CUSTOMERS', senders, publicUrl: PUBLIC_URL, fetchImpl: cw.fetchImpl, app, desk, scope: o.scope });
+  const bridge = new Bridge({ store, chatwoot: cw.client, inbox: 'IN_CUSTOMERS', senders, publicUrl: PUBLIC_URL, fetchImpl: cw.fetchImpl, app, desk, scope: o.scope, labeler: o.labeler });
   return { bridge, store, cw, senders, appCalls, deskCalls };
 }

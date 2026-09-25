@@ -21,20 +21,27 @@ export const firstName = name => (name || '').trim().split(/\s+/)[0] || '';
 
 /**
  * Customers list sections: NEEDS REPLY (the latest public message is the
- * customer's, on an open conversation), then ACTIVE (the rest). Empty
- * sections are dropped; rows keep the API's most-recent-first order.
+ * customer's, on an open conversation), ACTIVE (the rest), then UNLINKED
+ * (channels not linked to a Grip account yet). Empty sections are dropped;
+ * rows keep the API's most-recent-first order.
  */
-export const sectionCustomers = customers =>
-  [
+export const sectionCustomers = customers => {
+  const linked = customers.filter(customer => !customer.unlinked);
+  return [
     {
       key: 'NEEDS_REPLY',
-      customers: customers.filter(customer => customer.waiting_on_us),
+      customers: linked.filter(customer => customer.waiting_on_us),
     },
     {
       key: 'ACTIVE',
-      customers: customers.filter(customer => !customer.waiting_on_us),
+      customers: linked.filter(customer => !customer.waiting_on_us),
+    },
+    {
+      key: 'UNLINKED',
+      customers: customers.filter(customer => customer.unlinked),
     },
   ].filter(section => section.customers.length);
+};
 
 /**
  * The preview line of a customer row: "Slack · Maria: batch 14 …". Own

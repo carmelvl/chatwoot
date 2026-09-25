@@ -33,7 +33,7 @@ test('mapping: an unlinked slack channel is one conversation; the channel is the
   const [root, reply] = cw.calls.filter((c) => c.path.endsWith('/messages')).map((c) => c.body);
   assert.equal(root.sender_identifier, 'slack:UCUST001');
   assert.deepEqual(root.content_attributes, {
-    external_source: 'slack', external_channel: 'slack:C0SHARED1', external_channel_key: 'slack:C0SHARED1', external_thread: { root: 'C0SHARED1:1790000000.000100' },
+    external_source: 'slack', external_channel: 'Slack channel', external_channel_key: 'slack:C0SHARED1', external_thread: { root: 'C0SHARED1:1790000000.000100' },
   });
   // the thread reply is Ben's own message (no name prefix), natively replying to the root's desk message
   assert.equal(reply.content, 'screenshot attached');
@@ -105,18 +105,18 @@ test('customer: one conversation per customer per platform; Slack and WhatsApp o
   assert.equal(await bridge.inbound(waMsg()), 'created');
   assert.equal(cw.calls.filter((c) => c.path.endsWith('/conversations')).length, 2);
   const companies = cw.calls.filter((c) => c.path.endsWith('/contacts') && c.body.identifier.startsWith('grip-account:')).map((c) => [c.body.identifier, c.body.name]);
-  assert.deepEqual(companies, [['grip-account:42:slack', 'Tala · Slack'], ['grip-account:42:whatsapp', 'Tala · WhatsApp']]);
+  assert.deepEqual(companies, [['grip-account:42:slack', 'Tala'], ['grip-account:42:whatsapp', 'Tala']]);
   const created = cw.calls.find((c) => c.path.endsWith('/conversations'))!.body.custom_attributes;
   assert.deepEqual({ ...created, kita_channels: JSON.parse(created.kita_channels) }, {
     grip_account: 'Tala', grip_account_id: '42', account_owner: 'Carmel Limcaoco', account_owner_email: 'carmel@kita.ai',
-    customer_stage: 'pilot', customer_health: 'green', channel_key: 'slack:C0SHARED1', channel: 'slack',
+    customer_stage: 'pilot', customer_health: 'green', channel_key: 'slack:C0SHARED1', channel_label: '#kita-tala', channel: 'slack',
     kita_channels: [{ key: 'slack:C0SHARED1', platform: 'slack', label: '#kita-tala', sendable: true }],
   });
   assert.equal(store.getByThread('customers', 'account:42:slack')?.conversationId, 100);
   assert.equal(store.getByThread('customers', 'account:42:whatsapp')?.conversationId, 101);
   const wa = cw.calls.filter((c) => c.path.endsWith('/messages')).at(-1)!;
   assert.match(wa.path, /conversations\/101\/messages$/);
-  assert.deepEqual(wa.body.content_attributes, { external_source: 'whatsapp', external_channel: '+639998887777', external_channel_key: 'whatsapp:+639998887777' });
+  assert.deepEqual(wa.body.content_attributes, { external_source: 'whatsapp', external_channel: 'Maria Santos', external_channel_key: 'whatsapp:+639998887777' });
   // each conversation lists only its own platform's channels
   const waConv = cw.calls.filter((c) => c.path.endsWith('/conversations'))[1].body.custom_attributes;
   assert.deepEqual(JSON.parse(waConv.kita_channels).map((c: any) => c.key), ['whatsapp:+639998887777']);
@@ -143,7 +143,7 @@ test('customer: an unlinked channel gets its own conversation; once Grip links i
   const linked = slackMsg('slack_top_level.json');
   await bridge.inbound({ ...linked, eventId: 'C0OTHER:1.0', threadKey: 'C0OTHER', replyRef: { channel: 'C0OTHER' }, thread: { root: 'C0OTHER:1.0', reply: false }, conversationAttributes: { ...linked.conversationAttributes, channel_key: 'slack:C0OTHER', slack_channel: 'C0OTHER' } }); // account:42:slack -> conv 100
   assert.equal(await bridge.inbound(slackMsg('slack_top_level.json')), 'created'); // unlinked -> channel conv 101
-  assert.equal(cw.calls.find((c) => c.path.endsWith('/contacts') && c.body.identifier === 'slack-channel:slack:C0SHARED1')?.body.name, 'slack:C0SHARED1');
+  assert.equal(cw.calls.find((c) => c.path.endsWith('/contacts') && c.body.identifier === 'slack-channel:slack:C0SHARED1')?.body.name, 'Slack channel');
   assert.equal(await bridge.linkChannels(), 0);
   scope.link('slack:C0SHARED1', TALA);
   assert.equal(await bridge.linkChannels(), 1);
@@ -167,7 +167,7 @@ test('customer: a WhatsApp channel linked later merges into the WhatsApp account
   scope.link('whatsapp:+639998887777', TALA);
   assert.equal(await bridge.inbound({ ...waMsg(), eventId: 'wamid.later' }), 'appended');
   assert.deepEqual(deskCalls[0].body, { from_conversation_id: 101, to_conversation_id: 102 });
-  assert.equal(cw.calls.find((c) => c.path.endsWith('/contacts') && c.body.identifier === 'grip-account:42:whatsapp')?.body.name, 'Tala · WhatsApp');
+  assert.equal(cw.calls.find((c) => c.path.endsWith('/contacts') && c.body.identifier === 'grip-account:42:whatsapp')?.body.name, 'Tala');
   assert.equal(store.getByThread('customers', 'account:42:whatsapp')?.conversationId, 102);
   assert.equal(store.getByThread('customers', 'account:42:slack')?.conversationId, 100);
 });

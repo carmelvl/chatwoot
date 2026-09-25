@@ -5,6 +5,8 @@ module Kita::Bridge
   LINK_TTL = 7.days
   EXTERNAL_SOURCES = %w[slack teams whatsapp viber].freeze
   STATUS_TIMEOUT = 5
+  # Linking waits for Grip and the scope refresh + merge
+  LINK_TIMEOUT = 30
 
   module_function
 
@@ -38,6 +40,35 @@ module Kita::Bridge
     raise "bridge status #{response.code}" unless response.success?
 
     response.parsed_response
+  end
+
+  # Grip accounts matching `search`, for "Link to customer" (the bridge holds the grip_ key); raises on failure.
+  def grip_accounts(search)
+    internal_request(:get, '/internal/grip/accounts', query: { search: search })['accounts']
+  end
+
+  # Links an unlinked channel to a Grip account and merges its conversation under the customer now.
+  def link_channel(channel_key, account_id)
+    internal_request(:post, '/internal/grip/link', body: { channel_key: channel_key, account_id: account_id }.to_json)
+  end
+
+  def internal_request(method, path, **options)
+    response = HTTParty.public_send(method, "#{internal_url}#{path}", **options, timeout: LINK_TIMEOUT,
+                                                                                  headers: { 'Content-Type' => 'application/json',
+                                                                                             'X-Kita-Bridge-Secret' => secret })
+    raise LinkError.new(response.code, response.parsed_response.is_a?(Hash) ? response.parsed_response['error'] : nil) unless response.success?
+
+    response.parsed_response
+  end
+
+  # A failed bridge/Grip call: 404 = the channel isn't in Grip's unlinked list.
+  class LinkError < StandardError
+    attr_reader :status
+
+    def initialize(status, message)
+      @status = status
+      super(message || "bridge #{status}")
+    end
   end
 
   # Bridge-supplied message metadata: the platform it came through, the desk message it replies to

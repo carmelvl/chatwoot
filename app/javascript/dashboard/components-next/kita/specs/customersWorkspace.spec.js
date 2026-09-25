@@ -10,12 +10,14 @@ const platformName = platform =>
   ({ slack: 'Slack', whatsapp: 'WhatsApp' })[platform] || '';
 
 describe('customers workspace helpers', () => {
-  it('splits customers into NEEDS REPLY then ACTIVE, dropping empty sections', () => {
+  it('splits customers into NEEDS REPLY, ACTIVE, then UNLINKED channels, dropping empty sections', () => {
     const tala = { id: '1', waiting_on_us: true };
     const n90 = { id: '2', waiting_on_us: false };
-    expect(sectionCustomers([n90, tala])).toEqual([
+    const teams = { id: 'unlinked-7', waiting_on_us: true, unlinked: true };
+    expect(sectionCustomers([teams, n90, tala])).toEqual([
       { key: 'NEEDS_REPLY', customers: [tala] },
       { key: 'ACTIVE', customers: [n90] },
+      { key: 'UNLINKED', customers: [teams] },
     ]);
     expect(sectionCustomers([n90]).map(section => section.key)).toEqual([
       'ACTIVE',

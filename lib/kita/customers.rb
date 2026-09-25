@@ -1,8 +1,9 @@
 # Kita: customers (Grip accounts) derived from conversations, aggregated in SQL on
 # conversations.custom_attributes (grip_account, account_owner, account_owner_email, channel; set by
-# grip-sync and kita-bridges). A customer has one conversation per platform ("Tala · Slack", "Tala · WhatsApp"),
+# grip-sync and kita-bridges). A customer has one conversation per platform (Tala on Slack, Tala on WhatsApp),
 # so rows group by grip_account_id (falling back to the grip_account name when only grip-sync has set it).
-# Conversations with neither are grouped as "Unlinked".
+# A conversation with neither is an unlinked channel: its own row (id "unlinked-<display id>", unlinked: true,
+# channel_key), listed last, named by its channel label.
 # Row shape: {id, name, dri_name, dri_email, platforms[], open_count, waiting_on_us, last_activity_at,
 #   grip_account_id, conversations[{id, platform, label, status, unread_count, last_activity_at}] (most recent first),
 #   last_message {content, sender_name, platform, message_type, created_at}|nil (latest public message),
@@ -25,11 +26,24 @@ class Kita::Customers
 
   CUSTOMER_KEY = "COALESCE(conversations.custom_attributes->>'grip_account_id', conversations.custom_attributes->>'grip_account')".freeze
 
+  # Placeholder labels older bridges stored: a raw "platform:id" key is never shown.
+  RAW_KEY = /\A(slack|teams|whatsapp|viber):/
+  PLATFORM_FALLBACK = { 'slack' => 'Slack channel', 'teams' => 'Microsoft Teams chat', 'whatsapp' => 'WhatsApp chat',
+                        'viber' => 'Viber chat' }.freeze
+
   def rows
     grouped = @conversations.reorder(nil).group(Arel.sql(CUSTOMER_KEY))
-    rows = grouped.pluck(*columns).map { |values| row(values) }
+    rows = grouped.pluck(*columns).map { |values| row(values) }.reject { |r| r[:id] == UNLINKED_ID }
     attach_details(rows)
-    rows.sort_by { |r| [r[:id] == UNLINKED_ID ? 1 : 0, -r[:last_activity_at].to_i] }
+    linked = rows.sort_by { |r| -r[:last_activity_at].to_i }
+    linked + @by_key.fetch(UNLINKED_ID, []).sort_by { |c| -c.last_activity_at.to_i }.map { |c| unlinked_row(c) }
+  end
+
+  # "#kita-tala", "Acme › Support", "Jun, Maria & 2 others"; never a raw key.
+  def self.display_label(label, platform)
+    return label if label.present? && !label.match?(RAW_KEY)
+
+    PLATFORM_FALLBACK.fetch(platform.to_s, 'Unnamed channel')
   end
 
   private
@@ -46,8 +60,18 @@ class Kita::Customers
     @latest = latest_messages(ids)
     @unread = unread_counts(ids)
     @urgent = urgent_conversation_ids(ids)
-    by_key = conversations.group_by { |conversation| customer_key(conversation) }
-    rows.each { |row| row.merge!(details((by_key[row[:id]] || []).sort_by { |c| -c.last_activity_at.to_i })) }
+    @by_key = conversations.group_by { |conversation| customer_key(conversation) }
+    rows.each { |row| row.merge!(details((@by_key[row[:id]] || []).sort_by { |c| -c.last_activity_at.to_i })) }
+  end
+
+  def unlinked_row(conversation)
+    attrs = conversation.custom_attributes || {}
+    {
+      id: "unlinked-#{conversation.display_id}", name: channel_label(conversation), unlinked: true, channel_key: attrs['channel_key'],
+      dri_name: nil, dri_email: nil, platforms: [attrs['channel']].compact, open_count: conversation.open? ? 1 : 0,
+      waiting_on_us: conversation.open? && @latest[conversation.id]&.incoming? == true,
+      last_activity_at: conversation.last_activity_at&.to_i
+    }.merge(details([conversation]))
   end
 
   def details(list)
@@ -74,7 +98,8 @@ class Kita::Customers
 
   def channel_label(conversation)
     attrs = conversation.custom_attributes || {}
-    attrs['channel_label'].presence || first_channel_label(attrs['kita_channels']) || conversation.contact&.name
+    candidates = [attrs['channel_label'], first_channel_label(attrs['kita_channels']), conversation.contact&.name]
+    self.class.display_label(candidates.find { |label| label.present? && !label.match?(RAW_KEY) }, attrs['channel'])
   end
 
   def first_channel_label(raw)

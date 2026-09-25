@@ -151,7 +151,7 @@ test('e2e: customer message then phone-app echo land in the same conversation (i
   assert.equal(echo.content, 'Yes Maria, approved today!'); // no name prefix: authored by the owner
   assert.equal(echo.name, 'Carmel Limcaoco');
   assert.equal(echo.staff_key, 'whatsapp:111111111111111');
-  assert.deepEqual(echo.content_attributes, { external_source: 'whatsapp', external_channel: '+639998887777', external_channel_key: 'whatsapp:+639998887777' });
+  assert.deepEqual(echo.content_attributes, { external_source: 'whatsapp', external_channel: 'Maria Santos', external_channel_key: 'whatsapp:+639998887777' });
 });
 
 test('e2e: echo to a new customer creates the conversation, authored by the number\'s owner; media attached', async () => {

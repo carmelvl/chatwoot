@@ -186,7 +186,7 @@ test('staff typing directly in Slack is posted by the desk as them (agent by ema
   assert.deepEqual(calls[0].body, {
     conversation_id: 100, email: 'sam@kita.ai', staff_key: 'slack:UKITASTAFF', name: 'Sam Staff', avatar_url: 'https://avatars.slack-edge.com/sam.png',
     content: 'internal chatter',
-    content_attributes: { external_source: 'slack', external_channel: 'slack:C0SHARED1', external_channel_key: 'slack:C0SHARED1', external_thread: { root: 'C0SHARED1:1790000000.000100' }, in_reply_to: 1 },
+    content_attributes: { external_source: 'slack', external_channel: 'Slack channel', external_channel_key: 'slack:C0SHARED1', external_thread: { root: 'C0SHARED1:1790000000.000100' }, in_reply_to: 1 },
   });
   assert.equal(cw.calls.filter((c) => c.path.endsWith('/contacts')).length, contactsBefore); // no customer contact created
   // loop safety: the desk marks it kita_bridge_origin, and its desk id is pre-marked as ours

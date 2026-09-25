@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { kitaReplyBlock, shouldPromptKitaConnect } from '../kitaConnect';
+import {
+  kitaConversationTitle,
+  kitaReplyBlock,
+  shouldPromptKitaConnect,
+} from '../kitaConnect';
 
 describe('shouldPromptKitaConnect', () => {
   it('does not prompt when the status call failed', () => {
@@ -75,5 +79,40 @@ describe('kitaReplyBlock (mirrors)', () => {
     expect(kitaReplyBlock(status, 'whatsapp')).toBe('mirror');
     expect(kitaReplyBlock(status, 'viber')).toBe('mirror');
     expect(kitaReplyBlock(null, 'viber')).toBe('mirror');
+  });
+});
+
+describe('kitaConversationTitle', () => {
+  const chat = attrs => ({ custom_attributes: attrs });
+
+  it('names a customer conversation by its customer, platform apart', () => {
+    expect(
+      kitaConversationTitle(
+        chat({ channel: 'slack', grip_account: 'Tala' }),
+        'Tala · Slack'
+      )
+    ).toEqual({ platform: 'slack', title: 'Tala' });
+    expect(
+      kitaConversationTitle(chat({ channel: 'slack' }), 'Tala · Slack').title
+    ).toBe('Tala');
+  });
+
+  it('never shows a raw platform key', () => {
+    const teams = chat({ channel: 'teams', channel_label: 'teams:19:104cd' });
+    expect(kitaConversationTitle(teams, 'teams:19:104cd')).toEqual({
+      platform: 'teams',
+      title: null,
+    });
+    teams.custom_attributes.channel_label = 'Acme › Support';
+    expect(kitaConversationTitle(teams, 'teams:19:104cd').title).toBe(
+      'Acme › Support'
+    );
+  });
+
+  it('leaves other conversations alone', () => {
+    expect(kitaConversationTitle(chat({}), 'Ana')).toEqual({
+      platform: null,
+      title: 'Ana',
+    });
   });
 });

@@ -16,6 +16,9 @@ import { useInbox } from 'dashboard/composables/useInbox';
 import { useAlert } from 'dashboard/composables';
 import { useI18n } from 'vue-i18n';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import PlatformLogo from 'dashboard/components-next/kita/PlatformLogo.vue';
+import { kitaConversationTitle } from 'dashboard/helper/kitaConnect';
+import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
 
 const props = defineProps({
   chat: {
@@ -84,6 +87,15 @@ const snoozedDisplayText = computed(() => {
   return t('CONVERSATION.HEADER.SNOOZED_UNTIL_NEXT_REPLY');
 });
 
+// Kita customer conversations: the customer's name + platform icon, never a raw channel key
+const platformName = useKitaPlatformName();
+const kitaTitle = computed(() =>
+  kitaConversationTitle(props.chat, currentContact.value?.name)
+);
+const displayName = computed(
+  () => kitaTitle.value.title ?? platformName(kitaTitle.value.platform)
+);
+
 const inbox = computed(() => {
   const { inbox_id: inboxId } = props.chat;
   return store.getters['inboxes/getInbox'](inboxId);
@@ -121,7 +133,7 @@ const copyConversationId = async () => {
         class="me-2"
       />
       <Avatar
-        :name="currentContact.name"
+        :name="displayName"
         :src="currentContact.thumbnail"
         :size="32"
         :status="currentContact.availability_status"
@@ -132,8 +144,14 @@ const copyConversationId = async () => {
           <span
             class="text-sm font-medium truncate leading-tight text-n-slate-12"
           >
-            {{ currentContact.name }}
+            {{ displayName }}
           </span>
+          <PlatformLogo
+            v-if="kitaTitle.platform"
+            :platform="kitaTitle.platform"
+            :title="platformName(kitaTitle.platform)"
+            class="size-3.5 shrink-0"
+          />
           <fluent-icon
             v-if="!isHMACVerified"
             v-tooltip="$t('CONVERSATION.UNVERIFIED_SESSION')"

@@ -315,3 +315,11 @@ The bridge adds those three and posts every number into the Customers inbox. Its
 * Teams: only channels hosted in Kita's tenant are watched. Channels a customer hosts and shares *into* Kita can't be subscribed with Kita's delegated token.
 * Media links expire after `MEDIA_TTL_DAYS` (default 90). Slack files are native and don't expire.
 * Message edits and deletes aren't synced in either direction.
+
+## Channel labels and desk linking
+
+* **Labels.** Every channel has a human label; a raw `platform:id` key is never shown. Slack: `#name`. Teams (Graph, service account's delegated token): a channel is `Team › Channel`, a group chat its topic, else its members' first names (`Jun, Maria & 2 others`, the service account left out). WhatsApp: the customer's profile name, else the number. Viber: the user's name. Until a label is known the fallback is e.g. `Microsoft Teams chat`. Resolved labels are cached (`label:<channel_key>`); each scope refresh retries placeholder labels, renames the desk contacts (unlinked channels by label, customer conversations by account name, without the old ` · Platform` suffix) and writes `channel_label` on the conversation.
+* **Desk-only endpoints** (header `X-Kita-Bridge-Secret: $BRIDGE_LINK_SECRET`; the desk never holds the Grip key):
+  * `POST /internal/link-refresh`: refresh Grip scope now, which merges newly linked channel conversations (`linkChannels()`).
+  * `GET /internal/grip/accounts?search=`: Grip accounts for the desk's "Link to customer" picker.
+  * `POST /internal/grip/link {channel_key, account_id}`: finds the channel's link row in `GET /api/v1/support/channels?unlinked=true`, `PATCH /api/v1/support/channels/:id {account_id}`, then refreshes as above. 404 when Grip doesn't list the channel as unlinked.

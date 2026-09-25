@@ -302,6 +302,9 @@ Rails.application.routes.draw do
             resources :customers, only: [:index] do
               post :my_view, on: :collection
             end
+            resources :channel_links, only: [:create] do
+              get :accounts, on: :collection
+            end
             resources :conversations, only: [] do
               resources :threads, only: [:index, :update] do
                 post :read, on: :member

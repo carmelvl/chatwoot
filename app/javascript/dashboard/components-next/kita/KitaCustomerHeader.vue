@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useStore } from 'vuex';
@@ -7,6 +7,9 @@ import { useMapGetter } from 'dashboard/composables/store';
 import { useKitaThreads } from 'dashboard/composables/useKitaThreads';
 import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
 import MoreActions from 'dashboard/components/widgets/conversation/MoreActions.vue';
+import Button from 'dashboard/components-next/button/Button.vue';
+import { useAdmin } from 'dashboard/composables/useAdmin';
+import KitaLinkCustomerModal from './KitaLinkCustomerModal.vue';
 import {
   conversationTab,
   customerLabel,
@@ -50,8 +53,20 @@ const ticketCount = computed(() =>
   openTicketCount(threadsByConversation[props.conversationId] || [])
 );
 
+const { isAdmin } = useAdmin();
+const linkModal = ref(null);
+const isUnlinked = computed(() => !!customer.value?.unlinked);
+
 const subline = computed(() => {
   if (!customer.value) return '';
+  if (isUnlinked.value) {
+    return [
+      platformName(customer.value.platforms?.[0]),
+      t('KITA_CUSTOMERS.UNLINKED_SUBLINE'),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
   const count = customer.value.conversations?.length || 0;
   return [
     customer.value.dri_name || customer.value.dri_email
@@ -113,6 +128,13 @@ const openTickets = () => {
         >
           {{ t('KITA_CUSTOMERS.OPEN_IN_GRIP') }}
         </a>
+        <Button
+          v-if="isUnlinked && isAdmin"
+          :label="t('KITA_CUSTOMERS.LINK_TO_CUSTOMER')"
+          size="sm"
+          data-test-id="kita-header-link-customer"
+          @click="linkModal?.open()"
+        />
         <MoreActions :conversation-id="conversationId" />
       </div>
     </div>
@@ -159,5 +181,11 @@ const openTickets = () => {
         </span>
       </button>
     </nav>
+    <KitaLinkCustomerModal
+      v-if="isUnlinked"
+      ref="linkModal"
+      :conversation-id="conversationId"
+      :label="customer.name"
+    />
   </header>
 </template>

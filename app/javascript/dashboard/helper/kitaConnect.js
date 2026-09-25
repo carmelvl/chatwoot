@@ -35,3 +35,29 @@ export const kitaReplyBlock = (status, channel) => {
   if (state === 'not_connected' || state === 'unavailable') return state;
   return null;
 };
+
+const RAW_CHANNEL_KEY = /^(slack|teams|whatsapp|viber):/;
+// Older bridge contacts were named "Tala · Slack"; the platform is an icon now
+const PLATFORM_SUFFIX = / · (Slack|Microsoft Teams|WhatsApp|Viber)$/;
+
+/**
+ * How a Kita customer conversation is named in lists: the customer ("Tala"),
+ * else the channel's label; never a raw "platform:id" key.
+ * @param {Object} chat - Conversation (snake_case, from the store)
+ * @param {string} contactName - Name of the conversation's contact
+ * @returns {{platform: string|null, title: string|null}} title null = use the platform fallback
+ */
+export const kitaConversationTitle = (chat, contactName) => {
+  const attrs = chat?.custom_attributes || {};
+  const platform = KITA_PLATFORMS.includes(attrs.channel)
+    ? attrs.channel
+    : null;
+  if (!platform) return { platform: null, title: contactName };
+  const candidates = [
+    attrs.grip_account,
+    attrs.channel_label,
+    (contactName || '').replace(PLATFORM_SUFFIX, ''),
+  ];
+  const title = candidates.find(c => c && !RAW_CHANNEL_KEY.test(c)) ?? null;
+  return { platform, title };
+};

@@ -1185,7 +1185,8 @@
     "ALL_TAB": "All",
     "SECTIONS": {
       "NEEDS_REPLY": "Needs reply",
-      "ACTIVE": "Active"
+      "ACTIVE": "Active",
+      "UNLINKED": "Unlinked channels"
     },
     "URGENT_TICKET": "Urgent ticket",
     "OWNED_BY": "Owned by {name}",
@@ -1195,7 +1196,19 @@
     "TICKETS_OPEN": "{count} open",
     "SELECT": "Pick a customer to see their conversations",
     "YOU": "You",
-    "UNREAD": "{count} unread"
+    "UNREAD": "{count} unread",
+    "LINK_TO_CUSTOMER": "Link to customer",
+    "UNLINKED_SUBLINE": "Not linked to a customer yet",
+    "LINK": {
+      "TITLE": "Link {channel} to a customer",
+      "DESCRIPTION": "Pick the Grip account this channel belongs to. Its conversation moves under that customer.",
+      "SEARCH": "Search customers",
+      "NO_RESULTS": "No matching customers",
+      "CANCEL": "Cancel",
+      "DONE": "Linked to {customer}",
+      "ERROR": "Could not link the channel. Try again or link it in Grip.",
+      "SEARCH_ERROR": "Could not load customers from Grip"
+    }
   },
   "KITA_THREADS": {
     "REPLY_COUNT": "{count} reply | {count} replies",

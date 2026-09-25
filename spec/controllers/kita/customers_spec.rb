@@ -35,17 +35,18 @@ RSpec.describe 'Kita customers', type: :request do
     expect(response).to have_http_status(:unauthorized)
   end
 
-  it 'groups the conversations the agent can see by Grip account, with an Unlinked group last' do
+  it 'groups the conversations the agent can see by Grip account, with each unlinked channel as its own row last' do
     get path, headers: agent.create_new_auth_token, as: :json
 
     rows = response.parsed_body['payload']
-    expect(rows.pluck('id')).to contain_exactly('Tala', 'Amartha', 'unlinked')
-    expect(rows.last['id']).to eq('unlinked')
+    unlinked = Conversation.find_by("custom_attributes->>'channel' = 'viber'")
+    expect(rows.pluck('id')).to contain_exactly('Tala', 'Amartha', "unlinked-#{unlinked.display_id}")
+    expect(rows.last).to include('unlinked' => true, 'name' => unlinked.contact.name)
     tala = rows.find { |row| row['id'] == 'Tala' }
     expect(tala).to include('name' => 'Tala', 'dri_name' => 'Suraaj Samanta', 'dri_email' => 'suraaj@usekita.com',
                             'platforms' => %w[slack whatsapp], 'open_count' => 2, 'waiting_on_us' => true)
     expect(rows.find { |row| row['id'] == 'Amartha' }).to include('open_count' => 0, 'waiting_on_us' => false, 'platforms' => ['teams'])
-    expect(rows.last).to include('name' => nil, 'platforms' => ['viber'])
+    expect(rows.last).to include('platforms' => ['viber'])
   end
 
   it 'aggregates one customer across its per-platform conversations by grip_account_id' do
@@ -86,9 +87,23 @@ RSpec.describe 'Kita customers', type: :request do
     expect(response.parsed_body['payload'].find { |row| row['id'] == 'Tala' }['urgent_ticket']).to be(false)
   end
 
-  it 'filters to my customers, matching the DRI email across Kita domain aliases' do
+  it 'filters to my customers, matching the DRI email across Kita domain aliases, and keeps unlinked channels' do
     get path, params: { mine: true }, headers: agent.create_new_auth_token, as: :json
-    expect(response.parsed_body['payload'].pluck('id')).to eq(['Tala'])
+    expect(response.parsed_body['payload'].pluck('id')).to match([eq('Tala'), start_with('unlinked-')])
+  end
+
+  it 'names an unlinked channel by its label, never a raw platform key' do
+    teams = conversation_for({ 'channel' => 'teams', 'channel_key' => 'teams:19:104cd490', 'channel_label' => 'teams:19:104cd490' })
+    teams.contact.update!(name: 'teams:19:104cd490')
+    get path, headers: agent.create_new_auth_token, as: :json
+
+    row = response.parsed_body['payload'].find { |r| r['id'] == "unlinked-#{teams.display_id}" }
+    expect(row).to include('name' => 'Microsoft Teams chat', 'channel_key' => 'teams:19:104cd490')
+    expect(row['conversations'].first['label']).to eq('Microsoft Teams chat')
+
+    teams.update!(custom_attributes: teams.custom_attributes.merge('channel_label' => 'Acme › Support'))
+    get path, headers: agent.create_new_auth_token, as: :json
+    expect(response.parsed_body['payload'].find { |r| r['id'] == "unlinked-#{teams.display_id}" }['name']).to eq('Acme › Support')
   end
 
   it 'creates one "My customers" saved view per agent that filters conversations by account_owner_email' do

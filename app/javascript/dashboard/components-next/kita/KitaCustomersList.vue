@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useStore } from 'vuex';
 import { useAlert } from 'dashboard/composables';
 import { useMapGetter } from 'dashboard/composables/store';
+import { useAdmin } from 'dashboard/composables/useAdmin';
+import KitaLinkCustomerModal from './KitaLinkCustomerModal.vue';
 import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
 import { shortTimestamp, dynamicTime } from 'shared/helpers/timeHelper';
 import {
@@ -75,6 +77,16 @@ const relativeTime = customer =>
     ? shortTimestamp(dynamicTime(customer.last_activity_at))
     : '';
 
+// "Link to customer" on an unlinked channel (admins: Grip only lets admins link)
+const { isAdmin } = useAdmin();
+const linkTarget = ref(null);
+const linkModal = ref(null);
+const startLink = async customer => {
+  linkTarget.value = customer;
+  await nextTick();
+  linkModal.value?.open();
+};
+
 const openCustomer = customer => {
   const [latest] = customer.conversations || [];
   router.push(
@@ -141,44 +153,63 @@ const openCustomer = customer => {
         >
           {{ t(`KITA_CUSTOMERS.SECTIONS.${section.key}`) }}
         </p>
-        <button
+        <div
           v-for="customer in section.customers"
           :key="customer.id"
-          type="button"
-          data-test="kita-customer-row"
-          class="flex flex-col w-full gap-1 px-3 py-3 text-start rounded-xl"
-          :class="
-            String(customer.id) === customerId
-              ? 'bg-n-blue-2 outline outline-1 outline-n-blue-4'
-              : 'hover:bg-n-alpha-1'
-          "
-          @click="openCustomer(customer)"
+          class="flex flex-col"
         >
-          <span class="flex items-baseline justify-between gap-2">
-            <span class="text-sm font-semibold truncate text-n-slate-12">
-              {{ customerLabel(customer, t('KITA_CUSTOMERS.UNLINKED')) }}
-            </span>
-            <span class="text-xs text-n-slate-11 shrink-0">
-              {{ relativeTime(customer) }}
-            </span>
-          </span>
-          <span
-            v-if="preview(customer)"
-            class="text-sm text-n-slate-11 line-clamp-2"
+          <button
+            type="button"
+            data-test="kita-customer-row"
+            class="flex flex-col w-full gap-1 px-3 py-3 text-start rounded-xl"
+            :class="
+              String(customer.id) === customerId
+                ? 'bg-n-blue-2 outline outline-1 outline-n-blue-4'
+                : 'hover:bg-n-alpha-1'
+            "
+            @click="openCustomer(customer)"
           >
-            {{ preview(customer) }}
-          </span>
-          <span
-            v-if="customer.urgent_ticket"
-            class="text-xs font-medium text-n-ruby-11"
+            <span class="flex items-baseline justify-between gap-2">
+              <span class="text-sm font-semibold truncate text-n-slate-12">
+                {{ customerLabel(customer, t('KITA_CUSTOMERS.UNLINKED')) }}
+              </span>
+              <span class="text-xs text-n-slate-11 shrink-0">
+                {{ relativeTime(customer) }}
+              </span>
+            </span>
+            <span
+              v-if="preview(customer)"
+              class="text-sm text-n-slate-11 line-clamp-2"
+            >
+              {{ preview(customer) }}
+            </span>
+            <span
+              v-if="customer.urgent_ticket"
+              class="text-xs font-medium text-n-ruby-11"
+            >
+              {{ t('KITA_CUSTOMERS.URGENT_TICKET') }}
+            </span>
+            <span v-else-if="detail(customer)" class="text-xs text-n-slate-11">
+              {{ detail(customer) }}
+            </span>
+          </button>
+          <button
+            v-if="customer.unlinked && isAdmin"
+            type="button"
+            data-test="kita-link-customer"
+            class="self-start px-3 pb-2 -mt-1 text-xs font-medium text-n-blue-11 hover:underline"
+            @click="startLink(customer)"
           >
-            {{ t('KITA_CUSTOMERS.URGENT_TICKET') }}
-          </span>
-          <span v-else-if="detail(customer)" class="text-xs text-n-slate-11">
-            {{ detail(customer) }}
-          </span>
-        </button>
+            {{ t('KITA_CUSTOMERS.LINK_TO_CUSTOMER') }}
+          </button>
+        </div>
       </template>
     </div>
+    <KitaLinkCustomerModal
+      v-if="linkTarget"
+      ref="linkModal"
+      :conversation-id="linkTarget.conversations[0].id"
+      :label="linkTarget.name"
+    />
   </section>
 </template>

@@ -12,6 +12,8 @@ import { parseWhatsAppWebhook, resolveMedia, verifyWhatsAppSignature, verifyWhat
 import { parseViberEvent, verifyViberSignature } from './platforms/viber.ts';
 import type { Store } from './store.ts';
 import type { Platform } from './types.ts';
+import { safeEqual } from './crypto.ts';
+import { GripError, type GripLinks } from './griplinks.ts';
 
 const MAX_BODY = 5 * 1024 * 1024;
 
@@ -26,6 +28,39 @@ export interface AppDeps {
   connect?: AgentConnect;
   /** Per business number: that owner's own Chatwoot client (native attribution of phone-app echoes). */
   whatsappOwnerApps?: Map<string, ChatwootAppClient>;
+  /** Desk-driven channel linking through Grip (internal endpoints). */
+  gripLinks?: GripLinks;
+  /** Refresh Grip scope now and merge newly linked channels (POST /internal/link-refresh). */
+  linkRefresh?: () => Promise<unknown>;
+}
+
+/**
+ * Desk-only endpoints (X-Kita-Bridge-Secret = BRIDGE_LINK_SECRET):
+ *   POST /internal/link-refresh                      refresh Grip scope + merge linked channels now
+ *   GET  /internal/grip/accounts?search=             Grip accounts for the "Link to customer" picker
+ *   POST /internal/grip/link {channel_key, account_id} link the channel in Grip, then refresh
+ */
+async function internal(d: AppDeps, req: IncomingMessage, res: ServerResponse, path: string, url: URL) {
+  if (!d.cfg.linkSecret || !safeEqual(h(req, 'x-kita-bridge-secret') ?? '', d.cfg.linkSecret)) return send(res, 401);
+  try {
+    if (req.method === 'POST' && path === '/internal/link-refresh') {
+      if (!d.linkRefresh) return send(res, 404);
+      await d.linkRefresh();
+      return send(res, 200);
+    }
+    if (!d.gripLinks?.enabled) return send(res, 404, { error: 'grip_not_configured' });
+    if (req.method === 'GET' && path === '/internal/grip/accounts')
+      return send(res, 200, { accounts: await d.gripLinks.accounts(url.searchParams.get('search') ?? '') });
+    if (req.method === 'POST' && path === '/internal/grip/link') {
+      const { channel_key: channelKey, account_id: accountId } = JSON.parse(await readBody(req));
+      if (typeof channelKey !== 'string' || typeof accountId !== 'string' || !channelKey || !accountId) return send(res, 422);
+      return send(res, 200, await d.gripLinks.link(channelKey, accountId));
+    }
+    return send(res, 404);
+  } catch (e: any) {
+    if (e instanceof GripError) return send(res, e.status === 404 ? 404 : 502, { error: e.message });
+    throw e;
+  }
 }
 
 export { MIRROR_NOTE } from './bridge.ts';
@@ -113,6 +148,7 @@ export function createHandler(d: AppDeps) {
         const challenge = verifyWhatsAppSubscription(cfg.whatsapp.verifyToken, url.searchParams);
         return challenge === undefined ? send(res, 403) : send(res, 200, challenge);
       }
+      if (path.startsWith('/internal/')) return await internal(d, req, res, path, url);
       if (req.method === 'GET' && path === '/healthz') return send(res, 200, { ok: true, platforms: d.enabled, teamsConnected: d.teams?.auth.isConnected() ?? false });
 
       if (d.connect && req.method === 'GET' && path === '/connect/status') {
