@@ -1,5 +1,6 @@
 import {
   DEFAULT_INBOX_FILTERS,
+  activeFilterChips,
   activeFilterCount,
   defaultTab,
   filtersFromQuery,
@@ -103,6 +104,25 @@ describe('kitaInbox helpers', () => {
         advanced: [{}],
       })
     ).toBe(2);
+  });
+
+  it('shows chips only for filters that are set', () => {
+    expect(activeFilterChips(DEFAULT_INBOX_FILTERS)).toEqual([]);
+    expect(
+      activeFilterChips({ ...DEFAULT_INBOX_FILTERS, status: 'needs_reply' })
+    ).toEqual([]);
+    expect(
+      activeFilterChips({
+        ...DEFAULT_INBOX_FILTERS,
+        status: 'snoozed',
+        platform: 'slack',
+        advanced: [{}, {}],
+      })
+    ).toEqual([
+      { key: 'status', value: 'snoozed' },
+      { key: 'platform', value: 'slack' },
+      { key: 'advanced', value: '2' },
+    ]);
   });
 
   it('groups rows into sections in order', () => {

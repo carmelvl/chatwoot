@@ -60,3 +60,24 @@ test('a Teams channel whose label Graph could not resolve yet is renamed once it
   assert.deepEqual([rename.path.endsWith('/contacts/src-1'), rename.body], [true, { name: 'Acme › Support' }]);
   assert.equal(appCalls.at(-1)!.body.custom_attributes.channel_label, 'Acme › Support');
 });
+
+test('a desk conversation that no longer exists (404) is dropped, so attributes stop retrying', async () => {
+  const { makeBridge } = await import('./helpers.ts');
+  let gone = false;
+  const { bridge, store, appCalls } = makeBridge({ appStatus: (path) => (gone && path.includes('/custom_attributes') ? 404 : 200) });
+  const teams = msg({
+    eventId: '19:gone:1', threadKey: 'channel:T1:19:gone', replyRef: { kind: 'channel', teamId: 'T1', channelId: '19:gone' },
+    conversationAttributes: { channel_key: 'teams:19:gone' }, userName: 'Jun Lim', channelConversation: true,
+  });
+  assert.equal(await bridge.inbound(teams), 'created');
+  const conversationId = store.getChannel('teams:19:gone')!.conversationId;
+  store.deleteKv(`attrs:${conversationId}`);
+
+  gone = true;
+  await bridge.linkChannels();
+  assert.equal(store.getChannel('teams:19:gone'), undefined);
+  assert.equal(store.channelsFor(conversationId).length, 0);
+  const calls = appCalls.length;
+  await bridge.linkChannels();
+  assert.equal(appCalls.length, calls, 'no retry once dropped');
+});

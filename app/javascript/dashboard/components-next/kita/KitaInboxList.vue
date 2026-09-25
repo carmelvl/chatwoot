@@ -8,19 +8,14 @@ import { useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useKeyboardEvents } from 'dashboard/composables/useKeyboardEvents';
 import { useSnakeCase } from 'dashboard/composables/useTransformKeys';
-import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
 import {
   KITA_SNOOZE_OPTIONS,
   useKitaAccountActions,
 } from 'dashboard/composables/useKitaAccountActions';
-import { KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
 import filterQueryGenerator from 'dashboard/helper/filterQueryGenerator';
 import {
   COLLAPSED_SECTIONS,
   INBOX_SCOPES,
-  INBOX_SORTS,
-  INBOX_STATUSES,
-  TICKET_PRIORITIES,
   activeFilterCount,
   filtersFromQuery,
   queryFromFilters,
@@ -32,6 +27,7 @@ import SaveCustomView from 'next/filter/SaveCustomView.vue';
 import Button from 'dashboard/components-next/button/Button.vue';
 import KitaFilterMenu from './KitaFilterMenu.vue';
 import KitaInboxRow from './KitaInboxRow.vue';
+import KitaInboxFilterBar from './KitaInboxFilterBar.vue';
 import KitaLinkCustomerModal from './KitaLinkCustomerModal.vue';
 
 const props = defineProps({
@@ -40,14 +36,11 @@ const props = defineProps({
 });
 
 const REFRESH_MS = 30_000;
-const ALL = '__all__';
-const TICKET_STATUSES = ['open', 'in_progress', 'waiting_on_customer'];
 
 const { t } = useI18n();
 const store = useStore();
 const route = useRoute();
 const router = useRouter();
-const platformName = useKitaPlatformName();
 const { isAdmin } = useAdmin();
 const { act, snooze } = useKitaAccountActions();
 
@@ -57,7 +50,6 @@ const rows = useMapGetter('kitaInbox/getRows');
 const meta = useMapGetter('kitaInbox/getMeta');
 const isFetching = useMapGetter('kitaInbox/isFetching');
 const labels = useMapGetter('labels/getLabels');
-const teams = useMapGetter('teams/getTeams');
 const agents = useMapGetter('agents/getAgents');
 const views = useMapGetter('customViews/getConversationCustomViews');
 const appliedFiltersQuery = useMapGetter('getAppliedConversationFiltersQuery');
@@ -111,6 +103,7 @@ const clearFilters = () => {
     query: queryFromFilters({
       ...filtersFromQuery({}),
       scope: filters.value.scope,
+      status: filters.value.status,
     }),
   });
 };
@@ -132,158 +125,6 @@ const scopeTabs = computed(() => [
   })),
 ]);
 
-// Chip menus: value null = any
-const menuItems = (options, selected, label, extra = {}) => [
-  { label: t('KITA_INBOX.ANY'), value: ALL, isSelected: !selected },
-  ...options.map(option => ({
-    label: label(option),
-    value: String(option.value ?? option),
-    isSelected: String(option.value ?? option) === String(selected),
-    ...(extra.platform ? { platform: option } : {}),
-  })),
-];
-const pick = key => value => setFilter({ [key]: value === ALL ? null : value });
-
-const chips = computed(() => {
-  const f = filters.value;
-  const label = (options, value) =>
-    options.find(option => String(option.value) === String(value))?.label;
-  const teamOptions = teams.value.map(team => ({
-    value: team.id,
-    label: team.name,
-  }));
-  const agentOptions = agents.value.map(agent => ({
-    value: agent.email,
-    label: agent.name,
-  }));
-  const stageOptions = [
-    ...new Set([...rows.value.map(row => row.stage), f.stage].filter(Boolean)),
-  ];
-  return [
-    {
-      key: 'status',
-      label: t(`KITA_INBOX.STATUS.${f.status}`),
-      active: f.status !== 'open',
-      items: INBOX_STATUSES.map(status => ({
-        label: t(`KITA_INBOX.STATUS.${status}`),
-        value: status,
-        isSelected: status === f.status,
-      })),
-      select: value => setFilter({ status: value }),
-    },
-    {
-      key: 'platform',
-      label: f.platform
-        ? platformName(f.platform)
-        : t('KITA_INBOX.CHIPS.PLATFORM'),
-      platform: f.platform,
-      active: !!f.platform,
-      items: menuItems(KITA_PLATFORMS, f.platform, platformName, {
-        platform: true,
-      }),
-      select: pick('platform'),
-    },
-    {
-      key: 'dri',
-      label: label(agentOptions, f.dri) || f.dri || t('KITA_INBOX.CHIPS.DRI'),
-      active: !!f.dri,
-      search: true,
-      items: menuItems(agentOptions, f.dri, option => option.label),
-      select: pick('dri'),
-    },
-    {
-      key: 'label',
-      label: f.label || t('KITA_INBOX.CHIPS.LABEL'),
-      active: !!f.label,
-      search: true,
-      items: menuItems(
-        labels.value.map(item => item.title),
-        f.label,
-        title => title
-      ),
-      select: pick('label'),
-    },
-    {
-      key: 'team',
-      label: label(teamOptions, f.teamId) || t('KITA_INBOX.CHIPS.TEAM'),
-      active: !!f.teamId,
-      items: menuItems(teamOptions, f.teamId, option => option.label),
-      select: pick('teamId'),
-    },
-    {
-      key: 'ticketPriority',
-      label: f.ticketPriority
-        ? t(`KITA_THREADS.PRIORITY.${f.ticketPriority}`)
-        : t('KITA_INBOX.CHIPS.TICKET_PRIORITY'),
-      active: !!f.ticketPriority,
-      items: menuItems(TICKET_PRIORITIES, f.ticketPriority, priority =>
-        t(`KITA_THREADS.PRIORITY.${priority}`)
-      ),
-      select: pick('ticketPriority'),
-    },
-    {
-      key: 'ticketStatus',
-      label: f.ticketStatus
-        ? t(`KITA_THREADS.TICKET_STATUS.${f.ticketStatus}`)
-        : t('KITA_INBOX.CHIPS.TICKET_STATUS'),
-      active: !!f.ticketStatus,
-      items: menuItems(TICKET_STATUSES, f.ticketStatus, status =>
-        t(`KITA_THREADS.TICKET_STATUS.${status}`)
-      ),
-      select: pick('ticketStatus'),
-    },
-    {
-      key: 'stage',
-      label: f.stage || t('KITA_INBOX.CHIPS.STAGE'),
-      active: !!f.stage,
-      items: menuItems(stageOptions, f.stage, stage => stage),
-      select: pick('stage'),
-    },
-    {
-      key: 'sort',
-      label: t(`KITA_INBOX.SORT.${f.sort || 'default'}`),
-      active: !!f.sort,
-      items: [
-        {
-          label: t('KITA_INBOX.SORT.default'),
-          value: ALL,
-          isSelected: !f.sort,
-        },
-        ...INBOX_SORTS.map(sort => ({
-          label: t(`KITA_INBOX.SORT.${sort}`),
-          value: sort,
-          isSelected: sort === f.sort,
-        })),
-      ],
-      select: pick('sort'),
-    },
-  ];
-});
-
-// Filters from a classic URL (inbox/:id, mentions…) show as removable chips
-const inboxById = useMapGetter('inboxes/getInboxById');
-const contextChips = computed(() => {
-  const f = filters.value;
-  return [
-    f.conversationType && {
-      key: 'conversationType',
-      label: t(`KITA_INBOX.TYPES.${f.conversationType}`),
-    },
-    f.inboxId && {
-      key: 'inboxId',
-      label: inboxById.value(Number(f.inboxId))?.name || f.inboxId,
-    },
-    f.advanced?.length && {
-      key: 'advanced',
-      label: t('KITA_INBOX.ADVANCED_APPLIED', { count: f.advanced.length }),
-    },
-  ].filter(Boolean);
-});
-const removeContextChip = key => {
-  if (key === 'advanced') advanced.value = null;
-  else setFilter({ [key]: null });
-};
-
 // "More filters": Chatwoot's advanced filter popover, run by the Inbox API
 const showAdvanced = ref(false);
 const appliedFilter = ref([]);
@@ -294,6 +135,18 @@ const applyAdvanced = payload => {
   ).payload;
 };
 const showSaveView = ref(false);
+
+// Stages seen on the rows feed the Stage filter
+const stages = computed(() => [
+  ...new Set(
+    [...rows.value.map(row => row.stage), filters.value.stage].filter(Boolean)
+  ),
+]);
+const setAdvanced = value => {
+  if (value === null) advanced.value = null;
+  else showAdvanced.value = true;
+};
+
 const openLastSavedView = () => {
   const last = views.value[views.value.length - 1];
   if (last) setFilter({ viewId: String(last.id), scope: 'all' });
@@ -340,7 +193,7 @@ watch(rows, value => {
 const bulk = async (action, params) => {
   if (await act(selected.value, action, params)) selected.value = [];
 };
-const bulkSnooze = async ({ value }) => {
+const bulkSnooze = async value => {
   if (await snooze(selected.value, value)) selected.value = [];
 };
 const snoozeItems = computed(() =>
@@ -364,8 +217,12 @@ const startLink = async row => {
   await nextTick();
   linkModal.value?.open();
 };
-const setNotCustomer = (row, notCustomer) =>
-  act([row.id], notCustomer ? 'not_customer' : 'customer');
+// The row's ⋯ menu
+const onRowAction = (action, row) => {
+  if (action === 'select') toggleSelected(row);
+  else if (action === 'link') startLink(row);
+  else act([row.id], action);
+};
 
 // Keyboard: j/k (or Alt+J/K) move, Enter opens, x selects, e resolves
 const focusedIndex = ref(-1);
@@ -438,57 +295,14 @@ watch(filters, () => {
           {{ tab.label }}
         </button>
       </nav>
-      <div class="flex flex-wrap items-center gap-1.5 pt-3">
-        <KitaFilterMenu
-          v-for="chip in chips"
-          :key="chip.key"
-          :label="chip.label"
-          :items="chip.items"
-          :active="chip.active"
-          :platform="chip.platform"
-          :show-search="chip.search"
-          @select="chip.select"
-        />
-        <button
-          v-for="chip in contextChips"
-          :key="chip.key"
-          type="button"
-          class="flex items-center gap-1 h-7 px-2.5 text-xs font-medium rounded-lg bg-woot-25 dark:bg-n-alpha-2 outline outline-1 outline-woot-200 dark:outline-n-weak text-n-slate-12"
-          @click="removeContextChip(chip.key)"
-        >
-          {{ chip.label }}
-          <span class="i-lucide-x size-3" />
-        </button>
-        <div class="relative">
-          <Button
-            id="toggleConversationFilterButton"
-            :label="t('KITA_INBOX.MORE_FILTERS')"
-            icon="i-lucide-list-filter"
-            size="xs"
-            variant="ghost"
-            color="slate"
-            data-test-id="kita-more-filters"
-            @click="showAdvanced = !showAdvanced"
-          />
-        </div>
-        <Button
-          v-if="advanced?.length"
-          id="saveFilterTeleportTarget"
-          :label="t('KITA_INBOX.SAVE_VIEW')"
-          size="xs"
-          variant="ghost"
-          color="slate"
-          @click="showSaveView = true"
-        />
-        <button
-          v-if="hasFilters"
-          type="button"
-          class="text-xs font-medium text-n-slate-11 hover:text-n-slate-12"
-          @click="clearFilters"
-        >
-          {{ t('KITA_INBOX.CLEAR_FILTERS') }}
-        </button>
-      </div>
+      <KitaInboxFilterBar
+        :filters="filters"
+        :stages="stages"
+        @update="setFilter"
+        @clear="clearFilters"
+        @advanced="setAdvanced"
+        @save-view="showSaveView = true"
+      />
       <ConversationFilter
         v-if="showAdvanced"
         v-model="appliedFilter"
@@ -521,7 +335,7 @@ watch(filters, () => {
       <KitaFilterMenu
         :label="t('KITA_INBOX.BULK.SNOOZE')"
         :items="snoozeItems"
-        @select="value => bulkSnooze({ value })"
+        @select="bulkSnooze"
       />
       <KitaFilterMenu
         :label="t('KITA_INBOX.BULK.ASSIGN')"
@@ -563,7 +377,8 @@ watch(filters, () => {
       >
         <button
           type="button"
-          class="flex items-center w-full gap-1 px-3 pt-6 pb-2 m-0 text-xs font-medium tracking-widest uppercase text-n-slate-11"
+          data-test="kita-inbox-section-title"
+          class="flex items-center w-full gap-1 px-3 pt-5 pb-1.5 m-0 text-[0.6875rem] font-medium tracking-[0.12em] uppercase text-n-slate-11"
           :disabled="!section.collapsible"
           @click="toggleSection(section.key)"
         >
@@ -580,43 +395,18 @@ watch(filters, () => {
           </span>
         </button>
         <template v-if="section.open">
-          <div v-for="row in section.rows" :key="row.id" class="relative group">
-            <KitaInboxRow
-              :row="row"
-              :active="String(row.id) === customerId"
-              :focused="visibleRows[focusedIndex]?.id === row.id"
-              :selected="isSelected(row)"
-              :current-user-name="currentUser?.name || ''"
-              @open="openRow"
-              @toggle-select="toggleSelected"
-            />
-            <div
-              v-if="row.kind === 'unlinked'"
-              class="flex gap-3 pb-2 -mt-1 ps-10"
-            >
-              <button
-                v-if="isAdmin && row.conversations?.length"
-                type="button"
-                data-test="kita-link-customer"
-                class="text-xs font-medium text-n-brand hover:underline"
-                @click="startLink(row)"
-              >
-                {{ t('KITA_CUSTOMERS.LINK_TO_CUSTOMER') }}
-              </button>
-              <button
-                type="button"
-                data-test="kita-not-customer"
-                class="text-xs font-medium text-n-slate-11 hover:text-n-slate-12"
-                @click="setNotCustomer(row, !row.not_customer)"
-              >
-                {{
-                  row.not_customer
-                    ? t('KITA_INBOX.BACK_TO_INBOX')
-                    : t('KITA_INBOX.NOT_A_CUSTOMER')
-                }}
-              </button>
-            </div>
-          </div>
+          <KitaInboxRow
+            v-for="row in section.rows"
+            :key="row.id"
+            :row="row"
+            :active="String(row.id) === customerId"
+            :focused="visibleRows[focusedIndex]?.id === row.id"
+            :selected="isSelected(row)"
+            :can-link="isAdmin && !!row.conversations?.length"
+            :current-user-name="currentUser?.name || ''"
+            @open="openRow"
+            @action="onRowAction"
+          />
         </template>
       </section>
       <div v-if="meta.has_more" class="flex justify-center pt-3">

@@ -81,10 +81,16 @@ const mountList = () =>
       plugins: [i18n],
       stubs: {
         KitaInboxRow: {
-          props: ['row'],
+          name: 'KitaInboxRow',
+          props: ['row', 'canLink'],
+          emits: ['action'],
           template: '<div data-test="kita-inbox-row">{{ row.name }}</div>',
         },
-        KitaLinkCustomerModal: true,
+        KitaLinkCustomerModal: {
+          name: 'KitaLinkCustomerModal',
+          template: '<div />',
+          methods: { open() {} },
+        },
         ConversationFilter: true,
         SaveCustomView: true,
       },
@@ -116,18 +122,27 @@ describe('KitaInboxList', () => {
     ).toEqual(['Tala', 'Amartha']);
   });
 
-  it('opens a collapsed section with its Link and Not a customer actions', async () => {
+  it("opens a collapsed section; a row's ⋯ Link opens the link dialog", async () => {
     const wrapper = mountList();
     await wrapper
       .findAll('[data-test="kita-inbox-section"]')[2]
       .find('button')
       .trigger('click');
-    expect(wrapper.text()).toContain('#kita-test');
-    expect(wrapper.find('[data-test="kita-link-customer"]').exists()).toBe(
-      true
-    );
-    expect(wrapper.find('[data-test="kita-not-customer"]').text()).toBe(
-      'Not a customer'
+    const row = wrapper
+      .findAllComponents({ name: 'KitaInboxRow' })
+      .find(item => item.props('row').kind === 'unlinked');
+    expect(row.props('canLink')).toBe(true);
+    await row.vm.$emit('action', 'link', row.props('row'));
+    await wrapper.vm.$nextTick();
+    expect(
+      wrapper.findComponent({ name: 'KitaLinkCustomerModal' }).exists()
+    ).toBe(true);
+  });
+
+  it('has no filter chips when no filter is set', () => {
+    const wrapper = mountList();
+    expect(wrapper.find('[data-test="kita-filter-chips"]').exists()).toBe(
+      false
     );
   });
 

@@ -316,7 +316,14 @@ export class Bridge {
       await app.updateCustomAttributes(conversationId, attrs);
       store.putKv(`attrs:${conversationId}`, json);
     } catch (e: any) {
-      log.warn('conversation_attributes_failed', { conversation: conversationId, error: String(e?.message ?? e) });
+      const error = String(e?.message ?? e);
+      // Deleted in the desk: forget it so the sync stops retrying every run
+      if (/-> 404$/.test(error)) {
+        store.dropDeskConversation(conversationId);
+        log.info('conversation_dropped', { conversation: conversationId });
+        return;
+      }
+      log.warn('conversation_attributes_failed', { conversation: conversationId, error });
     }
   }
 

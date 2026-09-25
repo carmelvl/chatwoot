@@ -121,6 +121,13 @@ export class Store {
   }
 
   /** Conversations of a platform whose thread_key starts with `prefix`. */
+  /** Forgets a desk conversation that no longer exists: its thread rows, channels and cached attributes. */
+  dropDeskConversation(conversationId: number): void {
+    this.db.prepare('DELETE FROM conversations WHERE conversation_id = ?').run(conversationId);
+    this.db.prepare('DELETE FROM channels WHERE conversation_id = ?').run(conversationId);
+    this.deleteKv(`attrs:${conversationId}`);
+  }
+
   listConversations(platform: string, prefix = ''): ConversationRow[] {
     return (this.db.prepare('SELECT * FROM conversations WHERE platform = ? AND thread_key LIKE ?').all(platform, `${prefix}%`) as any[]).map((r) => this.row(r)!);
   }

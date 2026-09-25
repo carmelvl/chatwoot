@@ -11,7 +11,8 @@
 #                 unassigned (no DRI, or waiting on us with no assignee) or all
 #   view_id     - one of my saved views (Chatwoot custom filter of type conversation)
 #   filters     - a Chatwoot advanced-filter payload as JSON ([{attribute_key, filter_operator, values, query_operator}])
-#   status      - open (default), snoozed, resolved, all, or other (channels marked "Not a customer", hidden elsewhere)
+#   status      - open (default), needs_reply (open and waiting on us), snoozed, resolved, all, or other
+#                 (channels marked "Not a customer", hidden elsewhere)
 #   platform    - slack, teams, whatsapp, viber
 #   dri         - the DRI's email; labels[]; team_id; inbox_id; stage
 #   ticket_priority, ticket_status - the conversation has a Grip ticket with this priority/status (open = not closed)
@@ -22,7 +23,7 @@
 class Kita::Inbox
   PER_PAGE = 25
   SCOPES = %w[mine unassigned all].freeze
-  STATUSES = %w[open snoozed resolved all other].freeze
+  STATUSES = %w[needs_reply open snoozed resolved all other].freeze
   PLATFORMS = %w[slack teams whatsapp viber].freeze
   PRIORITY_RANK = "MAX(CASE conversations.priority WHEN #{Conversation.priorities[:urgent]} THEN 4 " \
                   "WHEN #{Conversation.priorities[:high]} THEN 3 WHEN #{Conversation.priorities[:medium]} THEN 2 " \
@@ -131,7 +132,11 @@ class Kita::Inbox
     return scope.where(::Kita::Customers::NOT_CUSTOMER) if status == 'other'
 
     scope = scope.where.not(::Kita::Customers::NOT_CUSTOMER)
-    status == 'all' ? scope : scope.where(status: status)
+    case status
+    when 'all' then scope
+    when 'needs_reply' then scope.where(::Kita::Customers::NEEDS_REPLY)
+    else scope.where(status: status)
+    end
   end
 
   def filter_platforms(scope)

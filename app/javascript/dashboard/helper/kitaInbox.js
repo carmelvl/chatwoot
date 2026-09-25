@@ -9,7 +9,27 @@
 export const TICKETS_TAB = 'tickets';
 
 export const INBOX_SCOPES = ['mine', 'unassigned', 'all'];
-export const INBOX_STATUSES = ['open', 'snoozed', 'resolved', 'all', 'other'];
+export const INBOX_STATUSES = [
+  'needs_reply',
+  'open',
+  'snoozed',
+  'resolved',
+  'all',
+  'other',
+];
+// The status control under the tabs; the rest live in the Filter popover
+export const STATUS_SEGMENTS = ['needs_reply', 'open', 'resolved'];
+export const MORE_STATUSES = ['snoozed', 'all', 'other'];
+// Filter popover fields, in order (each a single choice)
+export const POPOVER_FILTERS = [
+  'platform',
+  'dri',
+  'label',
+  'teamId',
+  'ticketPriority',
+  'ticketStatus',
+  'stage',
+];
 export const INBOX_SORTS = [
   'latest',
   'oldest',
@@ -125,6 +145,25 @@ export const inboxParams = (filters, page = 1) => {
       ([, value]) => value !== null && value !== undefined
     )
   );
+};
+
+/**
+ * The removable chips under the filter row: one per filter that is set (a
+ * status from the popover counts; the segmented ones don't). None by default.
+ * @returns {Array<{key: string, value: string}>}
+ */
+export const activeFilterChips = filters => {
+  const chips = [];
+  if (MORE_STATUSES.includes(filters.status)) {
+    chips.push({ key: 'status', value: filters.status });
+  }
+  [...POPOVER_FILTERS, 'inboxId', 'viewId', 'conversationType'].forEach(key => {
+    if (filters[key]) chips.push({ key, value: String(filters[key]) });
+  });
+  if (filters.advanced?.length) {
+    chips.push({ key: 'advanced', value: String(filters.advanced.length) });
+  }
+  return chips;
 };
 
 /** Filters set beyond scope and status (drives the "Clear" link). */

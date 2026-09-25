@@ -55,15 +55,16 @@ export function staticScope(links: Record<string, Partial<ScopeChannel>> = {}) {
   return { map, allows: () => true, channel: (k?: string) => (k ? map.get(k) : undefined), link: (k: string, v: Partial<ScopeChannel>) => map.set(k, { channel_key: k, ...v }) };
 }
 
-export function makeBridge(o: { scope?: ScopeCheck; labeler?: BridgeDeps['labeler'] } = {}) {
+export function makeBridge(o: { scope?: ScopeCheck; labeler?: BridgeDeps['labeler']; appStatus?: (path: string) => number } = {}) {
   const cw = fakeChatwoot();
   const store = new Store(':memory:');
   const senders = { slack: new RecordingSender(), teams: new RecordingSender(), viber: new RecordingSender() };
   let next = 5000;
   const appCalls: { path: string; body: any }[] = [];
   const app = new ChatwootAppClient('http://rails:3000', 'BRIDGE_TOKEN', '1', (async (u: any, init: any) => {
-    appCalls.push({ path: new URL(String(u)).pathname, body: JSON.parse(init.body) });
-    return Response.json({ id: next++ });
+    const path = new URL(String(u)).pathname;
+    appCalls.push({ path, body: JSON.parse(init.body) });
+    return Response.json({ id: next++ }, { status: o.appStatus?.(path) ?? 200 });
   }) as typeof fetch);
   const deskCalls: { path: string; body: any }[] = [];
   const desk = new KitaDeskClient('http://rails:3000', 'link-secret', (async (u: any, init: any) => {

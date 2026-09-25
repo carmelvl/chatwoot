@@ -1218,7 +1218,8 @@
     "CHANNELS": "Channels",
     "CONTACTS": "People",
     "NO_CONTACTS": "No people on this account yet.",
-    "LAST_MESSAGE": "Last message {time}: “{content}”"
+    "LAST_MESSAGE": "Last message {time}: “{content}”",
+    "URGENT_TICKET": "Urgent ticket"
   },
   "KITA_THREADS": {
     "REPLY_COUNT": "{count} reply | {count} replies",
@@ -1274,6 +1275,7 @@
       "all": "All"
     },
     "STATUS": {
+      "needs_reply": "Needs reply",
       "open": "Open",
       "pending": "Pending",
       "snoozed": "Snoozed",
@@ -1296,7 +1298,8 @@
       "oldest": "Oldest activity",
       "created_desc": "Newest first",
       "created_asc": "Oldest first",
-      "priority": "Priority"
+      "priority": "Priority",
+      "TITLE": "Sort"
     },
     "TYPES": {
       "mention": "Mentions",
@@ -1311,7 +1314,6 @@
       "resolved": "Resolved"
     },
     "ANY": "Any",
-    "MORE_FILTERS": "More filters",
     "SAVE_VIEW": "Save view",
     "CLEAR_FILTERS": "Clear",
     "ADVANCED_APPLIED": "{count} filter | {count} filters",
@@ -1349,7 +1351,8 @@
       "SNOOZE": "Snooze",
       "ASSIGN": "Assign",
       "LABEL": "Label",
-      "CLEAR": "Clear"
+      "CLEAR": "Clear",
+      "DESELECT": "Deselect"
     },
     "CLEAR": {
       "TITLE": "You're clear",
@@ -1359,7 +1362,14 @@
     "PICK": {
       "TITLE": "Pick a customer",
       "DESCRIPTION": "Choose a row on the left to read and reply."
-    }
+    },
+    "FILTER": {
+      "TITLE": "Filter",
+      "STATUS": "Status",
+      "ADVANCED": "Advanced filters…"
+    },
+    "ROW_ACTIONS": "Row actions",
+    "UNREAD": "Unread"
   },
   "KITA_BELL": {
     "TITLE": "Notifications",

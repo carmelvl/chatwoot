@@ -117,6 +117,8 @@ RSpec.describe 'Kita inbox', type: :request do
 
   it 'filters by status, platform, team, labels, stage and DRI' do
     expect(ids(scope: 'all', status: 'resolved')).to eq([website_id])
+    incoming(amartha)
+    expect(ids(scope: 'all', status: 'needs_reply')).to eq(['9'])
     expect(ids(scope: 'all', platform: 'whatsapp')).to eq(['7'])
     expect(ids(scope: 'all', stage: 'Production')).to eq(['7'])
     expect(ids(scope: 'all', dri: 'SURAAJ@usekita.com')).to eq(['7'])

@@ -12,6 +12,8 @@ defineProps({
   active: { type: Boolean, default: false },
   showSearch: { type: Boolean, default: false },
   platform: { type: String, default: null },
+  // Open the menu towards the start (inside a right-aligned popover)
+  alignEnd: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['select']);
@@ -47,7 +49,8 @@ const select = item => {
       v-if="isOpen"
       :menu-items="items"
       :show-search="showSearch"
-      class="mt-1 top-full ltr:left-0 rtl:right-0 max-h-80 min-w-44"
+      class="mt-1 top-full max-h-80 min-w-44"
+      :class="alignEnd ? 'ltr:right-0 rtl:left-0' : 'ltr:left-0 rtl:right-0'"
       @action="select"
     >
       <template #thumbnail="{ item }">

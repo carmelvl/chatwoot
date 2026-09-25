@@ -1,37 +1,42 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useMapGetter } from 'dashboard/composables/store';
+import { vOnClickOutside } from '@vueuse/components';
 import { useKitaPlatformName } from 'dashboard/composables/useKitaPlatformName';
-import {
-  platformStates,
-  rowWait,
-  shortDuration,
-} from 'dashboard/helper/kitaInbox';
-import Avatar from 'dashboard/components-next/avatar/Avatar.vue';
+import { KITA_PLATFORMS } from 'dashboard/helper/kitaConnect';
+import { rowPlatforms } from 'dashboard/helper/kitaInbox';
+import { dynamicTime, shortTimestamp } from 'shared/helpers/timeHelper';
+import DropdownMenu from 'dashboard/components-next/dropdown-menu/DropdownMenu.vue';
 import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import PlatformLogo from './PlatformLogo.vue';
-import { customerPreview } from './customersHelper';
+import { customerPreview, firstName } from './customersHelper';
 
-// One Inbox row (S03): name + stage, DRI and wait; platform logos with their
-// state; the waiting (or latest) message; the pressing ticket; labels.
+// One Inbox row (Paper S03, customers list):
+//   1. unread dot · name ··· relative time
+//   2. ‹logo› Sender: preview (one logo; several platforms = a tight strip)
+//   3. only when needed: the urgent ticket (red), else the owner and "Not linked"
+// Row actions (select, link, not a customer) sit in a hover "⋯" menu.
 const props = defineProps({
   row: { type: Object, required: true },
   active: { type: Boolean, default: false },
   focused: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
+  canLink: { type: Boolean, default: false },
   currentUserName: { type: String, default: '' },
 });
 
-defineEmits(['open', 'toggleSelect']);
-
-const MAX_LABELS = 3;
+const emit = defineEmits(['open', 'action']);
 
 const { t } = useI18n();
 const platformName = useKitaPlatformName();
-const agents = useMapGetter('agents/getAgents');
 
-const states = computed(() => platformStates(props.row));
+const platforms = computed(() => rowPlatforms(props.row, KITA_PLATFORMS));
+// Line 2 logos: the message's platform, or every platform of a multi-platform customer
+const logos = computed(() => {
+  if (platforms.value.length > 1) return platforms.value;
+  const platform = props.row.last_message?.platform || platforms.value[0];
+  return KITA_PLATFORMS.includes(platform) ? [platform] : [];
+});
 // Conversations from other inboxes (website, email…) show their channel icon
 const channelInbox = computed(() => {
   const [conversation] = props.row.conversations || [];
@@ -40,62 +45,78 @@ const channelInbox = computed(() => {
     : null;
 });
 
-const message = computed(() => props.row.last_message);
-// "Slack · Maria: batch 14 came back empty"
-const preview = computed(() => {
-  const text = customerPreview(props.row, {
+const preview = computed(() =>
+  customerPreview(props.row, {
     you: t('KITA_CUSTOMERS.YOU'),
     currentUserName: props.currentUserName,
-  });
-  const platform = platformName(message.value?.platform);
-  return text && platform ? `${platform} · ${text}` : text;
-});
-
-const wait = computed(() => {
-  const value = rowWait(props.row, Math.floor(Date.now() / 1000));
-  if (!value) return '';
-  const duration = shortDuration(value.seconds);
-  return value.waiting ? t('KITA_INBOX.WAITING', { duration }) : duration;
-});
-const isWaiting = computed(() => props.row.section === 'needs_reply');
-// Red only when an urgent ticket is open (no SLA on the desk)
-const isUrgent = computed(() => !!props.row.urgent_ticket);
-const isPinned = computed(
-  () => isWaiting.value && props.row.pressing_tickets > 0
+  })
 );
-
-const dri = computed(
-  () =>
-    agents.value.find(agent => agent.id === props.row.dri_id) ??
-    (props.row.dri_name ? { name: props.row.dri_name } : null)
+const time = computed(() =>
+  props.row.last_activity_at
+    ? shortTimestamp(dynamicTime(props.row.last_activity_at))
+    : ''
 );
+const isUnread = computed(() => props.row.unread_count > 0);
 
-const ticket = computed(() => props.row.top_ticket);
-const ticketLine = computed(() => {
-  if (!ticket.value) return '';
+const ticket = computed(() =>
+  props.row.urgent_ticket ? props.row.top_ticket : null
+);
+const urgentLine = computed(() => {
+  if (!props.row.urgent_ticket) return '';
+  const more = Math.max(0, (props.row.pressing_tickets || 0) - 1);
   return [
-    ticket.value.display_id,
-    t(`KITA_THREADS.PRIORITY.${ticket.value.priority}`),
-    ticket.value.title,
+    ticket.value?.display_id
+      ? `${t('KITA_CUSTOMERS.URGENT_TICKET')} ${ticket.value.display_id}`
+      : t('KITA_CUSTOMERS.URGENT_TICKET'),
+    ticket.value?.title,
+    more ? t('KITA_INBOX.MORE_TICKETS', { count: more }) : null,
   ]
     .filter(Boolean)
     .join(' · ');
 });
-const moreTickets = computed(() =>
-  Math.max(0, (props.row.pressing_tickets || 0) - 1)
+const mutedLine = computed(() =>
+  [
+    props.row.unlinked ? t('KITA_INBOX.NOT_LINKED') : null,
+    props.row.stage,
+    firstName(props.row.dri_name),
+  ]
+    .filter(Boolean)
+    .join(' · ')
 );
 
-const labels = computed(() => (props.row.labels || []).slice(0, MAX_LABELS));
-const extraLabels = computed(() =>
-  Math.max(0, (props.row.labels || []).length - MAX_LABELS)
-);
-
-const STATE_CLASS = {
-  needs_reply: '',
-  open: '',
-  pending: '',
-  snoozed: 'opacity-60',
-  resolved: 'opacity-35 grayscale',
+const showMenu = ref(false);
+const menuItems = computed(() => [
+  {
+    label: props.selected
+      ? t('KITA_INBOX.BULK.DESELECT')
+      : t('KITA_INBOX.BULK.SELECT'),
+    value: 'select',
+    action: 'select',
+  },
+  ...(props.row.kind === 'unlinked' && props.canLink
+    ? [
+        {
+          label: t('KITA_CUSTOMERS.LINK_TO_CUSTOMER'),
+          value: 'link',
+          action: 'link',
+        },
+      ]
+    : []),
+  ...(props.row.kind === 'unlinked'
+    ? [
+        {
+          label: props.row.not_customer
+            ? t('KITA_INBOX.BACK_TO_INBOX')
+            : t('KITA_INBOX.NOT_A_CUSTOMER'),
+          value: 'not_customer',
+          action: props.row.not_customer ? 'customer' : 'not_customer',
+        },
+      ]
+    : []),
+]);
+const onMenu = ({ action }) => {
+  showMenu.value = false;
+  emit('action', action, props.row);
 };
 </script>
 
@@ -104,149 +125,104 @@ const STATE_CLASS = {
     data-test="kita-inbox-row"
     role="button"
     tabindex="0"
-    class="relative flex gap-2 px-3 py-3 cursor-pointer rounded-xl kita-inbox-row"
+    class="relative flex flex-col gap-1 px-3 py-3 cursor-pointer group rounded-xl kita-inbox-row"
     :class="[
       active
-        ? 'bg-woot-25 dark:bg-n-alpha-2 outline outline-1 outline-woot-100 dark:outline-n-weak active'
-        : 'hover:bg-n-alpha-1',
+        ? 'bg-woot-25 dark:bg-n-alpha-2 active'
+        : selected
+          ? 'bg-n-alpha-1'
+          : 'hover:bg-n-alpha-1',
       { 'ring-1 ring-n-slate-7': focused && !active },
     ]"
-    @click="$emit('open', row)"
-    @keydown.enter="$emit('open', row)"
+    @click="emit('open', row)"
+    @keydown.enter="emit('open', row)"
   >
-    <span
-      v-if="isPinned"
-      data-test="kita-inbox-pinned"
-      class="absolute inset-y-2 w-0.5 rounded-full ltr:left-0 rtl:right-0 bg-n-ruby-9"
-    />
-    <span class="flex flex-col items-center w-4 pt-0.5 shrink-0">
-      <input
-        type="checkbox"
-        class="size-3.5 cursor-pointer accent-n-brand"
-        :class="selected ? '' : 'opacity-0 group-hover:opacity-100'"
-        :checked="selected"
-        :aria-label="t('KITA_INBOX.BULK.SELECT')"
-        data-test="kita-inbox-select"
-        @click.stop="$emit('toggleSelect', row)"
+    <span class="flex items-center min-w-0 gap-2">
+      <span
+        v-if="isUnread"
+        data-test="kita-inbox-unread"
+        class="rounded-full size-2 shrink-0 bg-n-brand"
+        :title="t('KITA_INBOX.UNREAD')"
       />
-    </span>
-    <span class="flex flex-col flex-1 min-w-0 gap-1">
-      <span class="flex items-center min-w-0 gap-2">
-        <span
-          class="text-sm truncate text-n-slate-12"
-          :class="row.unread_count ? 'font-semibold' : 'font-medium'"
-        >
-          {{ row.name || t('KITA_INBOX.UNNAMED') }}
-        </span>
-        <span
-          v-if="row.stage"
-          class="px-1.5 py-px text-[0.625rem] font-medium rounded-full bg-woot-50 text-woot-700 dark:bg-n-alpha-2 dark:text-n-slate-11 shrink-0"
-        >
-          {{ row.stage }}
-        </span>
-        <span
-          v-if="row.unlinked"
-          class="px-1.5 py-px text-[0.625rem] rounded-full bg-n-alpha-2 text-n-slate-11 shrink-0"
-        >
-          {{ t('KITA_INBOX.NOT_LINKED') }}
-        </span>
-        <span class="flex items-center gap-1.5 ms-auto shrink-0">
-          <Avatar
-            v-if="dri"
-            :name="dri.name"
-            :src="dri.thumbnail"
-            :size="16"
-            rounded-full
-            :title="t('KITA_INBOX.DRI', { name: dri.name })"
-          />
-          <span
-            class="text-xs"
-            :class="
-              isWaiting && isUrgent
-                ? 'font-medium text-n-ruby-11'
-                : 'text-n-slate-11'
-            "
-            data-test="kita-inbox-wait"
-          >
-            {{ wait }}
-          </span>
-        </span>
+      <span
+        v-if="selected"
+        class="i-lucide-check-square size-3.5 shrink-0 text-n-brand"
+      />
+      <span class="text-sm font-semibold truncate text-n-slate-12">
+        {{ row.name || t('KITA_INBOX.UNNAMED') }}
       </span>
+      <span
+        class="text-xs ms-auto shrink-0 text-n-slate-11 group-hover:invisible"
+        data-test="kita-inbox-time"
+      >
+        {{ time }}
+      </span>
+    </span>
 
-      <span class="flex items-center gap-1.5">
-        <span
-          v-for="item in states"
-          :key="item.platform"
-          class="relative inline-flex"
-          :title="platformName(item.platform)"
-          data-test="kita-inbox-platform"
-        >
-          <PlatformLogo
-            :platform="item.platform"
-            class="size-4"
-            :class="STATE_CLASS[item.state]"
-          />
-          <span
-            v-if="item.state === 'snoozed'"
-            class="absolute -bottom-1 -end-1 i-lucide-clock size-2.5 text-n-slate-11"
-          />
-          <span
-            v-else-if="item.unread"
-            class="absolute -top-0.5 -end-0.5 size-1.5 rounded-full bg-n-brand"
-          />
-        </span>
+    <span class="flex items-center min-w-0 gap-1.5">
+      <span
+        v-if="logos.length || channelInbox"
+        class="flex items-center gap-0.5 shrink-0"
+      >
+        <PlatformLogo
+          v-for="platform in logos"
+          :key="platform"
+          :platform="platform"
+          :title="platformName(platform)"
+          data-test="kita-inbox-logo"
+          class="size-3.5"
+        />
         <ChannelIcon
           v-if="channelInbox"
           :inbox="channelInbox"
-          class="size-4 text-n-slate-11"
+          class="size-3.5 text-n-slate-11"
         />
       </span>
-
-      <span v-if="preview" class="flex items-start gap-1.5 min-w-0">
-        <PlatformLogo
-          v-if="platformName(message?.platform)"
-          :platform="message.platform"
-          class="size-3.5 mt-0.5 shrink-0"
-        />
-        <span class="flex-1 min-w-0 text-sm text-n-slate-11 line-clamp-2">
-          {{ preview }}
-        </span>
-        <span
-          v-if="row.unread_count"
-          class="grid px-1 text-xs font-medium text-white rounded-full min-w-4 h-4 place-content-center bg-n-brand shrink-0"
-        >
-          {{ row.unread_count }}
-        </span>
-      </span>
-
       <span
-        v-if="ticket"
-        data-test="kita-inbox-ticket"
-        class="text-xs truncate"
-        :class="
-          ticket.priority === 'urgent'
-            ? 'font-medium text-n-ruby-11'
-            : 'text-n-amber-11'
-        "
+        class="text-sm truncate text-n-slate-11"
+        data-test="kita-inbox-preview"
       >
-        {{ ticketLine }}
-        <template v-if="moreTickets">
-          {{ t('KITA_INBOX.MORE_TICKETS', { count: moreTickets }) }}
-        </template>
-      </span>
-
-      <span v-if="labels.length" class="flex flex-wrap gap-1">
-        <span
-          v-for="label in labels"
-          :key="label"
-          class="px-1.5 py-px text-[0.625rem] rounded-md bg-n-alpha-2 text-n-slate-11"
-        >
-          {{ label }}
-        </span>
-        <span v-if="extraLabels" class="text-[0.625rem] text-n-slate-11">
-          +{{ extraLabels }}
-        </span>
+        {{ preview }}
       </span>
     </span>
+
+    <span
+      v-if="urgentLine"
+      class="text-xs font-medium truncate text-n-ruby-11"
+      data-test="kita-inbox-urgent"
+    >
+      {{ urgentLine }}
+    </span>
+    <span
+      v-else-if="mutedLine"
+      class="text-xs truncate text-n-slate-11"
+      data-test="kita-inbox-muted"
+    >
+      {{ mutedLine }}
+    </span>
+
+    <div
+      v-on-click-outside="() => (showMenu = false)"
+      class="absolute top-2 end-2"
+      :class="showMenu ? 'visible' : 'invisible group-hover:visible'"
+      @click.stop
+    >
+      <button
+        type="button"
+        class="grid rounded-md size-6 place-content-center text-n-slate-11 hover:bg-n-alpha-2 hover:text-n-slate-12"
+        :aria-label="t('KITA_INBOX.ROW_ACTIONS')"
+        data-test="kita-inbox-row-menu"
+        @click="showMenu = !showMenu"
+      >
+        <span class="i-lucide-ellipsis size-4" />
+      </button>
+      <DropdownMenu
+        v-if="showMenu"
+        :menu-items="menuItems"
+        class="mt-1 top-full ltr:right-0 rtl:left-0 min-w-44"
+        data-test="kita-inbox-row-actions"
+        @action="onMenu"
+      />
+    </div>
   </div>
 </template>
